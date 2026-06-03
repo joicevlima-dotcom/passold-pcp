@@ -52,6 +52,7 @@ def inicializar_banco_de_dados():
     conn = conectar_banco()
     cursor = conn.cursor()
     
+    # Criacao das tabelas estruturadas
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS cronograma_macro (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,7 +86,7 @@ def inicializar_banco_de_dados():
         )
     """)
     
-    # Atualizacoes de colunas para bancos ja criados
+    # Garantia de colunas atualizadas
     try:
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN Num_OP TEXT")
     except sqlite3.OperationalError:
@@ -142,17 +143,26 @@ def aplicar_planejamento_reverso(df):
             df_novo.at[idx, 'Prazo_Medicao_InLoco'] = dt_fim - timedelta(days=50)
     return df_novo
 
+# Funcao estrategica para limpar dados antigos inseridos em testes anteriores
+def resetar_banco_dados_completo():
+    conn = conectar_banco()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM cronograma_macro")
+    cursor.execute("DELETE FROM itens_detalhado")
+    conn.commit()
+    conn.close()
+
 df_banco_macro = carregar_macro()
 df_banco_micro = carregar_micro()
 
-# Controle de fluxo caso o sistema esteja completamente zerado
+# Controle e verificacao de visualizacao no painel
 if not df_banco_macro.empty:
     lista_obras_disponiveis = sorted(list(df_banco_macro['Obra'].unique()))
-    obra_selecionada = st.selectbox("Selecione a Obra Ativa para Visualizar no Painel:", lista_obras_disponiveis)
+    obra_selecionada = st.selectbox("Selecione a Obra Ativa para Visualizar no Panel:", lista_obras_disponiveis)
     df_macro_filtrado = df_banco_macro[df_banco_macro['Obra'] == obra_selecionada]
     df_macro_calculado = aplicar_planejamento_reverso(df_macro_filtrado)
 else:
-    st.info("Nenhuma obra cadastrada no sistema. Vá até a última aba 'Cadastrar Nova Obra' para começar a alimentar o PCP.")
+    st.info("O sistema esta limpo e pronto para uso. Acesse a ultima aba 'Cadastrar Nova Obra' para inserir sua primeira obra e frentes de trabalho reais.")
     obra_selecionada = None
     df_macro_filtrado = pd.DataFrame()
     df_macro_calculado = pd.DataFrame()
@@ -160,12 +170,13 @@ else:
 if 'modo_visao_tv' not in st.session_state:
     st.session_state.modo_visao_tv = "SEMANA"
 
-aba_tv, aba_geracao_op, aba_geral, aba_cadastro_chapas, aba_nova_obra = st.tabs([
+aba_tv, aba_geracao_op, aba_geral, aba_cadastro_chapas, aba_nova_obra, aba_config_sistema = st.tabs([
     "PAINEL DA TV (Chao de Fabrica)", 
     "Liberar OPs da Semana",
     "Visao Macro (Diretoria)", 
     "Vincular Datas na Relacao de Materiais",
-    "Cadastrar Nova Obra"
+    "Cadastrar Nova Obra",
+    "Configuracoes"
 ])
 
 # ========================================================
@@ -396,7 +407,7 @@ with aba_cadastro_chapas:
                     st.session_state.lote_salvo_sucesso = True
                     st.rerun()
     else:
-        st.warning("Antes de cadastrar materiais, registre a Obra e suas Frentes Técnicas Macro na última aba.")
+        st.warning("Antes de cadastrar materiais, registre a Obra e suas Frentes Técnicas Macro na próxima aba.")
 
 # ========================================================
 # ABA 5: CADASTRAR NOVA OBRA / INCLUIR VÁRIAS ETAPAS
@@ -454,3 +465,17 @@ with aba_nova_obra:
                     st.error("Erro: Este Codigo EDT ja esta sendo usado em outra frente. Insira um codigo exclusivo.")
                 finally:
                     conn.close()
+
+# ========================================================
+# ABA 6: CONFIGURAÇÕES E LIMPEZA DE BANCO
+# ========================================================
+with aba_config_sistema:
+    st.header("Painel de Controle e Limpeza do Sistema")
+    st.markdown("Use esta area se precisar deletar de vez registros antigos de teste e iniciar o software do zero.")
+    
+    st.warning("Atencao: Clicar no botao abaixo removera permanentemente todas as obras, frentes e lotes salvos no momento.")
+    if st.button("LIMPAR BANCO DE DADOS DE TESTE COMPLETAMENTE"):
+        resetar_banco_dados_completo()
+        st.toast("Banco de dados completamente resetado!", icon="🗑️")
+        time.sleep(0.5)
+        st.rerun()
