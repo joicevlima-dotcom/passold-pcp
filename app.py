@@ -84,6 +84,13 @@ def inicializar_banco_de_dados():
         )
     """)
     
+    # Atualiza automaticamente bancos de dados antigos adicionando a coluna Num_OP caso falte
+    try:
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN Num_OP TEXT")
+    except sqlite3.OperationalError:
+        # Se der erro, significa que a coluna Num_OP ja existe, entao pode ignorar
+        pass
+    
     cursor.execute("SELECT COUNT(*) FROM cronograma_macro")
     if cursor.fetchone()[0] == 0:
         dados_iniciais = [
@@ -176,7 +183,7 @@ aba_tv, aba_geracao_op, aba_geral, aba_cadastro_chapas = st.tabs([
 # ABA 1: PAINEL DA TV
 # ========================================================
 with aba_tv:
-    st.header(f"Quadro de Producao de Fabrica - Passold")
+    st.header(f"Quadro de Production de Fabrica - Passold")
     
     st.markdown("### Filtro de visualizacao para os operadores:")
     v_col1, v_col2 = st.columns(2)
