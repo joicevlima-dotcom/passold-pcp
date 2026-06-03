@@ -34,7 +34,7 @@ st.markdown("""
 st.title("Passold - Sistema de Planejamento e Controle de Producao")
 st.subheader("Gestao de OPs Semanais e Capacidade Operacional Flexivel")
 
-# Data atual de simulacao do projeto (Junho de 2026)
+# Data atual de simulacao do projeto (Ancorada em Junho de 2026)
 HOJE_PROJETO = datetime(2026, 6, 3) 
 
 # ========================================================
@@ -111,7 +111,7 @@ def carregar_macro():
         df['Inicio_Previsto'] = pd.to_datetime(df['Inicio_Previsto'])
         df['Termino_Obra'] = pd.to_datetime(df['Termino_Obra'])
         
-        # 🛡️ ESCUDO ANTI-KEYERROR: Se o banco antigo nao tiver a coluna, cria na memoria para nao travar!
+        # Escudo anti-keyerror caso o banco antigo nao tenha a coluna
         if 'Subdivisao' not in df.columns:
             df['Subdivisao'] = None
     return df
@@ -335,7 +335,7 @@ with aba_geral:
         st.info("Aguardando inserção de dados no PCP.")
 
 # ========================================================
-# ABA 4: VINCULO DE DATAS E CADÊNCIA FLEXÍVEL
+# ABA 4: VINCULO DE DATAS E CADÊNCIA FLEXÍVEL (PADRÃO DD/MM/AAAA BR)
 # ========================================================
 with aba_cadastro_chapas:
     st.header("Inteligencia Temporal: Fatiamento de Lotes e Cadencia Realista")
@@ -360,7 +360,8 @@ with aba_cadastro_chapas:
                 edt_puro = edt_selecionado.split(" ")[0]
                 cod_lote = st.text_input("Codigo/Identificacao desta Remessa (Ex: LOTE 3-PARTE A):")
             with col_in2:
-                data_necessidade_obra = st.date_input("Data Limite de Despacho desta Remessa:", value=datetime(2026, 7, 10).date())
+                # 🇧🇷 Mudamos aqui! Adicionado o format="DD/MM/YYYY" para ficar totalmente brasileiro!
+                data_necessidade_obra = st.date_input("Data Limite de Despacho desta Remessa:", value=datetime(2026, 7, 10).date(), format="DD/MM/YYYY")
                 recuo_dias_base = st.number_input("Dias de Pulmao (Seguranca antes do caminhao sair):", min_value=0, value=2)
             with col_in3:
                 dias_uteis_fabricacao = st.number_input("Dias Uteis de Production Estimados p/ esta quantidade:", min_value=1, value=20)
@@ -434,7 +435,7 @@ with aba_cadastro_chapas:
         st.warning("Antes de cadastrar materiais, registre a Obra e suas Frentes Técnicas Macro na última aba.")
 
 # ========================================================
-# ABA 5: CADASTRAR NOVA OBRA 
+# ABA 5: CADASTRAR NOVA OBRA (PADRÃO DD/MM/AAAA BR)
 # ========================================================
 with aba_nova_obra:
     st.header("Cadastrar Nova Obra e Frentes de Trabalho Macro")
@@ -463,9 +464,11 @@ with aba_nova_obra:
             
         col_d1, col_d2 = st.columns(2)
         with col_d1:
-            data_inicio_nova = st.date_input("Data Alvo para Inicio da Instalacao no Predio:", value=st.session_state.mem_dt_inicio)
+            # 🇧🇷 Mudamos aqui! Adicionado o format="DD/MM/YYYY" para ficar normal e legivel
+            data_inicio_nova = st.date_input("Data Alvo para Inicio da Instalacao no Predio:", value=st.session_state.mem_dt_inicio, format="DD/MM/YYYY")
         with col_d2:
-            data_fim_nova = st.date_input("Prazo Maximo do Balancim Pronto na Obra:", value=st.session_state.mem_dt_fim)
+            # 🇧🇷 Mudamos aqui também!
+            data_fim_nova = st.date_input("Prazo Maximo do Balancim Pronto na Obra:", value=st.session_state.mem_dt_fim, format="DD/MM/YYYY")
             
         btn_salvar_obra = st.form_submit_button("Registrar Subdivisao e Manter Base")
         
