@@ -95,7 +95,6 @@ def inicializar_banco_de_dados():
         )
     """)
     
-    # Forçar a inserção da coluna Subdivisao caso a tabela macro já exista antiga
     try:
         cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN Subdivisao TEXT")
     except sqlite3.OperationalError:
@@ -120,6 +119,7 @@ def carregar_macro():
         df['Termino_Obra'] = pd.to_datetime(df['Termino_Obra'])
         if 'Subdivisao' not in df.columns:
             df['Subdivisao'] = "Geral"
+        df['Subdivisao'] = df['Subdivisao'].fillna("Geral")
     return df
 
 def carregar_micro():
@@ -184,7 +184,7 @@ aba_tv, aba_geracao_op, aba_geral, aba_cadastro_chapas, aba_nova_obra, aba_confi
 ])
 
 # ========================================================
-# ABA 1: PAINEL DA TV (CORRIGIDO)
+# ABA 1: PAINEL DA TV 
 # ========================================================
 with aba_tv:
     st.header("Quadro de Producao de Fabrica - Passold")
@@ -199,7 +199,7 @@ with aba_tv:
             df_chapas_obra['Ano'] = df_chapas_obra['Data_Producao_Programada'].dt.isocalendar().year
             df_chapas_obra['Semana_Label'] = "Semana " + df_chapas_obra['Semana_Num'].astype(str)
             
-            st.markdown("### 🗓️ Calendario de Liberacoes para a Producao")
+            st.markdown("### 🗓️ Calendario de Liberacoes para a Production")
             st.markdown("Veja abaixo a carga de trabalho distribuida pelas próximas semanas:")
             
             df_semanas = df_chapas_obra.groupby(['Ano', 'Semana_Num', 'Semana_Label']).agg({
@@ -229,7 +229,6 @@ with aba_tv:
             lista_semanas_filtro = ["VER TODAS AS SEMANAS"] + list(df_semanas['Semana_Label'].unique())
             semana_foco = st.selectbox("🎯 Filtrar Lista de Corte pelo Calendario Semanal:", lista_semanas_filtro)
             
-            # CORREÇÃO AQUI: Removido os colchetes extras que davam ValueError
             if semana_foco != "VER TODAS AS SEMANAS":
                 df_tv_filtrado = df_chapas_obra[df_chapas_obra['Semana_Label'] == semana_foco]
             else:
@@ -242,8 +241,8 @@ with aba_tv:
                 total_m2_periodo = df_tv_filtrado['M2_Item'].sum()
                 
                 c_meta1, c_meta2 = st.columns(2)
-                c_meta1.metric("VOLUME TOTAL DE CAIXAS EM EXECUCAO", f"{int(total_cx_periodo)} cx")
-                c_meta2.metric("METRAGEM TOTAL EM PRODUCAO", f"{total_m2_periodo:,.2f} m2")
+                c_meta1.metric("VOLUME TOTAL DE CAIXAS EM EXECUÇÃO", f"{int(total_cx_periodo)} cx")
+                c_meta2.metric("METRAGEM TOTAL EM PRODUÇÃO", f"{total_m2_periodo:,.2f} m2")
                 
                 st.markdown(f"#### 📋 Fila de Execucao na Fabrica ({semana_foco}):")
                 for idx, row in df_tv_filtrado.iterrows():
@@ -323,7 +322,7 @@ with aba_geracao_op:
         st.info("Nenhum lote cadastrado no banco de dados para gerar OPs.")
 
 # ========================================================
-# ABA 3: VISAO MACRO DIRETORIA (CORRIGIDO)
+# ABA 3: VISAO MACRO DIRETORIA (ADENDO DE STATUS ADICIONADO)
 # ========================================================
 with aba_geral:
     st.header("Dashboard Executivo e Cronograma Macro")
@@ -333,7 +332,6 @@ with aba_geral:
     if not df_macro_completo.empty:
         df_macro_calculado_geral = aplicar_planejamento_reverso(df_macro_completo)
         
-        # CORREÇÃO AQUI: Tratamento preventivo caso a coluna não exista no dataframe lido da memória antiga
         if 'Subdivisao' not in df_macro_calculado_geral.columns:
             df_macro_calculado_geral['Subdivisao'] = "Geral"
             
@@ -345,8 +343,75 @@ with aba_geral:
             
         m_col1, m_col2, m_col3 = st.columns(3)
         m_col1.metric("Metragem Total no Filtro", f"{df_macro_calculado_geral['M2_Total_Tarefa'].sum():,.2f} m2")
-        m_col2.metric("Subdivisoes / Balancins Exibidos", f"{len(df_macro_calculado_geral)} frentes")
+        m_col2.metric("Subdivisões / Balancins Exibidos", f"{len(df_macro_calculado_geral)} frentes")
         m_col3.metric("Prazo de Entrega Mais Distante", df_macro_calculado_geral['Termino_Obra'].max().strftime('%d/%m/%Y'))
+        
+        st.markdown("---")
+        
+        # 🆕 ADENDO SOLICITADO: TABELA DE STATUS E PROGRESSO REAL DAS ETAPAS
+        st.markdown("### 📈 Progresso Físico e Status de Produção por Frente")
+        st.markdown("Veja abaixo o balanço de quanto já foi liberado para a fábrica e o saldo que resta produzir:")
+        
+        resumo_progresso = []
+        df_micro_dados = carregar_micro()
+        
+        for idx, row_macro in df_macro_calculado_geral.iterrows():
+            edt = row_macro['EDT']
+            tarefa = row_macro['Tarefa']
+            subdiv = row_macro['Subdivisao'] if 'Subdivisao' in row_macro else "Geral"
+            
+            # Filtrando os lotes vinculados a esta frente técnica específica
+            if not df_micro_dados.empty:
+                df_frente_micro = df_micro_dados[df_micro_dados['EDT_Vinculado'] == edt]
+                cx_liberadas = df_frente_micro[df_frente_micro['Status_Item'] == "Liberado para Fabrica"]['Qtd_Caixas'].sum()
+                cx_pendentes = df_frente_micro[df_frente_micro['Status_Item'] == "Pendente"]['Qtd_Caixas'].sum()
+                total_cx_frente = cx_liberadas + cx_pendentes
+            else:
+                cx_liberadas = 0
+                cx_pendentes = 0
+                total_cx_frente = 0
+                
+            # Calculando percentual de avanço de liberação
+            percentual = (cx_liberadas / total_cx_frente) if total_cx_frente > 0 else 0.0
+            
+            # Definindo status operacional dinâmico
+            if total_cx_frente == 0:
+                status_real = "⚪ Aguardando Lote"
+            elif cx_pendentes == 0:
+                status_real = "🟢 100% na Fábrica"
+            elif cx_liberadas > 0:
+                status_real = "🔵 Em Produção"
+            else:
+                status_real = "🟡 Programado"
+                
+            resumo_progresso.append({
+                "Código EDT": edt,
+                "Frente / Balancim": f"{tarefa} ({subdiv})",
+                "Status Atual": status_real,
+                "Já foi p/ Fábrica (cx)": int(cx_liberadas),
+                "Falta Produzir (cx)": int(cx_pendentes),
+                "Volume Total (cx)": int(total_cx_frente),
+                "Progresso": percentual
+            })
+            
+        df_progresso_painel = pd.DataFrame(resumo_progresso)
+        
+        # Exibindo a tabela formatada com barrinha de progresso nativa do streamlit
+        st.data_editor(
+            df_progresso_painel,
+            column_config={
+                "Progresso": st.column_config.ProgressColumn(
+                    "Avanço de Liberação",
+                    help="Porcentagem de caixas já enviadas para a TV do chão de fábrica",
+                    format="%.0f%%",
+                    min_value=0.0,
+                    max_value=1.0
+                )
+            },
+            hide_index=True,
+            use_container_width=True,
+            disabled=df_progresso_painel.columns
+        )
         
         st.markdown("---")
         
