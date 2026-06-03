@@ -60,6 +60,7 @@ def inicializar_banco_de_dados():
             EDT TEXT UNIQUE,
             Tipo_Escopo TEXT,
             Etapa_Macro TEXT,
+            Subdivisao TEXT,
             Tarefa TEXT,
             M2_Total_Tarefa REAL,
             Inicio_Previsto TEXT,
@@ -86,7 +87,12 @@ def inicializar_banco_de_dados():
         )
     """)
     
-    # Garantia de colunas atualizadas
+    # Garantia de colunas atualizadas (Migracao automatica)
+    try:
+        cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN Subdivisao TEXT")
+    except sqlite3.OperationalError:
+        pass
+
     try:
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN Num_OP TEXT")
     except sqlite3.OperationalError:
@@ -143,7 +149,6 @@ def aplicar_planejamento_reverso(df):
             df_novo.at[idx, 'Prazo_Medicao_InLoco'] = dt_fim - timedelta(days=50)
     return df_novo
 
-# Funcao estrategica para limpar dados antigos inseridos em testes anteriores
 def resetar_banco_dados_completo():
     conn = conectar_banco()
     cursor = conn.cursor()
@@ -155,14 +160,13 @@ def resetar_banco_dados_completo():
 df_banco_macro = carregar_macro()
 df_banco_micro = carregar_micro()
 
-# Controle e verificacao de visualizacao no painel
 if not df_banco_macro.empty:
     lista_obras_disponiveis = sorted(list(df_banco_macro['Obra'].unique()))
-    obra_selecionada = st.selectbox("Selecione a Obra Ativa para Visualizar no Panel:", lista_obras_disponiveis)
+    obra_selecionada = st.selectbox("Selecione a Obra Ativa para Visualizar no Painel:", lista_obras_disponiveis)
     df_macro_filtrado = df_banco_macro[df_banco_macro['Obra'] == obra_selecionada]
     df_macro_calculado = aplicar_planejamento_reverso(df_macro_filtrado)
 else:
-    st.info("O sistema esta limpo e pronto para uso. Acesse a ultima aba 'Cadastrar Nova Obra' para inserir sua primeira obra e frentes de trabalho reais.")
+    st.info("O sistema esta limpo e pronto para uso. Acesse a aba 'Cadastrar Nova Obra' para inserir sua primeira obra e subdivisoes reais.")
     obra_selecionada = None
     df_macro_filtrado = pd.DataFrame()
     df_macro_calculado = pd.DataFrame()
@@ -220,7 +224,7 @@ with aba_tv:
                         col_l2.markdown(f"**Meta:** {int(row['Qtd_Caixas'])} cx | {row['M2_Item']} m2")
                         col_l3.markdown(f"**Dificuldade:** {dif_txt} | **Status:** {row['Status_Item']}")
                         if row['Romaneio_Chapas']:
-                            st.caption(f"Pavimentos destino: {row['Romaneio_Chapas']} | Previsao de Producao: {row['Data_Producao_Programada'].strftime('%d/%m/%Y')}")
+                            st.caption(f"Subdivisao/Pavimentos destino: {row['Romaneio_Chapas']} | Previsao de Producao: {row['Data_Producao_Programada'].strftime('%d/%m/%Y')}")
                         st.markdown("---")
             else:
                 st.info("Nenhuma Ordem de Producao (OP) liberada para esta semana ate o momento.")
@@ -294,22 +298,27 @@ with aba_geral:
         st.subheader(f"Obra Ativa: {obra_selecionada}")
         col1, col2, col3 = st.columns(3)
         col1.metric("Metragem Total Pactuada", f"{df_macro_calculado['M2_Total_Tarefa'].sum():,.2f} m2")
-        col2.metric("Frentes Ativas Rastreadas", f"{len(df_macro_calculado)} frentes")
+        col2.metric("Frentes Ativas Rastreadas", f"{len(df_macro_calculado)} frentes/subdivisoes")
         col3.metric("Fim Previsto da Instalacao", df_macro_calculado['Termino_Obra'].max().strftime('%d/%m/%Y') if not df_macro_calculado.empty else "N/A")
         
         st.markdown("---")
         st.markdown("### Tabela de Planejamento Reverso Estrategico")
-        st.dataframe(df_macro_calculado, hide_index=True, use_container_width=True)
+        
+        colunas_macro = ['EDT', 'Tipo_Escopo', 'Etapa_Macro', 'Subdivisao', 'Tarefa', 'M2_Total_Tarefa', 'Inicio_Previsto', 'Termino_Obra', 'Status']
+        colunas_exibir_macro = [c for c in colunas_macro if c in df_macro_calculado.columns]
+        
+        st.dataframe(df_macro_calculado[colunas_exibir_macro], hide_index=True, use_container_width=True)
         
         st.markdown("### Linha do Tempo Macro (Gantt)")
-        fig_gantt = px.timeline(df_macro_calculado, x_start="Inicio_Previsto", x_end="Termino_Obra", y="Tarefa", color="Status")
-        fig_gantt.update_yaxes(autorange="reversed")
+        df_macro_calculado['Identificador_Visual'] = df_macro_calculado['Tarefa'] + " (" + df_macro_calculado['Subdivisao'].fillna('Geral') + ")"
+        fig_gantt = px.timeline(df_macro_calculado, x_start="Inicio_Previsto", x_end="Termino_Obra", y="Identificador_Visual", color="Status")
+        fig_gantt.update_yaxes(autorange="reversed", title="Tarefa / Subdivisao")
         st.plotly_chart(fig_gantt, use_container_width=True)
     else:
         st.info("Aguardando inserção de dados de planejamento macro.")
 
 # ========================================================
-# ABA 4: INTELIGENCIA REVERSA E FRACIONAMENTO
+# ABA 4: INTELIGENCIA REVERSA E FRACIONAMENTO (VINCULAR DATAS)
 # ========================================================
 with aba_cadastro_chapas:
     st.header("Inteligencia Temporal: Injetar Datas e Cadencia na Relacao Tecnica")
@@ -320,13 +329,17 @@ with aba_cadastro_chapas:
         st.session_state.lote_salvo_sucesso = False
 
     if obra_selecionada and not df_macro_filtrado.empty:
-        opcoes_edt = [f"{row['EDT']} - {row['Tarefa']}" for idx, row in df_macro_filtrado.iterrows()]
+        # Inclusao visual inteligente da Subdivisao/Balancim no Selectbox com base em image_a2744c.png
+        opcoes_edt = []
+        for idx, row in df_macro_filtrado.iterrows():
+            sub_txt = f" [{row['Subdivisao']}]" if row['Subdivisao'] else ""
+            opcoes_edt.append(f"{row['EDT']} - {row['Tarefa']}{sub_txt}")
         
         with st.form("form_injecao_datas"):
             st.markdown("### 1. Vinculo com Cronograma de Obra")
             col_in1, col_in2, col_in3 = st.columns(3)
             with col_in1:
-                edt_selecionado = st.selectbox("Esta relacao tecnica pertence a qual frente macro?", opcoes_edt)
+                edt_selecionado = st.selectbox("Esta relacao tecnica pertence a qual frente/subdivisao?", opcoes_edt)
                 edt_puro = edt_selecionado.split(" ")[0]
                 cod_lote = st.text_input("Codigo de Identificacao Interna:")
             with col_in2:
@@ -407,26 +420,27 @@ with aba_cadastro_chapas:
                     st.session_state.lote_salvo_sucesso = True
                     st.rerun()
     else:
-        st.warning("Antes de cadastrar materiais, registre a Obra e suas Frentes Técnicas Macro na próxima aba.")
+        st.warning("Antes de cadastrar materiais, registre a Obra e suas Frentes Técnicas Macro na última aba.")
 
 # ========================================================
-# ABA 5: CADASTRAR NOVA OBRA / INCLUIR VÁRIAS ETAPAS
+# ABA 5: CADASTRAR NOVA OBRA / INCLUIR VÁRIAS ETAPAS E SUBDIVISÕES
 # ========================================================
 with aba_nova_obra:
     st.header("Cadastrar Nova Obra e Frentes de Trabalho Macro")
-    st.markdown("Insira os dados técnicos abaixo para registrar uma etapa. Você pode usar este formulário consecutivamente para injetar múltiplas etapas na mesma obra.")
+    st.markdown("Insira os dados técnicos abaixo para registrar uma etapa. Você pode incluir subdivisões/balancinhos sequencialmente.")
     
     with st.form("form_nova_obra", clear_on_submit=True):
         nome_nova_obra = st.text_input("Nome Geral da Obra (Ex: OBRA OAS ou EDIFICIO MUNIQUE):").upper()
         
         col_o1, col_o2 = st.columns(2)
         with col_o1:
-            edt_nova_obra = st.text_input("Codigo EDT da Etapa/Frente (Ex: 1.1.1.1 ou 2.1):")
+            edt_nova_obra = st.text_input("Codigo EDT da Frente/Subdivisao (Ex: 1.1.1.1 ou 2.1):")
             tipo_escopo_novo = st.selectbox("Tipo de Escopo Fachada:", ["ACM", "Vidro/Esquadria"])
             etapa_macro_nova = st.text_input("Frente Macro / Pavimentos (Ex: TORRE - ETAPA 3):")
         with col_o2:
-            nome_tarefa_nova = st.text_input("Nome Detalhado da Tarefa (Ex: Instalacao ACM vigas Balancim 23):")
-            m2_total_novo = st.number_input("Metragem Quadrada Macro Pactuada (m2):", min_value=0.1, value=100.0)
+            subdivisao_nova = st.text_input("Subdivisao / Balancim Especifico (Ex: Balancim 04 / Fachada Sul):").upper()
+            nome_tarefa_nova = st.text_input("Nome Detalhado da Tarefa (Ex: Instalacao ACM vigas):")
+            m2_total_novo = st.number_input("Metragem Quadrada Pactuada p/ esta subdivisao (m2):", min_value=0.1, value=100.0)
             
         col_d1, col_d2 = st.columns(2)
         with col_d1:
@@ -444,13 +458,14 @@ with aba_nova_obra:
                 cursor = conn.cursor()
                 try:
                     cursor.execute("""
-                        INSERT INTO cronograma_macro (Obra, EDT, Tipo_Escopo, Etapa_Macro, Tarefa, M2_Total_Tarefa, Inicio_Previsto, Termino_Obra, Status)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO cronograma_macro (Obra, EDT, Tipo_Escopo, Etapa_Macro, Subdivisao, Tarefa, M2_Total_Tarefa, Inicio_Previsto, Termino_Obra, Status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         nome_nova_obra, 
                         edt_nova_obra, 
                         tipo_escopo_novo, 
-                        etapa_macro_nova, 
+                        etapa_macro_nova,
+                        subdivisao_nova,
                         nome_tarefa_nova, 
                         float(m2_total_novo), 
                         data_inicio_nova.strftime('%Y-%m-%d'), 
@@ -458,11 +473,11 @@ with aba_nova_obra:
                         "Pendente"
                     ))
                     conn.commit()
-                    st.toast(f"Etapa {edt_nova_obra} salva! O formulário foi limpo para a próxima.", icon="✅")
+                    st.toast(f"Frente {edt_nova_obra} [{subdivisao_nova}] salva! O formulário foi limpo para a próxima.", icon="✅")
                     time.sleep(0.5)
                     st.rerun()
                 except sqlite3.IntegrityError:
-                    st.error("Erro: Este Codigo EDT ja esta sendo usado em outra frente. Insira um codigo exclusivo.")
+                    st.error("Erro: Este Codigo EDT ja esta sendo usado em outra subdivisao. Insira um codigo exclusivo.")
                 finally:
                     conn.close()
 
