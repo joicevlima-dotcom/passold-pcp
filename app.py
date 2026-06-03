@@ -4,6 +4,7 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import sqlite3
 import os
+import time
 
 # Configuração da página do Streamlit
 st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide")
@@ -156,8 +157,6 @@ if 'modo_visao_tv' not in st.session_state:
     st.session_state.modo_visao_tv = "VER_TUDO"
 if 'data_filtro_tv' not in st.session_state:
     st.session_state.data_filtro_tv = HOJE_PROJETO.date()
-if 'mensagem_sucesso' not in st.session_state:
-    st.session_state.mensagem_sucesso = None
 
 aba_tv, aba_geral, aba_cadastro_chapas = st.tabs(["📺 PAINEL DA TV (Chão de Fábrica)", "📊 Visão Macro (Diretoria)", "📐 Vincular Datas na Relação de Materiais"])
 
@@ -241,11 +240,12 @@ with aba_geral:
 with aba_cadastro_chapas:
     st.header("📐 Inteligência Temporal: Injetar Datas e Cadência na Relação Técnica")
     
-    if st.session_state.mensagem_sucesso:
-        st.success(st.session_state.mensagem_sucesso)
-        if st.button("Limpar Notificação / Adicionar Outro Lote"):
-            st.session_state.mensagem_sucesso = None
-            st.rerun()
+    # Sistema de gatilho para disparar a notificação moderna após o reload do formulário
+    if 'lote_salvo_sucesso' in st.session_state and st.session_state.lote_salvo_sucesso:
+        st.toast("💾 Lote salvo com sucesso no banco de dados da Passold!", icon="✅")
+        st.success("🎉 SUCESSO! Divisão gerada e salva no banco de dados. O cronograma diário completo já está disponível na aba da TV!")
+        # Reseta o gatilho para não ficar repetindo a mensagem infinitamente
+        st.session_state.lote_salvo_sucesso = False
 
     if not df_macro_filtrado.empty:
         opcoes_edt = [f"{row['EDT']} - {row['Tarefa']}" for idx, row in df_macro_filtrado.iterrows()]
@@ -278,41 +278,45 @@ with aba_cadastro_chapas:
 
             if btn_calcular_tudo:
                 if cod_lote and total_m2 > 0:
-                    dt_limite_conv = datetime.combine(data_necessidade_obra, datetime.min.time())
-                    day_start = dt_limite_conv - timedelta(days=int(recuo_dias_base))
-                    
-                    caixas_restantes = total_cx
-                    m2_por_caixa = total_m2 / total_cx
-                    
-                    novos_registros = []
-                    dia_corrente = day_start
-                    
-                    while caixas_restantes > 0:
-                        if dia_corrente.weekday() in [5, 6]: # Pula Finais de Semana
-                            dia_corrente -= timedelta(days=1)
-                            continue
+                    # Animação visual de carregamento para dar feedback ao usuário
+                    with st.spinner("Fracionando lotes e atualizando banco de dados..."):
+                        dt_limite_conv = datetime.combine(data_necessidade_obra, datetime.min.time())
+                        day_start = dt_limite_conv - timedelta(days=int(recuo_dias_base))
+                        
+                        caixas_restantes = total_cx
+                        m2_por_caixa = total_m2 / total_cx
+                        
+                        novos_registros = []
+                        dia_corrente = day_start
+                        
+                        while caixas_restantes > 0:
+                            if dia_corrente.weekday() in [5, 6]: # Pula Finais de Semana
+                                dia_corrente -= timedelta(days=1)
+                                continue
+                                
+                            caixas_do_dia = min(int(limite_caixas_dia), int(caixas_restantes))
+                            m2_do_dia = caixas_do_dia * m2_por_caixa
                             
-                        caixas_do_dia = min(int(limite_caixas_dia), int(caixas_restantes))
-                        m2_do_dia = caixas_do_dia * m2_por_caixa
+                            novos_registros.append({
+                                "Obra_Vinculada": obra_selecionada, 
+                                "EDT_Vinculado": edt_puro,
+                                "Cod_Lote": cod_lote, 
+                                "Tipo_Material": especificacao,
+                                "Qtd_Caixas": int(caixas_do_dia), 
+                                "M2_Item": float(round(m2_do_dia, 2)),
+                                "Data_Producao_Programada": dia_corrente.strftime('%Y-%m-%d %H:%M:%S'), 
+                                "Data_Limite_Obra": dt_limite_conv.strftime('%Y-%m-%d %H:%M:%S'), 
+                                "Romaneio_Chapas": txt_pavimentos, 
+                                "Status_Item": "Pendente"
+                            })
+                            
+                            caixas_restantes -= caixas_do_dia
+                            dia_corrente -= timedelta(days=1)
                         
-                        novos_registros.append({
-                            "Obra_Vinculada": obra_selecionada, 
-                            "EDT_Vinculado": edt_puro,
-                            "Cod_Lote": cod_lote, 
-                            "Tipo_Material": especificacao, # <--- Corrigido de "Callahan_especificacao" para "especificacao"
-                            "Qtd_Caixas": int(caixas_do_dia), 
-                            "M2_Item": float(round(m2_do_dia, 2)),
-                            "Data_Producao_Programada": dia_corrente.strftime('%Y-%m-%d %H:%M:%S'), 
-                            "Data_Limite_Obra": dt_limite_conv.strftime('%Y-%m-%d %H:%M:%S'), 
-                            "Romaneio_Chapas": txt_pavimentos, 
-                            "Status_Item": "Pendente"
-                        })
+                        df_novos = pd.DataFrame(novos_registros)
+                        salvar_lotes_micro(df_novos)
+                        time.sleep(0.5) # Pequena pausa dramática só para o efeito visual ficar bonito
                         
-                        caixas_restantes -= caixas_do_dia # <--- Corrigido operador de subtração
-                        dia_corrente -= timedelta(days=1) # <--- Corrigido operador de data
-                    
-                    df_novos = pd.DataFrame(novos_registros)
-                    salvar_lotes_micro(df_novos)
-                    
-                    st.session_state.mensagem_sucesso = f"💾 SUCESSO! Divisão gerada e salva no banco de dados da Passold! Vá para a aba da TV conferir o cronograma diário completo."
+                    # Ativa a flag de sucesso e recarrega a página de forma limpa
+                    st.session_state.lote_salvo_sucesso = True
                     st.rerun()
