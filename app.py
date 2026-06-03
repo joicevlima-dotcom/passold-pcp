@@ -28,6 +28,14 @@ st.markdown("""
         background-color: #2563EB;
         color: white;
     }
+    .semana-card {
+        background-color: #EFF6FF;
+        padding: 10px;
+        border-radius: 5px;
+        border-top: 4px solid #2563EB;
+        text-align: center;
+        margin-bottom: 10px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -87,7 +95,6 @@ def inicializar_banco_de_dados():
         )
     """)
     
-    # Remendos preventivos caso o banco local ja exista sem as colunas novas
     try:
         cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN Subdivisao TEXT")
     except sqlite3.OperationalError:
@@ -110,8 +117,6 @@ def carregar_macro():
     if not df.empty:
         df['Inicio_Previsto'] = pd.to_datetime(df['Inicio_Previsto'])
         df['Termino_Obra'] = pd.to_datetime(df['Termino_Obra'])
-        
-        # Escudo anti-keyerror caso o banco antigo nao tenha a coluna
         if 'Subdivisao' not in df.columns:
             df['Subdivisao'] = None
     return df
@@ -168,9 +173,6 @@ else:
     obra_selecionada = None
     df_macro_filtrado = pd.DataFrame()
 
-if 'modo_visao_tv' not in st.session_state:
-    st.session_state.modo_visao_tv = "SEMANA"
-
 aba_tv, aba_geracao_op, aba_geral, aba_cadastro_chapas, aba_nova_obra, aba_config_sistema = st.tabs([
     "PAINEL DA TV (Chao de Fabrica)", 
     "Liberar OPs da Semana",
@@ -181,57 +183,82 @@ aba_tv, aba_geracao_op, aba_geral, aba_cadastro_chapas, aba_nova_obra, aba_confi
 ])
 
 # ========================================================
-# ABA 1: PAINEL DA TV
+# ABA 1: PAINEL DA TV (AGORA COM CALENDÁRIO DE PRODUÇÃO)
 # ========================================================
 with aba_tv:
     st.header("Quadro de Producao de Fabrica - Passold")
     
-    st.markdown("### Filtro de visualizacao para os operadores:")
-    v_col1, v_col2 = st.columns(2)
-    if v_col1.button("VER OP'S LIBERADAS DA SEMANA ATUAL"): st.session_state.modo_visao_tv = "SEMANA"
-    if v_col2.button("VER TODA A PROGRAMACAO COMPLETA"): st.session_state.modo_visao_tv = "VER_TUDO"
-        
-    st.markdown("---")
-    
     if obra_selecionada and not df_banco_micro.empty:
-        df_chapas_obra = df_banco_micro[df_banco_micro['Obra_Vinculada'] == obra_selecionada].copy()
+        df_chapas_obra = df_banco_micro[(df_banco_micro['Obra_Vinculada'] == obra_selecionada) & (df_banco_micro['Status_Item'] == "Liberado para Fabrica")].copy()
+        
         if not df_chapas_obra.empty:
             df_chapas_obra['Data_Producao_Programada'] = pd.to_datetime(df_chapas_obra['Data_Producao_Programada'])
             
-            if st.session_state.modo_visao_tv == "SEMANA":
-                df_tv_filtrado = df_chapas_obra[df_chapas_obra['Status_Item'] == "Liberado para Fabrica"]
+            # Criando informacao de Ano-Semana para o Calendario
+            df_chapas_obra['Semana_Num'] = df_chapas_obra['Data_Producao_Programada'].dt.isocalendar().week
+            df_chapas_obra['Ano'] = df_chapas_obra['Data_Producao_Programada'].dt.isocalendar().year
+            df_chapas_obra['Semana_Label'] = "Semana " + df_chapas_obra['Semana_Num'].astype(str)
+            
+            st.markdown("### 🗓️ Calendario de Liberacoes para a Producao")
+            st.markdown("Veja abaixo a carga de trabalho distribuida pelas próximas semanas:")
+            
+            # Agrupando dados para exibir nos cards do cronograma semanal
+            df_semanas = df_chapas_obra.groupby(['Ano', 'Semana_Num', 'Semana_Label']).agg({
+                'Qtd_Caixas': 'sum',
+                'M2_Item': 'sum',
+                'Data_Producao_Programada': ['min', 'max']
+            }).reset_index()
+            df_semanas.columns = ['Ano', 'Semana_Num', 'Semana_Label', 'Total_Caixas', 'Total_M2', 'Data_Min', 'Data_Max']
+            df_semanas = df_semanas.sort_values(by=['Ano', 'Semana_Num'])
+            
+            # Renderizando os blocos do calendario na tela de forma horizontal
+            cols_carrossel = st.columns(len(df_semanas) if len(df_semanas) <= 6 else 6)
+            for idx, row_sem in enumerate(df_semanas.itertuples()):
+                col_alvo = cols_carrossel[idx % 6]
+                with col_alvo:
+                    intervalo_datas = f"{row_sem.Data_Min.strftime('%d/%m')} ate {row_sem.Data_Max.strftime('%d/%m')}"
+                    st.markdown(f"""
+                    <div class="semana-card">
+                        <strong style="color: #1E3A8A; font-size: 16px;">{row_sem.Semana_Label}</strong><br>
+                        <small style="color: #6B7280;">{intervalo_datas}</small><br>
+                        <span style="font-weight: bold; color: #2563EB;">{int(row_sem.Total_Caixas)} cx</span> | 
+                        <span style="font-weight: bold; color: #10B981;">{row_sem.Total_M2:,.1f} m²</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # Filtro interativo para o operador escolher qual semana focar
+            lista_semanas_filtro = ["VER TODAS AS SEMANAS"] + list(df_semanas['Semana_Label'].unique())
+            semana_foco = st.selectbox("🎯 Filtrar Lista de Corte pelo Calendario Semanal:", lista_semanas_filtro)
+            
+            if semana_foco != "VER TODAS AS SEMANAS":
+                df_tv_filtrado = df_chapas_obra[df_chapas_obra['Semana_Label'] == [[semana_foco]]] # Correcao de sintaxe interna para string literal
+                df_tv_filtrado = df_chapas_obra[df_chapas_obra['Semana_Label'] == semana_foco]
             else:
                 df_tv_filtrado = df_chapas_obra.copy()
-
-            if not df_tv_filtrado.empty:
-                df_tv_filtrado = df_tv_filtrado.sort_values(by="Data_Producao_Programada", ascending=True)
-                total_cx_periodo = df_tv_filtrado['Qtd_Caixas'].sum()
                 
-                c_meta1, c_meta2 = st.columns(2)
-                c_meta1.metric("VOLUME TOTAL DE CAIXAS EM EXECUCAO", f"{int(total_cx_periodo)} cx")
-                c_meta2.metric("METRAGEM TOTAL EM PRODUCAO", f"{df_tv_filtrado['M2_Item'].sum():,.2f} m2")
-                
-                st.markdown("#### Sequencia Cronologica de Trabalho no Galpao:")
-                for idx, row in df_tv_filtrado.iterrows():
-                    with st.container():
-                        col_l1, col_l2, col_l3 = st.columns([2, 1, 1])
-                        op_txt = row['Num_OP'] if row['Num_OP'] else "Sem OP"
-                        fase = row['Fase_Produtiva'] if 'Fase_Produtiva' in row and row['Fase_Produtiva'] else "Corte/Montagem"
-                        
-                        cor_fase = "🔴" if "CORTE" in fase else "🔵"
-                        
-                        col_l1.markdown(f"**OP:** `{op_txt}` | **Lote/Sublote:** `{row['Cod_Lote']}` | **Material:** {row['Tipo_Material']}")
-                        col_l2.markdown(f"**Meta do Dia:** {int(row['Qtd_Caixas'])} cx | {row['M2_Item']} m2")
-                        col_l3.markdown(f"{cor_fase} **Fase Alvo:** `{fase}`")
-                        
-                        st.caption(f"Pavimentos Destino: {row['Romaneio_Chapas']} | Dia de Execucao: {row['Data_Producao_Programada'].strftime('%d/%m/%Y')} | Limite p/ Obra: {row['Data_Limite_Obra'].strftime('%d/%m/%Y')}")
-                        st.markdown("---")
-            else:
-                st.info(f"Nenhuma Ordem de Producao (OP) liberada para a {obra_selecionada} esta semana.")
+            df_tv_filtrado = df_tv_filtrado.sort_values(by="Data_Producao_Programada", ascending=True)
+            
+            st.markdown(f"#### 📋 Fila de Execucao na Fabrica ({semana_foco}):")
+            for idx, row in df_tv_filtrado.iterrows():
+                with st.container():
+                    col_l1, col_l2, col_l3 = st.columns([2, 1, 1])
+                    op_txt = row['Num_OP'] if row['Num_OP'] else "Sem OP"
+                    fase = row['Fase_Produtiva'] if 'Fase_Produtiva' in row and row['Fase_Produtiva'] else "Corte/Montagem"
+                    
+                    cor_fase = "🔴" if "CORTE" in fase.upper() else "🔵"
+                    
+                    col_l1.markdown(f"**OP:** `{op_txt}` | **Lote/Sublote:** `{row['Cod_Lote']}` | **Material:** {row['Tipo_Material']}")
+                    col_l2.markdown(f"**Meta do Dia:** {int(row['Qtd_Caixas'])} cx | {row['M2_Item']} m2")
+                    col_l3.markdown(f"{cor_fase} **Fase Alvo:** `{fase}`")
+                    
+                    st.caption(f"Pavimentos Destino: {row['Romaneio_Chapas']} | Dia de Execucao: {row['Data_Producao_Programada'].strftime('%d/%m/%Y')} | Limite p/ Obra: {row['Data_Limite_Obra'].strftime('%d/%m/%Y')} | ({row['Semana_Label']})")
+                    st.markdown("---")
         else:
-            st.info("Nenhum lote associado a esta obra especifica.")
+            st.info(f"Nenhuma Ordem de Producao (OP) liberada para a {obra_selecionada} no momento. Vá na aba 'Liberar OPs da Semana'.")
     else:
-        st.info("Nenhum lote tecnico importado ainda. Va na aba de Vinculo de Datas para cadastrar.")
+        st.info("Nenhum lote tecnico importado ou liberado para esta obra ainda.")
 
 # ========================================================
 # ABA 2: LIBERAR OP'S DA SEMANA
@@ -515,11 +542,9 @@ with aba_config_sistema:
     st.markdown("Area restrita para manutencao da base de dados da Passold.")
     
     st.markdown("### 🔐 Verificacao de Identidade")
-    # Campo de senha mascarado para o "malandro" nao ver o que digita
     senha_digitada = st.text_input("Insira a senha mestra para liberar comandos críticos:", type="password")
     
-    # 🔒 A CARTA NA MANGA: Se a senha for digitada corretamente, a tranca abre!
-    if senha_digitada == "Jv568279.":
+    if senha_digitada == "passold2026":
         st.success("Acesso Autorizado! Botões de exclusão liberados abaixo.")
         
         st.warning("🚨 Atencao: Clicar no botao abaixo removera permanentemente todas as obras e lotes salvos no momento.")
