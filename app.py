@@ -95,22 +95,6 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN Dificuldade INTEGER")
     except sqlite3.OperationalError:
         pass
-    
-    cursor.execute("SELECT COUNT(*) FROM cronograma_macro")
-    if cursor.fetchone()[0] == 0:
-        dados_iniciais = [
-            ("OBRA OAS", "1.1.1.1", "ACM", "TORRE - ETAPA 1 (6 ao 24 pav)", "Instalacao ACM vigas Balancim 02, 03 e 04", 1780.26, "2026-01-19", "2026-06-24", "Em Andamento"),
-            ("OBRA OAS", "1.1.1.2", "ACM", "TORRE - ETAPA 1 (6 ao 24 pav)", "Instalacao ACM vigas Balancim 05 e 06", 1780.26, "2026-01-19", "2026-06-24", "Em Andamento"),
-            ("OBRA OAS", "1.1.2.1", "Porcelanato", "TORRE - ETAPA 1 (6 ao 24 pav)", "Instalacao Porcelanato Balancim 02, 03 e 04", 950.00, "2026-02-02", "2026-06-15", "Em Andamento"),
-            ("OBRA OAS", "2.1.1", "ACM", "TORRE - ETAPA 2 (26 ao 37 pav)", "Instalacao ACM viga embasamento esquerdo", 267.70, "2026-04-20", "2026-06-30", "Pendente"),
-            ("OBRA OAS", "3.1.1.1", "ACM", "TORRE - ETAPA 3 (39 ao 48 pav.)", "Instalacao ACM vigas Balancim 23; 24 e 25", 212.95, "2026-07-10", "2026-07-30", "Pendente"),
-            ("OBRA OAS", "3.1.1.2", "ACM", "TORRE - ETAPA 3 (39 ao 48 pav.)", "Instalacao ACM vigas Balancim 26 e 07", 141.97, "2026-07-31", "2026-08-14", "Pendente"),
-            ("OBRA OAS", "4.1.1", "Vidro/Esquadria", "COBERTURA", "Instalacao de Esquadrias e Vidros Lojas Terras", 540.00, "2026-08-15", "2026-09-30", "Pendente")
-        ]
-        cursor.executemany("""
-            INSERT INTO cronograma_macro (Obra, EDT, Tipo_Escopo, Etapa_Macro, Tarefa, M2_Total_Tarefa, Inicio_Previsto, Termino_Obra, Status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, dados_iniciais)
         
     conn.commit()
     conn.close()
@@ -121,8 +105,9 @@ def carregar_macro():
     conn = conectar_banco()
     df = pd.read_sql_query("SELECT * FROM cronograma_macro", conn)
     conn.close()
-    df['Inicio_Previsto'] = pd.to_datetime(df['Inicio_Previsto'])
-    df['Termino_Obra'] = pd.to_datetime(df['Termino_Obra'])
+    if not df.empty:
+        df['Inicio_Previsto'] = pd.to_datetime(df['Inicio_Previsto'])
+        df['Termino_Obra'] = pd.to_datetime(df['Termino_Obra'])
     return df
 
 def carregar_micro():
@@ -160,11 +145,17 @@ def aplicar_planejamento_reverso(df):
 df_banco_macro = carregar_macro()
 df_banco_micro = carregar_micro()
 
-lista_obras_disponiveis = sorted(list(df_banco_macro['Obra'].unique()))
-obra_selecionada = st.selectbox("Selecione a Obra Ativa para Visualizar no Painel:", lista_obras_disponiveis)
-
-df_macro_filtrado = df_banco_macro[df_banco_macro['Obra'] == obra_selecionada]
-df_macro_calculado = aplicar_planejamento_reverso(df_macro_filtrado)
+# Controle de fluxo caso o sistema esteja completamente zerado
+if not df_banco_macro.empty:
+    lista_obras_disponiveis = sorted(list(df_banco_macro['Obra'].unique()))
+    obra_selecionada = st.selectbox("Selecione a Obra Ativa para Visualizar no Painel:", lista_obras_disponiveis)
+    df_macro_filtrado = df_banco_macro[df_banco_macro['Obra'] == obra_selecionada]
+    df_macro_calculado = aplicar_planejamento_reverso(df_macro_filtrado)
+else:
+    st.info("Nenhuma obra cadastrada no sistema. Vá até a última aba 'Cadastrar Nova Obra' para começar a alimentar o PCP.")
+    obra_selecionada = None
+    df_macro_filtrado = pd.DataFrame()
+    df_macro_calculado = pd.DataFrame()
 
 if 'modo_visao_tv' not in st.session_state:
     st.session_state.modo_visao_tv = "SEMANA"
@@ -190,7 +181,7 @@ with aba_tv:
         
     st.markdown("---")
     
-    if not df_banco_micro.empty:
+    if obra_selecionada and not df_banco_micro.empty:
         df_chapas_obra = df_banco_micro[df_banco_micro['Obra_Vinculada'] == obra_selecionada].copy()
         if not df_chapas_obra.empty:
             df_chapas_obra['Data_Producao_Programada'] = pd.to_datetime(df_chapas_obra['Data_Producao_Programada'])
@@ -234,7 +225,7 @@ with aba_geracao_op:
     st.header("Gerenciador de Ordens de Producao Semanais")
     st.markdown("Selecione os lotes fatiados abaixo para liberar o corte e montagem na fabrica para a proxima semana.")
     
-    if not df_banco_micro.empty:
+    if obra_selecionada and not df_banco_micro.empty:
         df_pendentes = df_banco_micro[(df_banco_micro['Obra_Vinculada'] == obra_selecionada) & (df_banco_micro['Status_Item'] == "Pendente")].copy()
         
         if not df_pendentes.empty:
@@ -286,15 +277,16 @@ with aba_geracao_op:
 # ABA 3: VISAO MACRO
 # ========================================================
 with aba_geral:
-    st.header(f"Dashboard Executivo e Cronograma Macro - {obra_selecionada}")
+    st.header("Dashboard Executivo e Cronograma Macro")
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Metragem Total Pactuada", f"{df_macro_calculado['M2_Total_Tarefa'].sum():,.2f} m2")
-    col2.metric("Frentes Ativas Rastreadas", f"{len(df_macro_calculado)} frentes")
-    col3.metric("Fim Previsto da Instalacao", df_macro_calculado['Termino_Obra'].max().strftime('%d/%m/%Y') if not df_macro_calculado.empty else "N/A")
-    
-    st.markdown("---")
-    if not df_macro_calculado.empty:
+    if obra_selecionada and not df_macro_calculado.empty:
+        st.subheader(f"Obra Ativa: {obra_selecionada}")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Metragem Total Pactuada", f"{df_macro_calculado['M2_Total_Tarefa'].sum():,.2f} m2")
+        col2.metric("Frentes Ativas Rastreadas", f"{len(df_macro_calculado)} frentes")
+        col3.metric("Fim Previsto da Instalacao", df_macro_calculado['Termino_Obra'].max().strftime('%d/%m/%Y') if not df_macro_calculado.empty else "N/A")
+        
+        st.markdown("---")
         st.markdown("### Tabela de Planejamento Reverso Estrategico")
         st.dataframe(df_macro_calculado, hide_index=True, use_container_width=True)
         
@@ -303,7 +295,7 @@ with aba_geral:
         fig_gantt.update_yaxes(autorange="reversed")
         st.plotly_chart(fig_gantt, use_container_width=True)
     else:
-        st.info("Nao ha dados de planejamento macro inseridos para esta obra.")
+        st.info("Aguardando inserção de dados de planejamento macro.")
 
 # ========================================================
 # ABA 4: INTELIGENCIA REVERSA E FRACIONAMENTO
@@ -316,7 +308,7 @@ with aba_cadastro_chapas:
         st.success("Sucesso! Divisao gerada e salva como Pendente. Acesse a aba 'Liberar OPs da Semana' para enviar o planejamento para a TV da fabrica.")
         st.session_state.lote_salvo_sucesso = False
 
-    if not df_macro_filtrado.empty:
+    if obra_selecionada and not df_macro_filtrado.empty:
         opcoes_edt = [f"{row['EDT']} - {row['Tarefa']}" for idx, row in df_macro_filtrado.iterrows()]
         
         with st.form("form_injecao_datas"):
@@ -332,7 +324,7 @@ with aba_cadastro_chapas:
             with col_in3:
                 limite_caixas_dia = st.number_input("Capacidade MÁXIMA real de montagem (caixas de nivel 1/dia):", min_value=1, value=10)
                 dificuldade_lote = st.selectbox("Dificuldade tecnica das pecas deste lote:", [1, 2, 3, 4, 5], index=0, 
-                                                help="Nivel 1 representa pecas faceis (ritmo normal). Nivel 5 representa pecas complexas (reduz o ritmo diario para ate 1/4 da capacidade).")
+                                                help="Nivel 1 representa pecas faceis. Nivel 5 representa pecas complexas (reduz o ritmo diario para ate 1/4 da capacidade).")
 
             st.markdown("---")
             st.markdown("### 2. Dados Extraidos da Planilha Tecnica Bruta")
@@ -404,38 +396,38 @@ with aba_cadastro_chapas:
                     st.session_state.lote_salvo_sucesso = True
                     st.rerun()
     else:
-        st.warning("Antes de cadastrar materiais, voce precisa registrar pelo menos uma Frente Técnica Macro para esta obra na ultima aba.")
+        st.warning("Antes de cadastrar materiais, registre a Obra e suas Frentes Técnicas Macro na última aba.")
 
 # ========================================================
-# ABA 5: CADASTRAR NOVA OBRA (Aba adicionada)
+# ABA 5: CADASTRAR NOVA OBRA / INCLUIR VÁRIAS ETAPAS
 # ========================================================
 with aba_nova_obra:
     st.header("Cadastrar Nova Obra e Frentes de Trabalho Macro")
-    st.markdown("Insira os dados técnicos iniciais da obra para abrir frentes de planejamento no sistema.")
+    st.markdown("Insira os dados técnicos abaixo para registrar uma etapa. Você pode usar este formulário consecutivamente para injetar múltiplas etapas na mesma obra.")
     
-    with st.form("form_nova_obra"):
-        nome_nova_obra = st.text_input("Nome Geral da Obra (Ex: EDIFICIO RESIDENCIAL MUNIQUE):").upper()
+    with st.form("form_nova_obra", clear_on_submit=True):
+        nome_nova_obra = st.text_input("Nome Geral da Obra (Ex: OBRA OAS ou EDIFICIO MUNIQUE):").upper()
         
         col_o1, col_o2 = st.columns(2)
         with col_o1:
-            edt_nova_obra = st.text_input("Codigo EDT da Frente (Ex: 1.1 ou 2.1.1):")
-            tipo_escopo_novo = st.selectbox("Tipo de Escopo Predominante:", ["ACM", "Vidro/Esquadria", "Porcelanato"])
-            etapa_macro_nova = st.text_input("Etapa Macro (Ex: TORRE - ETAPA 1):")
+            edt_nova_obra = st.text_input("Codigo EDT da Etapa/Frente (Ex: 1.1.1.1 ou 2.1):")
+            tipo_escopo_novo = st.selectbox("Tipo de Escopo Fachada:", ["ACM", "Vidro/Esquadria"])
+            etapa_macro_nova = st.text_input("Frente Macro / Pavimentos (Ex: TORRE - ETAPA 3):")
         with col_o2:
-            nome_tarefa_nova = st.text_input("Nome Detalhado da Frente/Tarefa (Ex: Instalacao ACM Fachada Sul):")
-            m2_total_novo = st.number_input("Metragem Quadrada Macro Pactuada (m2):", min_value=0.1, value=500.0)
+            nome_tarefa_nova = st.text_input("Nome Detalhado da Tarefa (Ex: Instalacao ACM vigas Balancim 23):")
+            m2_total_novo = st.number_input("Metragem Quadrada Macro Pactuada (m2):", min_value=0.1, value=100.0)
             
         col_d1, col_d2 = st.columns(2)
         with col_d1:
-            data_inicio_nova = st.date_input("Data de Inicio de Mobilizacao Prevista:", value=datetime.now().date())
+            data_inicio_nova = st.date_input("Data de Inicio Prevista:", value=datetime.now().date())
         with col_d2:
-            data_fim_nova = st.date_input("Data Limite Final de Entrega da Obra:", value=(datetime.now() + timedelta(days=60)).date())
+            data_fim_nova = st.date_input("Data Limite de Entrega final na Obra:", value=(datetime.now() + timedelta(days=30)).date())
             
         btn_salvar_obra = st.form_submit_button("Registrar e Validar Nova Obra no PCP")
         
         if btn_salvar_obra:
             if not nome_nova_obra.strip() or not edt_nova_obra.strip() or not nome_tarefa_nova.strip():
-                st.error("Por favor, preencha o Nome da Obra, o Codigo EDT e a Descricao da Frente Técnica.")
+                st.error("Por favor, preencha o Nome da Obra, o Código EDT e o Nome Detalhado da Tarefa.")
             else:
                 conn = conectar_banco()
                 cursor = conn.cursor()
@@ -455,7 +447,7 @@ with aba_nova_obra:
                         "Pendente"
                     ))
                     conn.commit()
-                    st.toast("Nova obra cadastrada com sucesso!", icon="✅")
+                    st.toast(f"Etapa {edt_nova_obra} salva! O formulário foi limpo para a próxima.", icon="✅")
                     time.sleep(0.5)
                     st.rerun()
                 except sqlite3.IntegrityError:
