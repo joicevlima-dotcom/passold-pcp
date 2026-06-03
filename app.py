@@ -283,7 +283,7 @@ with aba_geracao_op:
         st.info("Nenhum lote cadastrado no banco de dados para gerar OPs.")
 
 # ========================================================
-# ABA 3: VISAO MACRO DIRETORIA (GANTT + CALENDÁRIO SEMANAL FILTRÁVEIS)
+# ABA 3: VISAO MACRO DIRETORIA (CORRIGIDA)
 # ========================================================
 with aba_geral:
     st.header("Dashboard Executivo e Cronograma Macro")
@@ -294,15 +294,12 @@ with aba_geral:
     if not df_macro_completo.empty:
         df_macro_calculado_geral = aplicar_planejamento_reverso(df_macro_completo)
         
-        # Filtro global inteligente no topo da pagina da diretoria
         lista_filtro_diretoria = ["TODAS AS OBRAS"] + sorted(list(df_macro_calculado_geral['Obra'].unique()))
         filtro_dir = st.selectbox("Filtrar Painel Executivo por Obra:", lista_filtro_diretoria)
         
-        # Aplica o filtro de obra nos dados que alimentarao tanto o Gantt quanto o calendario
         if filtro_dir != "TODAS AS OBRAS":
             df_macro_calculado_geral = df_macro_calculado_geral[df_macro_calculado_geral['Obra'] == filtro_dir]
             
-        # Indicadores Consolidados Dinamicos
         m_col1, m_col2, m_col3 = st.columns(3)
         m_col1.metric("Metragem Total no Filtro", f"{df_macro_calculado_geral['M2_Total_Tarefa'].sum():,.2f} m2")
         m_col2.metric("Subdivisoes / Balancins Exibidos", f"{len(df_macro_calculado_geral)} frentes")
@@ -313,7 +310,6 @@ with aba_geral:
         # 1. LINHA DO TEMPO / GRÁFICO DE GANTT (FILTRÁVEL)
         st.markdown("### 📊 Linha do Tempo de Execucao (Gantt)")
         
-        # Concatena informacoes para o eixo Y ficar bem explicativo para a diretoria
         df_macro_calculado_geral['Identificador_Visual'] = (
             df_macro_calculado_geral['Obra'] + " - " + 
             df_macro_calculado_geral['Tarefa'] + " (" + 
@@ -329,9 +325,10 @@ with aba_geral:
             labels={"Identificador_Visual": "Frente de Trabalho / Balancim"}
         )
         fig_gantt.update_yaxes(autorange="reversed")
-        # Garante que a escala temporal do eixo X detalhe os meses e semanas de forma limpa
-        fig_gantt.update_xaxes(dtickvalue="M1", hoverformat="%d/%m/%Y")
-        fig_gantt.update_layout(use_container_width=True, margin=dict(t=10, b=10, l=10, r=10))
+        
+        # AJUSTE DA LINHA DE ERRO: dtick="M1" configura a divisao por meses de forma nativa e segura no Plotly
+        fig_gantt.update_xaxes(dtick="M1", hoverformat="%d/%m/%Y")
+        fig_gantt.update_layout(margin=dict(t=10, b=10, l=10, r=10))
         st.plotly_chart(fig_gantt, use_container_width=True)
         
         st.markdown("---")
@@ -339,7 +336,6 @@ with aba_geral:
         # 2. CRONOGRAMA EM CALENDÁRIO COM AS SEMANAS/DIAS
         st.markdown("### 📅 Programacao de Entregas por Mes e Semana")
         
-        # Tratamento das datas para agrupamento cronologico
         df_macro_calculado_geral['Mes_Nome'] = df_macro_calculado_geral['Termino_Obra'].dt.strftime('%B / %Y').str.upper()
         df_macro_calculado_geral['Mes_Num'] = df_macro_calculado_geral['Termino_Obra'].dt.month
         df_macro_calculado_geral['Ano_Num'] = df_macro_calculado_geral['Termino_Obra'].dt.year
@@ -429,7 +425,7 @@ with aba_cadastro_chapas:
                 elif total_m2 <= 0:
                     st.error("Atencao! A Metragem Quadrada Total deve ser maior que zero.")
                 else:
-                    with st.spinner("Fracionando lotes e considerando complexidade das pecas..."):
+                    with st.spinner("Fracionando lotes e considering complexidade das pecas..."):
                         dt_limite_conv = datetime.combine(data_necessidade_obra, datetime.min.time())
                         day_start = dt_limite_conv - timedelta(days=int(recuo_dias_base))
                         
