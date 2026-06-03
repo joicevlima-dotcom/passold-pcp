@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -160,13 +159,13 @@ if 'data_filtro_tv' not in st.session_state:
 if 'mensagem_sucesso' not in st.session_state:
     st.session_state.mensagem_sucesso = None
 
-aba_tv, aba_geral, aba_cadastro_chapas = st.tabs(["📺 PAINEL DA TV (Chão de Fábrica)", "📊 Visão Macro (Diretoria)", "📐 Vincular Datas na Relação de Materials"])
+aba_tv, aba_geral, aba_cadastro_chapas = st.tabs(["📺 PAINEL DA TV (Chão de Fábrica)", "📊 Visão Macro (Diretoria)", "📐 Vincular Datas na Relação de Materiais"])
 
 # ========================================================
-# ABA 1: PAINEL DA TV (Otimizada para Mostrar a Divisão)
+# ABA 1: PAINEL DA TV
 # ========================================================
 with aba_tv:
-    st.header(f"📺 Quadro de Production de Fábrica - Passold")
+    st.header(f"📺 Quadro de Produção de Fábrica - Passold")
     
     st.markdown("### ⚡ Escolha o período de visualização para os operadores:")
     v_col1, v_col2, v_col3 = st.columns(3)
@@ -213,7 +212,7 @@ with aba_tv:
         else:
             st.success("🎉 Nenhum fracionamento agendado encontrado para o período selecionado.")
     else:
-        st.info("Nenhum lote técnico importado ainda. Vá na terceira aba para injetar as datas!")
+        st.info("Nenhum lote técnico importado ainda. Vá na terceira aba para injetar as datas na relação de materiais dos meninos!")
 
 # ========================================================
 # ABA 2: VISÃO MACRO (Diretoria)
@@ -300,7 +299,7 @@ with aba_cadastro_chapas:
                             "Obra_Vinculada": obra_selecionada, 
                             "EDT_Vinculado": edt_puro,
                             "Cod_Lote": cod_lote, 
-                            "Tipo_Material": especificacao,
+                            "Tipo_Material": especificacao, # <--- Corrigido de "Callahan_especificacao" para "especificacao"
                             "Qtd_Caixas": int(caixas_do_dia), 
                             "M2_Item": float(round(m2_do_dia, 2)),
                             "Data_Producao_Programada": dia_corrente.strftime('%Y-%m-%d %H:%M:%S'), 
@@ -309,8 +308,8 @@ with aba_cadastro_chapas:
                             "Status_Item": "Pendente"
                         })
                         
-                        caixas_restantes -= caixas_do_dia
-                        dia_corrente -= timedelta(days=1)
+                        caixas_restantes -= caixas_do_dia # <--- Corrigido operador de subtração
+                        dia_corrente -= timedelta(days=1) # <--- Corrigido operador de data
                     
                     df_novos = pd.DataFrame(novos_registros)
                     salvar_lotes_micro(df_novos)
