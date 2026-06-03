@@ -87,6 +87,12 @@ def inicializar_banco_de_dados():
         )
     """)
     
+    # Remendos preventivos caso o banco local ja exista sem as colunas novas
+    try:
+        cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN Subdivisao TEXT")
+    except sqlite3.OperationalError:
+        pass
+        
     try:
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN Fase_Produtiva TEXT")
     except sqlite3.OperationalError:
@@ -104,6 +110,10 @@ def carregar_macro():
     if not df.empty:
         df['Inicio_Previsto'] = pd.to_datetime(df['Inicio_Previsto'])
         df['Termino_Obra'] = pd.to_datetime(df['Termino_Obra'])
+        
+        # 🛡️ ESCUDO ANTI-KEYERROR: Se o banco antigo nao tiver a coluna, cria na memoria para nao travar!
+        if 'Subdivisao' not in df.columns:
+            df['Subdivisao'] = None
     return df
 
 def carregar_micro():
@@ -171,7 +181,7 @@ aba_tv, aba_geracao_op, aba_geral, aba_cadastro_chapas, aba_nova_obra, aba_confi
 ])
 
 # ========================================================
-# ABA 1: PAINEL DA TV (Foco Real em Etapa de Corte vs Montagem)
+# ABA 1: PAINEL DA TV
 # ========================================================
 with aba_tv:
     st.header("Quadro de Producao de Fabrica - Passold")
@@ -208,7 +218,6 @@ with aba_tv:
                         op_txt = row['Num_OP'] if row['Num_OP'] else "Sem OP"
                         fase = row['Fase_Produtiva'] if 'Fase_Produtiva' in row and row['Fase_Produtiva'] else "Corte/Montagem"
                         
-                        # Destaque visual para a fase de corte ou montagem
                         cor_fase = "🔴" if "CORTE" in fase else "🔵"
                         
                         col_l1.markdown(f"**OP:** `{op_txt}` | **Lote/Sublote:** `{row['Cod_Lote']}` | **Material:** {row['Tipo_Material']}")
@@ -326,7 +335,7 @@ with aba_geral:
         st.info("Aguardando inserção de dados no PCP.")
 
 # ========================================================
-# ABA 4: VINCULO DE DATAS E CADÊNCIA TOTALMENTE FLEXÍVEL (MUNDO REAL)
+# ABA 4: VINCULO DE DATAS E CADÊNCIA FLEXÍVEL
 # ========================================================
 with aba_cadastro_chapas:
     st.header("Inteligencia Temporal: Fatiamento de Lotes e Cadencia Realista")
@@ -354,8 +363,7 @@ with aba_cadastro_chapas:
                 data_necessidade_obra = st.date_input("Data Limite de Despacho desta Remessa:", value=datetime(2026, 7, 10).date())
                 recuo_dias_base = st.number_input("Dias de Pulmao (Seguranca antes do caminhao sair):", min_value=0, value=2)
             with col_in3:
-                # O grande segredo: O PCP agora aceita a estimativa de dias uteis do projetista!
-                dias_uteis_fabricacao = st.number_input("Dias Uteis de Producao Estimados p/ esta quantidade:", min_value=1, value=20)
+                dias_uteis_fabricacao = st.number_input("Dias Uteis de Production Estimados p/ esta quantidade:", min_value=1, value=20)
                 dificuldade_lote = st.selectbox("Nivel de Complexidade Tecnica:", [1, 2, 3, 4, 5], index=3)
 
             st.markdown("---")
@@ -376,10 +384,8 @@ with aba_cadastro_chapas:
                 else:
                     with st.spinner("Gerando cadencia inteligente por etapas..."):
                         dt_limite_conv = datetime.combine(data_necessidade_obra, datetime.min.time())
-                        # Inicia a contagem retroativa a partir da data de despacho menos o pulmao
                         dia_fim_producao = dt_limite_conv - timedelta(days=int(recuo_dias_base))
                         
-                        # Distribuicao proporcional das caixas e m2 ao longo dos dias uteis definidos
                         caixas_por_dia_real = total_cx / float(dias_uteis_fabricacao)
                         m2_por_dia_real = total_m2 / float(dias_uteis_fabricacao)
                         
@@ -388,16 +394,13 @@ with aba_cadastro_chapas:
                         
                         dias_uteis_contados = 0
                         
-                        # Loop que vai voltando no tempo e preenchendo apenas dias uteis
                         while dias_uteis_contados < int(dias_uteis_fabricacao):
-                            # Se for fim de semana, pula para trás sem gastar os dias uteis do projetista
                             if dia_corrente.weekday() in [5, 6]:
                                 dia_corrente -= timedelta(days=1)
                                 continue
                             
                             dias_uteis_contados += 1
                             
-                            # Logica de batelada: primeira metade do tempo e corte, segunda e montagem
                             if dias_uteis_contados <= (int(dias_uteis_fabricacao) / 2):
                                 fase_atual = "MONTAGEM FINAL"
                             else:
@@ -431,7 +434,7 @@ with aba_cadastro_chapas:
         st.warning("Antes de cadastrar materiais, registre a Obra e suas Frentes Técnicas Macro na última aba.")
 
 # ========================================================
-# ABA 5: CADASTRAR NOVA OBRA / COM LEGENDAS DIDÁTICAS
+# ABA 5: CADASTRAR NOVA OBRA 
 # ========================================================
 with aba_nova_obra:
     st.header("Cadastrar Nova Obra e Frentes de Trabalho Macro")
