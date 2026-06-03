@@ -360,7 +360,6 @@ with aba_cadastro_chapas:
                 edt_puro = edt_selecionado.split(" ")[0]
                 cod_lote = st.text_input("Codigo/Identificacao desta Remessa (Ex: LOTE 3-PARTE A):")
             with col_in2:
-                # 🇧🇷 Mudamos aqui! Adicionado o format="DD/MM/YYYY" para ficar totalmente brasileiro!
                 data_necessidade_obra = st.date_input("Data Limite de Despacho desta Remessa:", value=datetime(2026, 7, 10).date(), format="DD/MM/YYYY")
                 recuo_dias_base = st.number_input("Dias de Pulmao (Seguranca antes do caminhao sair):", min_value=0, value=2)
             with col_in3:
@@ -439,7 +438,7 @@ with aba_cadastro_chapas:
 # ========================================================
 with aba_nova_obra:
     st.header("Cadastrar Nova Obra e Frentes de Trabalho Macro")
-    st.markdown("Insira os dados da subdivisao. O sistema mantem a Obra, Escopo e Datas fixas para voce cadastrar multiplos balancins em sequencia.")
+    st.markdown("Insira os dados da subdivisao. O sistema mantem a Obra, Escopo e Datas fixas para voce cadastrar multiplos balancins in sequencia.")
 
     if 'mem_obra' not in st.session_state: st.session_state.mem_obra = ""
     if 'mem_escopo' not in st.session_state: st.session_state.mem_escopo = "ACM"
@@ -464,10 +463,8 @@ with aba_nova_obra:
             
         col_d1, col_d2 = st.columns(2)
         with col_d1:
-            # 🇧🇷 Mudamos aqui! Adicionado o format="DD/MM/YYYY" para ficar normal e legivel
             data_inicio_nova = st.date_input("Data Alvo para Inicio da Instalacao no Predio:", value=st.session_state.mem_dt_inicio, format="DD/MM/YYYY")
         with col_d2:
-            # 🇧🇷 Mudamos aqui também!
             data_fim_nova = st.date_input("Prazo Maximo do Balancim Pronto na Obra:", value=st.session_state.mem_dt_fim, format="DD/MM/YYYY")
             
         btn_salvar_obra = st.form_submit_button("Registrar Subdivisao e Manter Base")
@@ -511,18 +508,28 @@ with aba_nova_obra:
                     conn.close()
 
 # ========================================================
-# ABA 6: CONFIGURAÇÕES E LIMPEZA DE BANCO
+# ABA 6: CONFIGURAÇÕES, TRANCA E LIMPEZA DE BANCO
 # ========================================================
 with aba_config_sistema:
-    st.header("Painel de Controle e Limpeza do Sistema")
-    st.markdown("Use esta area se precisar deletar de vez registros antigos de teste e iniciar o software do zero.")
+    st.header("Painel de Controle e Seguranca do PCP")
+    st.markdown("Area restrita para manutencao da base de dados da Passold.")
     
-    st.warning("Atencao: Clicar no botao abaixo removera permanentemente todas as obras, frentes e lotes salvos no momento.")
-    if st.button("LIMPAR BANCO DE DADOS DE TESTE COMPLETAMENTE"):
-        resetar_banco_dados_completo()
-        st.session_state.mem_obra = ""
-        st.session_state.mem_frente_macro = ""
-        st.session_state.mem_tarefa = ""
-        st.toast("Banco de dados completamente resetado!", icon="🗑️")
-        time.sleep(0.5)
-        st.rerun()
+    st.markdown("### 🔐 Verificacao de Identidade")
+    # Campo de senha mascarado para o "malandro" nao ver o que digita
+    senha_digitada = st.text_input("Insira a senha mestra para liberar comandos críticos:", type="password")
+    
+    # 🔒 A CARTA NA MANGA: Se a senha for digitada corretamente, a tranca abre!
+    if senha_digitada == "Jv568279.":
+        st.success("Acesso Autorizado! Botões de exclusão liberados abaixo.")
+        
+        st.warning("🚨 Atencao: Clicar no botao abaixo removera permanentemente todas as obras e lotes salvos no momento.")
+        if st.button("CONFIRMAR E LIMPAR BANCO DE DADOS COMPLETAMENTE"):
+            resetar_banco_dados_completo()
+            st.session_state.mem_obra = ""
+            st.session_state.mem_frente_macro = ""
+            st.session_state.mem_tarefa = ""
+            st.toast("Banco de dados completamente resetado!", icon="🗑️")
+            time.sleep(0.5)
+            st.rerun()
+    elif senha_digitada != "":
+        st.error("Senha Incorreta! Comando bloqueado preventivamente. 🧐")
