@@ -267,7 +267,7 @@ with aba_tv:
         st.info("Nenhum lote tecnico importado ou liberado para esta obra ainda.")
 
 # ========================================================
-# ABA 2: LIBERAR OP'S DA SEMANA
+# ABA 2: LIBERAR OP'S DA SEMANA (FORMATO DE DATA CORRIGIDO SEM HORAS)
 # ========================================================
 with aba_geracao_op:
     st.header("Gerenciador de Ordens de Producao Semanais")
@@ -278,13 +278,26 @@ with aba_geracao_op:
         
         if not df_pendentes.empty:
             df_pendentes['Data_Producao_Programada'] = pd.to_datetime(df_pendentes['Data_Producao_Programada'])
+            
+            # Ordenando explicitamente por data para a fila fazer sentido cronológico
+            df_pendentes = df_pendentes.sort_values(by='Data_Producao_Programada', ascending=True)
+            
             df_pendentes['Selecionar'] = False
             
             colunas_exibir = ['id', 'Cod_Lote', 'Tipo_Material', 'Qtd_Caixas', 'M2_Item', 'Fase_Produtiva', 'Data_Producao_Programada', 'Romaneio_Chapas', 'Selecionar']
             colunas_existentes = [c for c in colunas_exibir if c in df_pendentes.columns]
             
+            df_exibicao_limpa = df_pendentes[colunas_existentes].copy()
+            
             df_edicao = st.data_editor(
-                df_pendentes[colunas_existentes],
+                df_exibicao_limpa,
+                column_config={
+                    "Data_Producao_Programada": st.column_config.DateColumn(
+                        "Data Programada",
+                        format="DD/MM/YYYY",
+                        help="Data calculada retroativa para fabricação"
+                    )
+                },
                 hide_index=True,
                 use_container_width=True,
                 disabled=[c for c in colunas_existentes if c != 'Selecionar']
@@ -322,7 +335,7 @@ with aba_geracao_op:
         st.info("Nenhum lote cadastrado no banco de dados para gerar OPs.")
 
 # ========================================================
-# ABA 3: VISAO MACRO DIRETORIA (ADENDO DE STATUS ADICIONADO)
+# ABA 3: VISAO MACRO DIRETORIA
 # ========================================================
 with aba_geral:
     st.header("Dashboard Executivo e Cronograma Macro")
@@ -348,7 +361,6 @@ with aba_geral:
         
         st.markdown("---")
         
-        # 🆕 ADENDO SOLICITADO: TABELA DE STATUS E PROGRESSO REAL DAS ETAPAS
         st.markdown("### 📈 Progresso Físico e Status de Produção por Frente")
         st.markdown("Veja abaixo o balanço de quanto já foi liberado para a fábrica e o saldo que resta produzir:")
         
@@ -360,7 +372,6 @@ with aba_geral:
             tarefa = row_macro['Tarefa']
             subdiv = row_macro['Subdivisao'] if 'Subdivisao' in row_macro else "Geral"
             
-            # Filtrando os lotes vinculados a esta frente técnica específica
             if not df_micro_dados.empty:
                 df_frente_micro = df_micro_dados[df_micro_dados['EDT_Vinculado'] == edt]
                 cx_liberadas = df_frente_micro[df_frente_micro['Status_Item'] == "Liberado para Fabrica"]['Qtd_Caixas'].sum()
@@ -371,10 +382,8 @@ with aba_geral:
                 cx_pendentes = 0
                 total_cx_frente = 0
                 
-            # Calculando percentual de avanço de liberação
             percentual = (cx_liberadas / total_cx_frente) if total_cx_frente > 0 else 0.0
             
-            # Definindo status operacional dinâmico
             if total_cx_frente == 0:
                 status_real = "⚪ Aguardando Lote"
             elif cx_pendentes == 0:
@@ -396,7 +405,6 @@ with aba_geral:
             
         df_progresso_painel = pd.DataFrame(resumo_progresso)
         
-        # Exibindo a tabela formatada com barrinha de progresso nativa do streamlit
         st.data_editor(
             df_progresso_painel,
             column_config={
