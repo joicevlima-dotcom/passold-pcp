@@ -32,13 +32,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("Passold - Sistema de Planejamento e Controle de Producao")
-st.subheader("Gestao de OPs Semanais e Capacidade Operacional Flexivel")
+st.subheader("Gestao de OPs Semanais e Capacidade Operacional")
 
 # Data atual de simulacao do projeto (Junho de 2026)
 HOJE_PROJETO = datetime(2026, 6, 3) 
 
 # ========================================================
-# ESTRUTURA DO BANCO DE DADOS (SQLITE)
+# ESTRUTURA DO BANCO DE DADOS REAL (SQLITE)
 # ========================================================
 if os.path.exists("/data"):
     DB_NAME = "/data/passold_pcp.db"
@@ -82,13 +82,20 @@ def inicializar_banco_de_dados():
             Data_Limite_Obra TEXT,
             Romaneio_Chapas TEXT,
             Status_Item TEXT,
-            Dificuldade INTEGER,
-            Fase_Produtiva TEXT
+            Dificuldade INTEGER
         )
     """)
     
     try:
-        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN Fase_Produtiva TEXT")
+        cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN Subdivisao TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN Num_OP TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN Dificuldade INTEGER")
     except sqlite3.OperationalError:
         pass
         
@@ -171,7 +178,7 @@ aba_tv, aba_geracao_op, aba_geral, aba_cadastro_chapas, aba_nova_obra, aba_confi
 ])
 
 # ========================================================
-# ABA 1: PAINEL DA TV (Foco Real em Etapa de Corte vs Montagem)
+# ABA 1: PAINEL DA TV
 # ========================================================
 with aba_tv:
     st.header("Quadro de Producao de Fabrica - Passold")
@@ -201,21 +208,17 @@ with aba_tv:
                 c_meta1.metric("VOLUME TOTAL DE CAIXAS EM EXECUCAO", f"{int(total_cx_periodo)} cx")
                 c_meta2.metric("METRAGEM TOTAL EM PRODUCAO", f"{df_tv_filtrado['M2_Item'].sum():,.2f} m2")
                 
-                st.markdown("#### Sequencia Cronologica de Trabalho no Galpao:")
+                st.markdown("#### Sequencia Semanal de Corte e Montagem:")
                 for idx, row in df_tv_filtrado.iterrows():
                     with st.container():
                         col_l1, col_l2, col_l3 = st.columns([2, 1, 1])
                         op_txt = row['Num_OP'] if row['Num_OP'] else "Sem OP"
-                        fase = row['Fase_Produtiva'] if 'Fase_Produtiva' in row and row['Fase_Produtiva'] else "Corte/Montagem"
-                        
-                        # Destaque visual para a fase de corte ou montagem
-                        cor_fase = "🔴" if "CORTE" in fase else "🔵"
-                        
-                        col_l1.markdown(f"**OP:** `{op_txt}` | **Lote/Sublote:** `{row['Cod_Lote']}` | **Material:** {row['Tipo_Material']}")
-                        col_l2.markdown(f"**Meta do Dia:** {int(row['Qtd_Caixas'])} cx | {row['M2_Item']} m2")
-                        col_l3.markdown(f"{cor_fase} **Fase Alvo:** `{fase}`")
-                        
-                        st.caption(f"Pavimentos Destino: {row['Romaneio_Chapas']} | Dia de Execucao: {row['Data_Producao_Programada'].strftime('%d/%m/%Y')} | Limite p/ Obra: {row['Data_Limite_Obra'].strftime('%d/%m/%Y')}")
+                        dif_txt = f"Nivel {row['Dificuldade']}" if 'Dificuldade' in row and row['Dificuldade'] else "Nao informada"
+                        col_l1.markdown(f"**OP:** `{op_txt}` | **Lote:** {row['Cod_Lote']} | **Material:** {row['Tipo_Material']}")
+                        col_l2.markdown(f"**Meta:** {int(row['Qtd_Caixas'])} cx | {row['M2_Item']} m2")
+                        col_l3.markdown(f"**Dificuldade:** {dif_txt} | **Status:** {row['Status_Item']}")
+                        if row['Romaneio_Chapas']:
+                            st.caption(f"Subdivisao/Pavimentos destino: {row['Romaneio_Chapas']} | Previsao de Producao: {row['Data_Producao_Programada'].strftime('%d/%m/%Y')}")
                         st.markdown("---")
             else:
                 st.info(f"Nenhuma Ordem de Producao (OP) liberada para a {obra_selecionada} esta semana.")
@@ -238,7 +241,7 @@ with aba_geracao_op:
             df_pendentes['Data_Producao_Programada'] = pd.to_datetime(df_pendentes['Data_Producao_Programada'])
             df_pendentes['Selecionar'] = False
             
-            colunas_exibir = ['id', 'Cod_Lote', 'Tipo_Material', 'Qtd_Caixas', 'M2_Item', 'Fase_Produtiva', 'Data_Producao_Programada', 'Romaneio_Chapas', 'Selecionar']
+            colunas_exibir = ['id', 'Cod_Lote', 'Tipo_Material', 'Qtd_Caixas', 'M2_Item', 'Dificuldade', 'Data_Producao_Programada', 'Romaneio_Chapas', 'Selecionar']
             colunas_existentes = [c for c in colunas_exibir if c in df_pendentes.columns]
             
             df_edicao = st.data_editor(
@@ -280,10 +283,11 @@ with aba_geracao_op:
         st.info("Nenhum lote cadastrado no banco de dados para gerar OPs.")
 
 # ========================================================
-# ABA 3: VISAO MACRO DIRETORIA
+# ABA 3: VISAO MACRO DIRETORIA (CORRIGIDA)
 # ========================================================
 with aba_geral:
     st.header("Dashboard Executivo e Cronograma Macro")
+    st.markdown("Monitore os prazos finais de fabrica e as datas limites de entrega de cada balancim de forma visual e estruturada.")
     
     df_macro_completo = carregar_macro()
     
@@ -303,7 +307,9 @@ with aba_geral:
         
         st.markdown("---")
         
+        # 1. LINHA DO TEMPO / GRÁFICO DE GANTT (FILTRÁVEL)
         st.markdown("### 📊 Linha do Tempo de Execucao (Gantt)")
+        
         df_macro_calculado_geral['Identificador_Visual'] = (
             df_macro_calculado_geral['Obra'] + " - " + 
             df_macro_calculado_geral['Tarefa'] + " (" + 
@@ -319,22 +325,66 @@ with aba_geral:
             labels={"Identificador_Visual": "Frente de Trabalho / Balancim"}
         )
         fig_gantt.update_yaxes(autorange="reversed")
+        
+        # AJUSTE DA LINHA DE ERRO: dtick="M1" configura a divisao por meses de forma nativa e segura no Plotly
         fig_gantt.update_xaxes(dtick="M1", hoverformat="%d/%m/%Y")
         fig_gantt.update_layout(margin=dict(t=10, b=10, l=10, r=10))
         st.plotly_chart(fig_gantt, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # 2. CRONOGRAMA EM CALENDÁRIO COM AS SEMANAS/DIAS
+        st.markdown("### 📅 Programacao de Entregas por Mes e Semana")
+        
+        df_macro_calculado_geral['Mes_Nome'] = df_macro_calculado_geral['Termino_Obra'].dt.strftime('%B / %Y').str.upper()
+        df_macro_calculado_geral['Mes_Num'] = df_macro_calculado_geral['Termino_Obra'].dt.month
+        df_macro_calculado_geral['Ano_Num'] = df_macro_calculado_geral['Termino_Obra'].dt.year
+        df_macro_calculado_geral['Semana_Ano'] = df_macro_calculado_geral['Termino_Obra'].dt.isocalendar().week
+        
+        meses_pt = {
+            "JANUARY": "JANEIRO", "FEBRUARY": "FEVEREIRO", "MARCH": "MARÇO", "APRIL": "ABRIL",
+            "MAY": "MAIO", "JUNE": "JUNHO", "JULY": "JULHO", "AUGUST": "AGOSTO",
+            "SEPTEMBER": "SETEMBRO", "OCTOBER": "OUTUBRO", "NOVEMBER": "NOVEMBRO", "DECEMBER": "DEZEMBRO"
+        }
+        for eng, pt in meses_pt.items():
+            df_macro_calculado_geral['Mes_Nome'] = df_macro_calculado_geral['Mes_Nome'].str.replace(eng, pt)
+
+        df_macro_calculado_geral = df_macro_calculado_geral.sort_values(by=['Ano_Num', 'Mes_Num', 'Semana_Ano'])
+        
+        for (ano, mes_num, nome_mes), grupo_mes in df_macro_calculado_geral.groupby(['Ano_Num', 'Mes_Num', 'Mes_Nome']):
+            with st.expander(f"📅 ENTREGAS PACTUADAS EM: {nome_mes}", expanded=True):
+                
+                for num_semana, grupo_semana in grupo_mes.groupby('Semana_Ano'):
+                    data_min_sem = grupo_semana['Termino_Obra'].min() - timedelta(days=grupo_semana['Termino_Obra'].min().weekday())
+                    data_max_sem = data_min_sem + timedelta(days=4)
+                    
+                    st.markdown(f"#### 🗓️ Semana {num_semana} *(Janela de entrega: {data_min_sem.strftime('%d/%m')} a {data_max_sem.strftime('%d/%m/%Y')} )*")
+                    
+                    df_exibicao_semana = grupo_semana[[
+                        'Obra', 'EDT', 'Tipo_Escopo', 'Etapa_Macro', 'Subdivisao', 'Tarefa', 'M2_Total_Tarefa', 'Prazo_Final_Fabrica', 'Termino_Obra'
+                    ]].copy()
+                    
+                    df_exibicao_semana['Prazo_Final_Fabrica'] = df_exibicao_semana['Prazo_Final_Fabrica'].dt.strftime('%d/%m/%Y')
+                    df_exibicao_semana['Termino_Obra'] = df_exibicao_semana['Termino_Obra'].dt.strftime('%d/%m/%Y')
+                    
+                    df_exibicao_semana.columns = [
+                        'Obra', 'Código EDT', 'Escopo', 'Frente Macro', 'Subdivisão/Balancim', 'Tarefa Técnica', 'Metragem (m²)', 'Limite Saída Fábrica', 'Data Alvo na Obra'
+                    ]
+                    
+                    st.dataframe(df_exibicao_semana, hide_index=True, use_container_width=True)
+                    st.markdown("<br>", unsafe_allow_html=True)
     else:
-        st.info("Aguardando inserção de dados no PCP.")
+        st.info("Aguardando inserção de dados no PCP para estruturar o cronograma visual da diretoria.")
 
 # ========================================================
-# ABA 4: VINCULO DE DATAS E CADÊNCIA TOTALMENTE FLEXÍVEL (MUNDO REAL)
+# ABA 4: INTELIGENCIA REVERSA E FRACIONAMENTO
 # ========================================================
 with aba_cadastro_chapas:
-    st.header("Inteligencia Temporal: Fatiamento de Lotes e Cadencia Realista")
-    st.markdown("Lance o lote ou a remessa fatiada parcial combinada com o projetista para gerar uma distribuicao sem erros.")
+    st.header("Inteligencia Temporal: Injetar Datas e Cadencia na Relacao Tecnica")
     
     if 'lote_salvo_sucesso' in st.session_state and st.session_state.lote_salvo_sucesso:
-        st.toast("Remessa salva com sucesso no banco da Passold!", icon="✅")
-        st.success("Sucesso! Remessa gerada e salva como Pendente. Confira na aba 'Liberar OPs da Semana'.")
+        st.toast("Lote salvo com sucesso no banco de dados da Passold!", icon="✅")
+        st.success("Sucesso! Divisao gerada e salva como Pendente. Acesse a aba 'Liberar OPs da Semana' para enviar o planejamento para a TV da fabrica.")
         st.session_state.lote_salvo_sucesso = False
 
     if obra_selecionada and not df_macro_filtrado.empty:
@@ -343,82 +393,81 @@ with aba_cadastro_chapas:
             sub_txt = f" [{row['Subdivisao']}]" if row['Subdivisao'] else ""
             opcoes_edt.append(f"{row['EDT']} - {row['Tarefa']}{sub_txt}")
         
-        with st.form("form_injecao_datas_flexivel"):
-            st.markdown("### 1. Dados Cronologicos Combinados (Projetista/Obra)")
+        with st.form("form_injecao_datas"):
+            st.markdown("### 1. Vinculo com Cronograma de Obra")
             col_in1, col_in2, col_in3 = st.columns(3)
             with col_in1:
-                edt_selecionado = st.selectbox("Esta relacao tecnica pertence a qual frente macro?", opcoes_edt)
+                edt_selecionado = st.selectbox(f"Esta relacao tecnica pertence a qual frente/subdivisao da obra {obra_selecionada}?", opcoes_edt)
                 edt_puro = edt_selecionado.split(" ")[0]
-                cod_lote = st.text_input("Codigo/Identificacao desta Remessa (Ex: LOTE 3-PARTE A):")
+                cod_lote = st.text_input("Codigo de Identificacao Interna:")
             with col_in2:
-                data_necessidade_obra = st.date_input("Data Limite de Despacho desta Remessa:", value=datetime(2026, 7, 10).date())
-                recuo_dias_base = st.number_input("Dias de Pulmao (Seguranca antes do caminhao sair):", min_value=0, value=2)
+                data_necessidade_obra = st.date_input("Data de Despacho / Envio p/ Obra:", value=datetime(2026, 7, 10).date())
+                recuo_dias_base = st.number_input("Dias de Pulmao Minimo de Seguranca antes do Despacho:", min_value=1, value=2)
             with col_in3:
-                # O grande segredo: O PCP agora aceita a estimativa de dias uteis do projetista!
-                dias_uteis_fabricacao = st.number_input("Dias Uteis de Producao Estimados p/ esta quantidade:", min_value=1, value=20)
-                dificuldade_lote = st.selectbox("Nivel de Complexidade Tecnica:", [1, 2, 3, 4, 5], index=3)
+                limite_caixas_dia = st.number_input("Capacidade MÁXIMA real de montagem (caixas de nivel 1/dia):", min_value=1, value=10)
+                dificuldade_lote = st.selectbox("Dificuldade tecnica das pecas deste lote:", [1, 2, 3, 4, 5], index=0)
 
             st.markdown("---")
-            st.markdown("### 2. Dados Quantitativos Fatiados do Projeto")
+            st.markdown("### 2. Dados Extraidos da Planilha Tecnica Bruta")
             col_dados1, col_dados2 = st.columns(2)
             with col_dados1:
-                txt_pavimentos = st.text_area("Pavimentos/Balancins Destino (Ex: Pav 39 ao 43):", value="Pav 39 ao 43")
+                txt_pavimentos = st.text_area("Pavimentos/Balancins afetados de acordo com o PDF:", value="Pav 39 ao 48")
                 especificacao = st.text_input("Material / Chapa do Lote:", value="ACM BRANCO")
             with col_dados2:
-                total_cx = st.number_input("Quantidade de Caixas desta Remessa Parcial:", min_value=1, value=50)
-                total_m2 = st.number_input("Metragem Quadrada (m2) desta Remessa Parcial:", min_value=0.1, value=113.27)
+                total_cx = st.number_input("Quantidade Total de Caixas Identificadas na Planilha:", min_value=1, value=94)
+                total_m2 = st.number_input("Metragem Quadrada Total (m2) da Planilha:", min_value=0.1, value=212.95)
 
-            btn_calcular_tudo = st.form_submit_button("Distribuir Remessa Realista na Fabrica")
+            btn_calcular_tudo = st.form_submit_button("Processar Fluxo Real de Fabrica e Salvar no Banco")
 
             if btn_calcular_tudo:
                 if not cod_lote.strip():
-                    st.error("Por favor, digite uma identificacao de lote/sublote para salvar.")
+                    st.error("Atencao! Voce precisa digitar um 'Codigo de Identificacao Interna' para conseguir salvar.")
+                elif total_m2 <= 0:
+                    st.error("Atencao! A Metragem Quadrada Total deve ser maior que zero.")
                 else:
-                    with st.spinner("Gerando cadencia inteligente por etapas..."):
+                    with st.spinner("Fracionando lotes e considering complexidade das pecas..."):
                         dt_limite_conv = datetime.combine(data_necessidade_obra, datetime.min.time())
-                        # Inicia a contagem retroativa a partir da data de despacho menos o pulmao
-                        dia_fim_producao = dt_limite_conv - timedelta(days=int(recuo_dias_base))
+                        day_start = dt_limite_conv - timedelta(days=int(recuo_dias_base))
                         
-                        # Distribuicao proporcional das caixas e m2 ao longo dos dias uteis definidos
-                        caixas_por_dia_real = total_cx / float(dias_uteis_fabricacao)
-                        m2_por_dia_real = total_m2 / float(dias_uteis_fabricacao)
+                        caixas_restantes = total_cx
+                        m2_por_caixa = total_m2 / total_cx
+                        
+                        peso_esforco = float(dificuldade_lote)
+                        if dificuldade_lote == 5:
+                            peso_esforco = 4.0
+                            
+                        capacidade_ajustada_dia = max(1.0, float(limite_caixas_dia) / peso_esforco)
                         
                         novos_registros = []
-                        dia_corrente = dia_fim_producao
+                        dia_corrente = day_start
                         
-                        dias_uteis_contados = 0
-                        
-                        # Loop que vai voltando no tempo e preenchendo apenas dias uteis
-                        while dias_uteis_contados < int(dias_uteis_fabricacao):
-                            # Se for fim de semana, pula para trás sem gastar os dias uteis do projetista
+                        while caixas_restantes > 0:
                             if dia_corrente.weekday() in [5, 6]:
                                 dia_corrente -= timedelta(days=1)
                                 continue
-                            
-                            dias_uteis_contados += 1
-                            
-                            # Logica de batelada: primeira metade do tempo e corte, segunda e montagem
-                            if dias_uteis_contados <= (int(dias_uteis_fabricacao) / 2):
-                                fase_atual = "MONTAGEM FINAL"
-                            else:
-                                fase_atual = "CORTE E USINAGEM"
                                 
+                            caixas_do_dia = min(int(round(capacidade_ajustada_dia)), int(caixas_restantes))
+                            if caixas_do_dia == 0 and caixas_restantes > 0:
+                                caixas_do_dia = 1
+                                
+                            m2_do_dia = caixas_do_dia * m2_por_caixa
+                            
                             novos_registros.append({
                                 "Obra_Vinculada": obra_selecionada, 
                                 "EDT_Vinculado": edt_puro,
                                 "Cod_Lote": cod_lote,
                                 "Num_OP": None,
                                 "Tipo_Material": especificacao,
-                                "Qtd_Caixas": max(1, int(round(caixas_por_dia_real))), 
-                                "M2_Item": float(round(m2_por_dia_real, 2)),
+                                "Qtd_Caixas": int(caixas_do_dia), 
+                                "M2_Item": float(round(m2_do_dia, 2)),
                                 "Data_Producao_Programada": dia_corrente.strftime('%Y-%m-%d %H:%M:%S'), 
                                 "Data_Limite_Obra": dt_limite_conv.strftime('%Y-%m-%d %H:%M:%S'), 
                                 "Romaneio_Chapas": txt_pavimentos, 
                                 "Status_Item": "Pendente",
-                                "Dificuldade": int(dificuldade_lote),
-                                "Fase_Produtiva": fase_atual
+                                "Dificuldade": int(dificuldade_lote)
                             })
                             
+                            caixas_restantes -= caixas_do_dia
                             dia_corrente -= timedelta(days=1)
                         
                         df_novos = pd.DataFrame(novos_registros)
@@ -431,7 +480,7 @@ with aba_cadastro_chapas:
         st.warning("Antes de cadastrar materiais, registre a Obra e suas Frentes Técnicas Macro na última aba.")
 
 # ========================================================
-# ABA 5: CADASTRAR NOVA OBRA / COM LEGENDAS DIDÁTICAS
+# ABA 5: CADASTRAR NOVA OBRA / COM MEMÓRIA DE SESSÃO CONTÍNUA
 # ========================================================
 with aba_nova_obra:
     st.header("Cadastrar Nova Obra e Frentes de Trabalho Macro")
@@ -460,9 +509,9 @@ with aba_nova_obra:
             
         col_d1, col_d2 = st.columns(2)
         with col_d1:
-            data_inicio_nova = st.date_input("Data Alvo para Inicio da Instalacao no Predio:", value=st.session_state.mem_dt_inicio)
+            data_inicio_nova = st.date_input("Data de Inicio Prevista:", value=st.session_state.mem_dt_inicio)
         with col_d2:
-            data_fim_nova = st.date_input("Prazo Maximo do Balancim Pronto na Obra:", value=st.session_state.mem_dt_fim)
+            data_fim_nova = st.date_input("Data Limite de Entrega final na Obra:", value=st.session_state.mem_dt_fim)
             
         btn_salvar_obra = st.form_submit_button("Registrar Subdivisao e Manter Base")
         
