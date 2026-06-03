@@ -52,7 +52,6 @@ def inicializar_banco_de_dados():
     conn = conectar_banco()
     cursor = conn.cursor()
     
-    # Criacao das tabelas estruturadas
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS cronograma_macro (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,17 +86,14 @@ def inicializar_banco_de_dados():
         )
     """)
     
-    # Garantia de colunas atualizadas (Migracao automatica)
     try:
         cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN Subdivisao TEXT")
     except sqlite3.OperationalError:
         pass
-
     try:
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN Num_OP TEXT")
     except sqlite3.OperationalError:
         pass
-
     try:
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN Dificuldade INTEGER")
     except sqlite3.OperationalError:
@@ -318,7 +314,7 @@ with aba_geral:
         st.info("Aguardando inserção de dados de planejamento macro.")
 
 # ========================================================
-# ABA 4: INTELIGENCIA REVERSA E FRACIONAMENTO (VINCULAR DATAS)
+# ABA 4: INTELIGENCIA REVERSA E FRACIONAMENTO
 # ========================================================
 with aba_cadastro_chapas:
     st.header("Inteligencia Temporal: Injetar Datas e Cadencia na Relacao Tecnica")
@@ -329,7 +325,6 @@ with aba_cadastro_chapas:
         st.session_state.lote_salvo_sucesso = False
 
     if obra_selecionada and not df_macro_filtrado.empty:
-        # Inclusao visual inteligente da Subdivisao/Balancim no Selectbox com base em image_a2744c.png
         opcoes_edt = []
         for idx, row in df_macro_filtrado.iterrows():
             sub_txt = f" [{row['Subdivisao']}]" if row['Subdivisao'] else ""
@@ -423,37 +418,56 @@ with aba_cadastro_chapas:
         st.warning("Antes de cadastrar materiais, registre a Obra e suas Frentes Técnicas Macro na última aba.")
 
 # ========================================================
-# ABA 5: CADASTRAR NOVA OBRA / INCLUIR VÁRIAS ETAPAS E SUBDIVISÕES
+# ABA 5: CADASTRAR NOVA OBRA / COM MEMÓRIA DE SESSÃO CONTÍNUA
 # ========================================================
 with aba_nova_obra:
     st.header("Cadastrar Nova Obra e Frentes de Trabalho Macro")
-    st.markdown("Insira os dados técnicos abaixo para registrar uma etapa. Você pode incluir subdivisões/balancinhos sequencialmente.")
-    
-    with st.form("form_nova_obra", clear_on_submit=True):
-        nome_nova_obra = st.text_input("Nome Geral da Obra (Ex: OBRA OAS ou EDIFICIO MUNIQUE):").upper()
+    st.markdown("Insira os dados da subdivisao. O sistema mantem a Obra, Escopo e Datas fixas para voce cadastrar multiplos balancins em sequencia.")
+
+    # Inicializacao da memoria de sessao para evitar redigitacao
+    if 'mem_obra' not in st.session_state: st.session_state.mem_obra = ""
+    if 'mem_escopo' not in st.session_state: st.session_state.mem_escopo = "ACM"
+    if 'mem_frente_macro' not in st.session_state: st.session_state.mem_frente_macro = ""
+    if 'mem_tarefa' not in st.session_state: st.session_state.mem_tarefa = ""
+    if 'mem_dt_inicio' not in st.session_state: st.session_state.mem_dt_inicio = datetime.now().date()
+    if 'mem_dt_fim' not in st.session_state: st.session_state.mem_dt_fim = (datetime.now() + timedelta(days=30)).date()
+
+    with st.form("form_nova_obra_sequencial"):
+        # Dados que costumam se repetir (puxando da memoria)
+        nome_nova_obra = st.text_input("Nome Geral da Obra (Ex: OBRA OAS ou EDIFICIO MUNIQUE):", value=st.session_state.mem_obra).upper()
         
         col_o1, col_o2 = st.columns(2)
         with col_o1:
-            edt_nova_obra = st.text_input("Codigo EDT da Frente/Subdivisao (Ex: 1.1.1.1 ou 2.1):")
-            tipo_escopo_novo = st.selectbox("Tipo de Escopo Fachada:", ["ACM", "Vidro/Esquadria"])
-            etapa_macro_nova = st.text_input("Frente Macro / Pavimentos (Ex: TORRE - ETAPA 3):")
+            tipo_escopo_novo = st.selectbox("Tipo de Escopo Fachada:", ["ACM", "Vidro/Esquadria"], index=0 if st.session_state.mem_escopo == "ACM" else 1)
+            etapa_macro_nova = st.text_input("Frente Macro / Pavimentos (Ex: TORRE - ETAPA 3):", value=st.session_state.mem_frente_macro)
+            nome_tarefa_nova = st.text_input("Nome Detalhado da Tarefa (Ex: Instalacao ACM vigas):", value=st.session_state.mem_tarefa)
+        
         with col_o2:
-            subdivisao_nova = st.text_input("Subdivisao / Balancim Especifico (Ex: Balancim 04 / Fachada Sul):").upper()
-            nome_tarefa_nova = st.text_input("Nome Detalhado da Tarefa (Ex: Instalacao ACM vigas):")
-            m2_total_novo = st.number_input("Metragem Quadrada Pactuada p/ esta subdivisao (m2):", min_value=0.1, value=100.0)
+            # Dados especificos de cada subdivisao (estao sempre em branco para o próximo "pimba")
+            edt_nova_obra = st.text_input("Codigo EDT da Frente/Subdivisao ÚNICO (Ex: 1.1.1.1 ou 2.1):", value="")
+            subdivisao_nova = st.text_input("Subdivisao / Balancim Especifico (Ex: Balancim 04 / Fachada Sul):", value="").upper()
+            m2_total_novo = st.number_input("Metragem Quadrada Pactuada p/ esta subdivisao (m2):", min_value=0.1, value=100.0, step=10.0)
             
         col_d1, col_d2 = st.columns(2)
         with col_d1:
-            data_inicio_nova = st.date_input("Data de Inicio Prevista:", value=datetime.now().date())
+            data_inicio_nova = st.date_input("Data de Inicio Prevista:", value=st.session_state.mem_dt_inicio)
         with col_d2:
-            data_fim_nova = st.date_input("Data Limite de Entrega final na Obra:", value=(datetime.now() + timedelta(days=30)).date())
+            data_fim_nova = st.date_input("Data Limite de Entrega final na Obra:", value=st.session_state.mem_dt_fim)
             
-        btn_salvar_obra = st.form_submit_button("Registrar e Validar Nova Obra no PCP")
+        btn_salvar_obra = st.form_submit_button("Registrar Subdivisao e Manter Base")
         
         if btn_salvar_obra:
-            if not nome_nova_obra.strip() or not edt_nova_obra.strip() or not nome_tarefa_nova.strip():
-                st.error("Por favor, preencha o Nome da Obra, o Código EDT e o Nome Detalhado da Tarefa.")
+            if not nome_nova_obra.strip() or not edt_nova_obra.strip() or not nome_tarefa_nova.strip() or not subdivisao_nova.strip():
+                st.error("Por favor, preencha o Nome da Obra, o Código EDT, o Balancim e a Tarefa.")
             else:
+                # Salva na memoria para a proxima rodada
+                st.session_state.mem_obra = nome_nova_obra
+                st.session_state.mem_escopo = tipo_escopo_novo
+                st.session_state.mem_frente_macro = etapa_macro_nova
+                st.session_state.mem_tarefa = nome_tarefa_nova
+                st.session_state.mem_dt_inicio = data_inicio_nova
+                st.session_state.mem_dt_fim = data_fim_nova
+                
                 conn = conectar_banco()
                 cursor = conn.cursor()
                 try:
@@ -473,11 +487,11 @@ with aba_nova_obra:
                         "Pendente"
                     ))
                     conn.commit()
-                    st.toast(f"Frente {edt_nova_obra} [{subdivisao_nova}] salva! O formulário foi limpo para a próxima.", icon="✅")
-                    time.sleep(0.5)
+                    st.toast(f"Pimba! Subdivisao {subdivisao_nova} inserida com sucesso. Insira a proxima!", icon="🚀")
+                    time.sleep(0.4)
                     st.rerun()
                 except sqlite3.IntegrityError:
-                    st.error("Erro: Este Codigo EDT ja esta sendo usado em outra subdivisao. Insira um codigo exclusivo.")
+                    st.error(f"Erro: O Codigo EDT '{edt_nova_obra}' ja existe no sistema. Cada subdivisao precisa de um EDT exclusivo.")
                 finally:
                     conn.close()
 
@@ -491,6 +505,10 @@ with aba_config_sistema:
     st.warning("Atencao: Clicar no botao abaixo removera permanentemente todas as obras, frentes e lotes salvos no momento.")
     if st.button("LIMPAR BANCO DE DADOS DE TESTE COMPLETAMENTE"):
         resetar_banco_dados_completo()
+        # Limpa memoria de sessao do cadastro
+        st.session_state.mem_obra = ""
+        st.session_state.mem_frente_macro = ""
+        st.session_state.mem_tarefa = ""
         st.toast("Banco de dados completamente resetado!", icon="🗑️")
         time.sleep(0.5)
         st.rerun()
