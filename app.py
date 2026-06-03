@@ -544,7 +544,7 @@ with aba_config_sistema:
     st.markdown("### 🔐 Verificacao de Identidade")
     senha_digitada = st.text_input("Insira a senha mestra para liberar comandos críticos:", type="password")
     
-    if senha_digitada == "passold2026":
+    if senha_digitada == "Jv568279.":
         st.success("Acesso Autorizado! Botões de exclusão liberados abaixo.")
         
         st.warning("🚨 Atencao: Clicar no botao abaixo removera permanentemente todas as obras e lotes salvos no momento.")
