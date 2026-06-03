@@ -158,14 +158,12 @@ df_banco_micro = carregar_micro()
 
 if not df_banco_macro.empty:
     lista_obras_disponiveis = sorted(list(df_banco_macro['Obra'].unique()))
-    obra_selecionada = st.selectbox("Selecione a Obra Ativa para Visualizar no Painel:", lista_obras_disponiveis)
+    obra_selecionada = st.selectbox("Selecione a Obra de Trabalho para a Fabrica / Lotes:", lista_obras_disponiveis)
     df_macro_filtrado = df_banco_macro[df_banco_macro['Obra'] == obra_selecionada]
-    df_macro_calculado = aplicar_planejamento_reverso(df_macro_filtrado)
 else:
-    st.info("O sistema esta limpo e pronto para uso. Acesse a aba 'Cadastrar Nova Obra' para inserir sua primeira obra e subdivisoes reais.")
+    st.info("O sistema esta limpo e pronto para uso. Acesse a aba 'Cadastrar Nova Obra' para inserir sua primeira obra.")
     obra_selecionada = None
     df_macro_filtrado = pd.DataFrame()
-    df_macro_calculado = pd.DataFrame()
 
 if 'modo_visao_tv' not in st.session_state:
     st.session_state.modo_visao_tv = "SEMANA"
@@ -223,7 +221,7 @@ with aba_tv:
                             st.caption(f"Subdivisao/Pavimentos destino: {row['Romaneio_Chapas']} | Previsao de Producao: {row['Data_Producao_Programada'].strftime('%d/%m/%Y')}")
                         st.markdown("---")
             else:
-                st.info("Nenhuma Ordem de Producao (OP) liberada para esta semana ate o momento.")
+                st.info(f"Nenhuma Ordem de Producao (OP) liberada para a {obra_selecionada} esta semana.")
         else:
             st.info("Nenhum lote associado a esta obra especifica.")
     else:
@@ -285,33 +283,102 @@ with aba_geracao_op:
         st.info("Nenhum lote cadastrado no banco de dados para gerar OPs.")
 
 # ========================================================
-# ABA 3: VISAO MACRO
+# ABA 3: VISAO MACRO DIRETORIA (GANTT + CALENDÁRIO SEMANAL FILTRÁVEIS)
 # ========================================================
 with aba_geral:
     st.header("Dashboard Executivo e Cronograma Macro")
+    st.markdown("Monitore os prazos finais de fabrica e as datas limites de entrega de cada balancim de forma visual e estruturada.")
     
-    if obra_selecionada and not df_macro_calculado.empty:
-        st.subheader(f"Obra Ativa: {obra_selecionada}")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Metragem Total Pactuada", f"{df_macro_calculado['M2_Total_Tarefa'].sum():,.2f} m2")
-        col2.metric("Frentes Ativas Rastreadas", f"{len(df_macro_calculado)} frentes/subdivisoes")
-        col3.metric("Fim Previsto da Instalacao", df_macro_calculado['Termino_Obra'].max().strftime('%d/%m/%Y') if not df_macro_calculado.empty else "N/A")
+    df_macro_completo = carregar_macro()
+    
+    if not df_macro_completo.empty:
+        df_macro_calculado_geral = aplicar_planejamento_reverso(df_macro_completo)
+        
+        # Filtro global inteligente no topo da pagina da diretoria
+        lista_filtro_diretoria = ["TODAS AS OBRAS"] + sorted(list(df_macro_calculado_geral['Obra'].unique()))
+        filtro_dir = st.selectbox("Filtrar Painel Executivo por Obra:", lista_filtro_diretoria)
+        
+        # Aplica o filtro de obra nos dados que alimentarao tanto o Gantt quanto o calendario
+        if filtro_dir != "TODAS AS OBRAS":
+            df_macro_calculado_geral = df_macro_calculado_geral[df_macro_calculado_geral['Obra'] == filtro_dir]
+            
+        # Indicadores Consolidados Dinamicos
+        m_col1, m_col2, m_col3 = st.columns(3)
+        m_col1.metric("Metragem Total no Filtro", f"{df_macro_calculado_geral['M2_Total_Tarefa'].sum():,.2f} m2")
+        m_col2.metric("Subdivisoes / Balancins Exibidos", f"{len(df_macro_calculado_geral)} frentes")
+        m_col3.metric("Prazo de Entrega Mais Distante", df_macro_calculado_geral['Termino_Obra'].max().strftime('%d/%m/%Y'))
         
         st.markdown("---")
-        st.markdown("### Tabela de Planejamento Reverso Estrategico")
         
-        colunas_macro = ['EDT', 'Tipo_Escopo', 'Etapa_Macro', 'Subdivisao', 'Tarefa', 'M2_Total_Tarefa', 'Inicio_Previsto', 'Termino_Obra', 'Status']
-        colunas_exibir_macro = [c for c in colunas_macro if c in df_macro_calculado.columns]
+        # 1. LINHA DO TEMPO / GRÁFICO DE GANTT (FILTRÁVEL)
+        st.markdown("### 📊 Linha do Tempo de Execucao (Gantt)")
         
-        st.dataframe(df_macro_calculado[colunas_exibir_macro], hide_index=True, use_container_width=True)
+        # Concatena informacoes para o eixo Y ficar bem explicativo para a diretoria
+        df_macro_calculado_geral['Identificador_Visual'] = (
+            df_macro_calculado_geral['Obra'] + " - " + 
+            df_macro_calculado_geral['Tarefa'] + " (" + 
+            df_macro_calculado_geral['Subdivisao'].fillna('Geral') + ")"
+        )
         
-        st.markdown("### Linha do Tempo Macro (Gantt)")
-        df_macro_calculado['Identificador_Visual'] = df_macro_calculado['Tarefa'] + " (" + df_macro_calculado['Subdivisao'].fillna('Geral') + ")"
-        fig_gantt = px.timeline(df_macro_calculado, x_start="Inicio_Previsto", x_end="Termino_Obra", y="Identificador_Visual", color="Status")
-        fig_gantt.update_yaxes(autorange="reversed", title="Tarefa / Subdivisao")
+        fig_gantt = px.timeline(
+            df_macro_calculado_geral, 
+            x_start="Inicio_Previsto", 
+            x_end="Termino_Obra", 
+            y="Identificador_Visual", 
+            color="Obra" if filtro_dir == "TODAS AS OBRAS" else "Status",
+            labels={"Identificador_Visual": "Frente de Trabalho / Balancim"}
+        )
+        fig_gantt.update_yaxes(autorange="reversed")
+        # Garante que a escala temporal do eixo X detalhe os meses e semanas de forma limpa
+        fig_gantt.update_xaxes(dtickvalue="M1", hoverformat="%d/%m/%Y")
+        fig_gantt.update_layout(use_container_width=True, margin=dict(t=10, b=10, l=10, r=10))
         st.plotly_chart(fig_gantt, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # 2. CRONOGRAMA EM CALENDÁRIO COM AS SEMANAS/DIAS
+        st.markdown("### 📅 Programacao de Entregas por Mes e Semana")
+        
+        # Tratamento das datas para agrupamento cronologico
+        df_macro_calculado_geral['Mes_Nome'] = df_macro_calculado_geral['Termino_Obra'].dt.strftime('%B / %Y').str.upper()
+        df_macro_calculado_geral['Mes_Num'] = df_macro_calculado_geral['Termino_Obra'].dt.month
+        df_macro_calculado_geral['Ano_Num'] = df_macro_calculado_geral['Termino_Obra'].dt.year
+        df_macro_calculado_geral['Semana_Ano'] = df_macro_calculado_geral['Termino_Obra'].dt.isocalendar().week
+        
+        meses_pt = {
+            "JANUARY": "JANEIRO", "FEBRUARY": "FEVEREIRO", "MARCH": "MARÇO", "APRIL": "ABRIL",
+            "MAY": "MAIO", "JUNE": "JUNHO", "JULY": "JULHO", "AUGUST": "AGOSTO",
+            "SEPTEMBER": "SETEMBRO", "OCTOBER": "OUTUBRO", "NOVEMBER": "NOVEMBRO", "DECEMBER": "DEZEMBRO"
+        }
+        for eng, pt in meses_pt.items():
+            df_macro_calculado_geral['Mes_Nome'] = df_macro_calculado_geral['Mes_Nome'].str.replace(eng, pt)
+
+        df_macro_calculado_geral = df_macro_calculado_geral.sort_values(by=['Ano_Num', 'Mes_Num', 'Semana_Ano'])
+        
+        for (ano, mes_num, nome_mes), grupo_mes in df_macro_calculado_geral.groupby(['Ano_Num', 'Mes_Num', 'Mes_Nome']):
+            with st.expander(f"📅 ENTREGAS PACTUADAS EM: {nome_mes}", expanded=True):
+                
+                for num_semana, grupo_semana in grupo_mes.groupby('Semana_Ano'):
+                    data_min_sem = grupo_semana['Termino_Obra'].min() - timedelta(days=grupo_semana['Termino_Obra'].min().weekday())
+                    data_max_sem = data_min_sem + timedelta(days=4)
+                    
+                    st.markdown(f"#### 🗓️ Semana {num_semana} *(Janela de entrega: {data_min_sem.strftime('%d/%m')} a {data_max_sem.strftime('%d/%m/%Y')} )*")
+                    
+                    df_exibicao_semana = grupo_semana[[
+                        'Obra', 'EDT', 'Tipo_Escopo', 'Etapa_Macro', 'Subdivisao', 'Tarefa', 'M2_Total_Tarefa', 'Prazo_Final_Fabrica', 'Termino_Obra'
+                    ]].copy()
+                    
+                    df_exibicao_semana['Prazo_Final_Fabrica'] = df_exibicao_semana['Prazo_Final_Fabrica'].dt.strftime('%d/%m/%Y')
+                    df_exibicao_semana['Termino_Obra'] = df_exibicao_semana['Termino_Obra'].dt.strftime('%d/%m/%Y')
+                    
+                    df_exibicao_semana.columns = [
+                        'Obra', 'Código EDT', 'Escopo', 'Frente Macro', 'Subdivisão/Balancim', 'Tarefa Técnica', 'Metragem (m²)', 'Limite Saída Fábrica', 'Data Alvo na Obra'
+                    ]
+                    
+                    st.dataframe(df_exibicao_semana, hide_index=True, use_container_width=True)
+                    st.markdown("<br>", unsafe_allow_html=True)
     else:
-        st.info("Aguardando inserção de dados de planejamento macro.")
+        st.info("Aguardando inserção de dados no PCP para estruturar o cronograma visual da diretoria.")
 
 # ========================================================
 # ABA 4: INTELIGENCIA REVERSA E FRACIONAMENTO
@@ -334,7 +401,7 @@ with aba_cadastro_chapas:
             st.markdown("### 1. Vinculo com Cronograma de Obra")
             col_in1, col_in2, col_in3 = st.columns(3)
             with col_in1:
-                edt_selecionado = st.selectbox("Esta relacao tecnica pertence a qual frente/subdivisao?", opcoes_edt)
+                edt_selecionado = st.selectbox(f"Esta relacao tecnica pertence a qual frente/subdivisao da obra {obra_selecionada}?", opcoes_edt)
                 edt_puro = edt_selecionado.split(" ")[0]
                 cod_lote = st.text_input("Codigo de Identificacao Interna:")
             with col_in2:
@@ -342,15 +409,14 @@ with aba_cadastro_chapas:
                 recuo_dias_base = st.number_input("Dias de Pulmao Minimo de Seguranca antes do Despacho:", min_value=1, value=2)
             with col_in3:
                 limite_caixas_dia = st.number_input("Capacidade MÁXIMA real de montagem (caixas de nivel 1/dia):", min_value=1, value=10)
-                dificuldade_lote = st.selectbox("Dificuldade tecnica das pecas deste lote:", [1, 2, 3, 4, 5], index=0, 
-                                                help="Nivel 1 representa pecas faceis. Nivel 5 representa pecas complexas (reduz o ritmo diario para ate 1/4 da capacidade).")
+                dificuldade_lote = st.selectbox("Dificuldade tecnica das pecas deste lote:", [1, 2, 3, 4, 5], index=0)
 
             st.markdown("---")
             st.markdown("### 2. Dados Extraidos da Planilha Tecnica Bruta")
             col_dados1, col_dados2 = st.columns(2)
             with col_dados1:
                 txt_pavimentos = st.text_area("Pavimentos/Balancins afetados de acordo com o PDF:", value="Pav 39 ao 48")
-                especificacao = st.text_input("Material / Chapa do Lote:", value="ACM BRANCO - OAS")
+                especificacao = st.text_input("Material / Chapa do Lote:", value="ACM BRANCO")
             with col_dados2:
                 total_cx = st.number_input("Quantidade Total de Caixas Identificadas na Planilha:", min_value=1, value=94)
                 total_m2 = st.number_input("Metragem Quadrada Total (m2) da Planilha:", min_value=0.1, value=212.95)
@@ -424,7 +490,6 @@ with aba_nova_obra:
     st.header("Cadastrar Nova Obra e Frentes de Trabalho Macro")
     st.markdown("Insira os dados da subdivisao. O sistema mantem a Obra, Escopo e Datas fixas para voce cadastrar multiplos balancins em sequencia.")
 
-    # Inicializacao da memoria de sessao para evitar redigitacao
     if 'mem_obra' not in st.session_state: st.session_state.mem_obra = ""
     if 'mem_escopo' not in st.session_state: st.session_state.mem_escopo = "ACM"
     if 'mem_frente_macro' not in st.session_state: st.session_state.mem_frente_macro = ""
@@ -433,7 +498,6 @@ with aba_nova_obra:
     if 'mem_dt_fim' not in st.session_state: st.session_state.mem_dt_fim = (datetime.now() + timedelta(days=30)).date()
 
     with st.form("form_nova_obra_sequencial"):
-        # Dados que costumam se repetir (puxando da memoria)
         nome_nova_obra = st.text_input("Nome Geral da Obra (Ex: OBRA OAS ou EDIFICIO MUNIQUE):", value=st.session_state.mem_obra).upper()
         
         col_o1, col_o2 = st.columns(2)
@@ -443,7 +507,6 @@ with aba_nova_obra:
             nome_tarefa_nova = st.text_input("Nome Detalhado da Tarefa (Ex: Instalacao ACM vigas):", value=st.session_state.mem_tarefa)
         
         with col_o2:
-            # Dados especificos de cada subdivisao (estao sempre em branco para o próximo "pimba")
             edt_nova_obra = st.text_input("Codigo EDT da Frente/Subdivisao ÚNICO (Ex: 1.1.1.1 ou 2.1):", value="")
             subdivisao_nova = st.text_input("Subdivisao / Balancim Especifico (Ex: Balancim 04 / Fachada Sul):", value="").upper()
             m2_total_novo = st.number_input("Metragem Quadrada Pactuada p/ esta subdivisao (m2):", min_value=0.1, value=100.0, step=10.0)
@@ -460,7 +523,6 @@ with aba_nova_obra:
             if not nome_nova_obra.strip() or not edt_nova_obra.strip() or not nome_tarefa_nova.strip() or not subdivisao_nova.strip():
                 st.error("Por favor, preencha o Nome da Obra, o Código EDT, o Balancim e a Tarefa.")
             else:
-                # Salva na memoria para a proxima rodada
                 st.session_state.mem_obra = nome_nova_obra
                 st.session_state.mem_escopo = tipo_escopo_novo
                 st.session_state.mem_frente_macro = etapa_macro_nova
@@ -505,7 +567,6 @@ with aba_config_sistema:
     st.warning("Atencao: Clicar no botao abaixo removera permanentemente todas as obras, frentes e lotes salvos no momento.")
     if st.button("LIMPAR BANCO DE DADOS DE TESTE COMPLETAMENTE"):
         resetar_banco_dados_completo()
-        # Limpa memoria de sessao do cadastro
         st.session_state.mem_obra = ""
         st.session_state.mem_frente_macro = ""
         st.session_state.mem_tarefa = ""
