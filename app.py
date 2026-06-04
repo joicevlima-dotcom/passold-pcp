@@ -187,7 +187,7 @@ aba_tv, aba_geracao_op, aba_geral, aba_cadastro_chapas, aba_nova_obra, aba_confi
 # ABA 1: PAINEL DA TV 
 # ========================================================
 with aba_tv:
-    st.header("Quadro de Producao de Fabrica - Passold")
+    st.header("Quadro de Production de Fabrica - Passold")
     
     if obra_selecionada and not df_banco_micro.empty:
         df_chapas_obra = df_banco_micro[(df_banco_micro['Obra_Vinculada'] == obra_selecionada) & (df_banco_micro['Status_Item'] == "Liberado para Fabrica")].copy()
@@ -267,7 +267,7 @@ with aba_tv:
         st.info("Nenhum lote tecnico importado ou liberado para esta obra ainda.")
 
 # ========================================================
-# ABA 2: LIBERAR OP'S DA SEMANA (FORMATO DE DATA CORRIGIDO SEM HORAS)
+# ABA 2: LIBERAR OP'S DA SEMANA 
 # ========================================================
 with aba_geracao_op:
     st.header("Gerenciador de Ordens de Producao Semanais")
@@ -278,10 +278,7 @@ with aba_geracao_op:
         
         if not df_pendentes.empty:
             df_pendentes['Data_Producao_Programada'] = pd.to_datetime(df_pendentes['Data_Producao_Programada'])
-            
-            # Ordenando explicitamente por data para a fila fazer sentido cronológico
             df_pendentes = df_pendentes.sort_values(by='Data_Producao_Programada', ascending=True)
-            
             df_pendentes['Selecionar'] = False
             
             colunas_exibir = ['id', 'Cod_Lote', 'Tipo_Material', 'Qtd_Caixas', 'M2_Item', 'Fase_Produtiva', 'Data_Producao_Programada', 'Romaneio_Chapas', 'Selecionar']
@@ -294,8 +291,7 @@ with aba_geracao_op:
                 column_config={
                     "Data_Producao_Programada": st.column_config.DateColumn(
                         "Data Programada",
-                        format="DD/MM/YYYY",
-                        help="Data calculada retroativa para fabricação"
+                        format="DD/MM/YYYY"
                     )
                 },
                 hide_index=True,
@@ -446,7 +442,7 @@ with aba_geral:
         st.info("Aguardando inserção de dados no PCP.")
 
 # ========================================================
-# ABA 4: VINCULO DE DATAS E CADÊNCIA FLEXÍVEL
+# ABA 4: VINCULO DE DATAS COM COMPENSAÇÃO DE ARREDONDAMENTO
 # ========================================================
 with aba_cadastro_chapas:
     st.header("Inteligencia Temporal: Fatiamento de Lotes e Cadencia Realista")
@@ -497,43 +493,69 @@ with aba_cadastro_chapas:
                         dt_limite_conv = datetime.combine(data_necessidade_obra, datetime.min.time())
                         dia_fim_producao = dt_limite_conv - timedelta(days=int(recuo_dias_base))
                         
+                        # Cálculo base diário
                         caixas_por_dia_real = total_cx / float(dias_uteis_fabricacao)
                         m2_por_dia_real = total_m2 / float(dias_uteis_fabricacao)
                         
+                        # Arredondamento padrão para as fatias padrão
+                        cx_padrao = max(1, int(round(caixas_por_dia_real)))
+                        m2_padrao = float(round(m2_por_dia_real, 2))
+                        
                         novos_registros = []
                         dia_corrente = dia_fim_producao
-                        
                         dias_uteis_contados = 0
                         
-                        while dias_uteis_contados < int(dias_uteis_fabricacao):
+                        # Guardamos os dados temporariamente para ajustar a sobra no primeiro dia real de produção
+                        lista_dias_uteis = []
+                        
+                        # Loop para encontrar os dias úteis retroativos
+                        while len(lista_dias_uteis) < int(dias_uteis_fabricacao):
                             if dia_corrente.weekday() in [5, 6]:
                                 dia_corrente -= timedelta(days=1)
                                 continue
-                            
+                            lista_dias_uteis.append(dia_corrente)
+                            dia_corrente -= timedelta(days=1)
+                        
+                        # O primeiro dia cronológico de fabricação é o último elemento da lista invertida
+                        # Vamos montar os registros
+                        total_cx_acumulado = 0
+                        total_m2_acumulado = 0
+                        
+                        for idx_dia, dt_freg in enumerate(lista_dias_uteis):
                             dias_uteis_contados += 1
                             
+                            # Define a fase produtiva baseada no progresso cronológico
                             if dias_uteis_contados <= (int(dias_uteis_fabricacao) / 2):
                                 fase_atual = "MONTAGEM FINAL"
                             else:
                                 fase_atual = "CORTE E USINAGEM"
+                            
+                            # Se for o último dia do loop (que é o primeiro dia real que a fábrica inicia o lote)
+                            if idx_dia == len(lista_dias_uteis) - 1:
+                                cx_final = int(total_cx - total_cx_acumulado)
+                                m2_final = float(round(total_m2 - total_m2_acumulado, 2))
+                            else:
+                                cx_final = cx_padrao
+                                m2_final = m2_padrao
                                 
+                            total_cx_acumulado += cx_final
+                            total_m2_acumulado += m2_final
+                            
                             novos_registros.append({
                                 "Obra_Vinculada": obra_selecionada, 
                                 "EDT_Vinculado": edt_puro,
                                 "Cod_Lote": cod_lote,
                                 "Num_OP": None,
                                 "Tipo_Material": especificacao,
-                                "Qtd_Caixas": max(1, int(round(caixas_por_dia_real))), 
-                                "M2_Item": float(round(m2_por_dia_real, 2)),
-                                "Data_Producao_Programada": dia_corrente.strftime('%Y-%m-%d %H:%M:%S'), 
+                                "Qtd_Caixas": cx_final, 
+                                "M2_Item": m2_final,
+                                "Data_Producao_Programada": dt_freg.strftime('%Y-%m-%d %H:%M:%S'), 
                                 "Data_Limite_Obra": dt_limite_conv.strftime('%Y-%m-%d %H:%M:%S'), 
                                 "Romaneio_Chapas": txt_pavimentos, 
                                 "Status_Item": "Pendente",
                                 "Dificuldade": int(dificuldade_lote),
                                 "Fase_Produtiva": fase_atual
                             })
-                            
-                            dia_corrente -= timedelta(days=1)
                         
                         df_novos = pd.DataFrame(novos_registros)
                         salvar_lotes_micro(df_novos)
