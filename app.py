@@ -187,7 +187,7 @@ aba_tv, aba_geracao_op, aba_geral, aba_cadastro_chapas, aba_nova_obra, aba_confi
 # ABA 1: PAINEL DA TV 
 # ========================================================
 with aba_tv:
-    st.header("Quadro de Production de Fabrica - Passold")
+    st.header("Quadro de Produção de Fabrica - Passold")
     
     if obra_selecionada and not df_banco_micro.empty:
         df_chapas_obra = df_banco_micro[(df_banco_micro['Obra_Vinculada'] == obra_selecionada) & (df_banco_micro['Status_Item'] == "Liberado para Fabrica")].copy()
@@ -470,7 +470,7 @@ with aba_cadastro_chapas:
                 data_necessidade_obra = st.date_input("Data Limite de Despacho desta Remessa:", value=datetime(2026, 7, 10).date(), format="DD/MM/YYYY")
                 recuo_dias_base = st.number_input("Dias de Pulmao (Seguranca antes do caminhao sair):", min_value=0, value=2)
             with col_in3:
-                dias_uteis_fabricacao = st.number_input("Dias Uteis de Production Estimados p/ esta quantidade:", min_value=1, value=20)
+                dias_uteis_fabricacao = st.number_input("Dias Uteis de Produção Estimados p/ esta quantidade:", min_value=1, value=20)
                 dificuldade_lote = st.selectbox("Nivel de Complexidade Tecnica:", [1, 2, 3, 4, 5], index=3)
 
             st.markdown("---")
