@@ -319,83 +319,150 @@ with conteudo_sistema:
 # Mapeamento do conteúdo de cada aba de acordo com o que foi gerado
 for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     
-    # ----------------------------------------------------
-    # ABA: PAINEL DA TV
+# ----------------------------------------------------
+    # ABA: PAINEL DA TV (MURAL OPERACIONAL DA PRODUÇÃO) - CORRIGIDO
     # ----------------------------------------------------
     if nome_aba == "PAINEL DA TV (Chão de Fábrica)":
+        import calendar as py_calendar
+        
         with aba_objeto:
-            st.header("Quadro de Production de Fábrica - Passold")
+            st.header("📆 Mural de Metas da Produção - Passold")
+            st.markdown("Navegue pelos meses para ver os dias programados. Clique em qualquer dia com OPs para ver a lista e dar baixa!")
+
+            # Modificação 1: Permitir ver Todas as Obras ou uma específica no painel da TV
+            obras_producao = ["TODAS AS OBRAS"] + list(df_banco_micro['Obra_Vinculada'].dropna().unique()) if not df_banco_micro.empty else ["TODAS AS OBRAS"]
             
-            if obra_selecionada and not df_banco_micro.empty:
-                df_chapas_obra = df_banco_micro[(df_banco_micro['Obra_Vinculada'] == obra_selecionada) & (df_banco_micro['Status_Item'] == "Liberado para Fábrica")].copy()
+            # Aqui criamos o seletor específico para a TV se você quiser que eles filtrem por lá também, 
+            # ou usamos a variável global que você já tem no topo do app. Vamos usar uma local para dar autonomia à TV:
+            obra_tv = st.selectbox("Filtrar Painel da TV por Obra:", obras_producao, key="sb_obra_tv")
+
+            if not df_banco_micro.empty:
+                # 1. Filtrar pelo status de liberado
+                df_chapas_base = df_banco_micro[df_banco_micro['Status_Item'] == "Liberado para Fábrica"].copy()
+                
+                # Aplicar filtro de obra selecionada na TV
+                if obra_tv == "TODAS AS OBRAS":
+                    df_chapas_obra = df_chapas_base.copy()
+                else:
+                    df_chapas_obra = df_chapas_base[df_chapas_base['Obra_Vinculada'] == obra_tv].copy()
                 
                 if not df_chapas_obra.empty:
-                    df_chapas_obra['Data_Producao_Programada'] = pd.to_datetime(df_chapas_obra['Data_Producao_Programada'])
-                    df_chapas_obra['Semana_Num'] = df_chapas_obra['Data_Producao_Programada'].dt.isocalendar().week
-                    df_chapas_obra['Ano'] = df_chapas_obra['Data_Producao_Programada'].dt.isocalendar().year
-                    df_chapas_obra['Semana_Label'] = "Semana " + df_chapas_obra['Semana_Num'].astype(str)
+                    # Garantir formato de data correto
+                    df_chapas_obra['Data_Producao_Programada'] = pd.to_datetime(df_chapas_obra['Data_Producao_Programada']).dt.date
                     
-                    st.markdown("### 🗓️ Calendário de Liberações para a Produção")
+                    # Controle do Mês e Ano de exibição
+                    if "prog_mes" not in st.session_state:
+                        st.session_state.prog_mes = HOJE_PROJETO.month
+                    if "prog_ano" not in st.session_state:
+                        st.session_state.prog_ano = HOJE_PROJETO.year
                     
-                    df_semanas = df_chapas_obra.groupby(['Ano', 'Semana_Num', 'Semana_Label']).agg({
-                        'Qtd_Caixas': 'sum',
-                        'M2_Item': 'sum',
-                        'Data_Producao_Programada': ['min', 'max']
-                    }).reset_index()
-                    df_semanas.columns = ['Ano', 'Semana_Num', 'Semana_Label', 'Total_Caixas', 'Total_M2', 'Data_Min', 'Data_Max']
-                    df_semanas = df_semanas.sort_values(by=['Ano', 'Semana_Num'])
-                    
-                    cols_carrossel = st.columns(len(df_semanas) if len(df_semanas) <= 6 else 6)
-                    for idx, row_sem in enumerate(df_semanas.itertuples()):
-                        col_alvo = cols_carrossel[idx % 6]
-                        with col_alvo:
-                            intervalo_datas = f"{row_sem.Data_Min.strftime('%d/%m')} até {row_sem.Data_Max.strftime('%d/%m')}"
-                            st.markdown(f"""
-                            <div class="semana-card">
-                                <strong style="color: #1E3A8A; font-size: 16px;">{row_sem.Semana_Label}</strong><br>
-                                <small style="color: #6B7280;">{intervalo_datas}</small><br>
-                                <span style="font-weight: bold; color: #2563EB;">{int(row_sem.Total_Caixas)} cx</span> | 
-                                <span style="font-weight: bold; color: #10B981;">{row_sem.Total_M2:,.1f} m²</span>
-                            </div>
-                            """, unsafe_allow_html=True)
+                    # Botões de Navegação de Meses
+                    col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
+                    with col_nav1:
+                        if st.button("⬅️ Mês Anterior", use_container_width=True, key="btn_mes_ant"):
+                            st.session_state.prog_mes -= 1
+                            if st.session_state.prog_mes == 0:
+                                st.session_state.prog_mes = 12
+                                st.session_state.prog_ano -= 1
+                            st.rerun()
+                            
+                    with col_nav2:
+                        meses_nomes = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+                        st.markdown(f"<h3 style='text-align: center; color: #1E3A8A; margin:0;'>📅 {meses_nomes[st.session_state.prog_mes]} / {st.session_state.prog_ano}</h3>", unsafe_allow_html=True)
+                        
+                    with col_nav3:
+                        if st.button("Próximo Mês ➡️", use_container_width=True, key="btn_mes_prox"):
+                            st.session_state.prog_mes += 1
+                            if st.session_state.prog_mes == 13:
+                                st.session_state.prog_mes = 1
+                                st.session_state.prog_ano += 1
+                            st.rerun()
                     
                     st.markdown("---")
-                    lista_semanas_filtro = ["VER TODAS AS SEMANAS"] + list(df_semanas['Semana_Label'].unique())
-                    semana_foco = st.selectbox("🎯 Filtrar Lista de Corte pelo Calendário Semanal:", lista_semanas_filtro)
                     
-                    if semana_foco != "VER TODAS AS SEMANAS":
-                        df_tv_filtrado = df_chapas_obra[df_chapas_obra['Semana_Label'] == semana_foco]
+                    # 2. CONSTRUÇÃO DA MATRIZ DO CALENDÁRIO MENSAL
+                    cal = py_calendar.Calendar(firstweekday=6)
+                    semanas_mes = cal.monthdatescalendar(st.session_state.prog_ano, st.session_state.prog_mes)
+                    
+                    dias_da_semana_nomes = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
+                    colunas_headers = st.columns(7)
+                    for idx, nome_d in enumerate(dias_da_semana_nomes):
+                        colunas_headers[idx].markdown(f"<p style='text-align:center; font-weight:bold; color:#475569;'>{nome_d}</p>", unsafe_allow_html=True)
+                    
+                    for semana in semanas_mes:
+                        colunas_dias = st.columns(7)
+                        for idx_dia, data_dia in enumerate(semana):
+                            with colunas_dias[idx_dia]:
+                                do_mes_corrente = (data_dia.month == st.session_state.prog_mes)
+                                
+                                if do_mes_corrente:
+                                    df_dia_ops = df_chapas_obra[df_chapas_obra['Data_Producao_Programada'] == data_dia]
+                                    total_ops_dia = len(df_dia_ops)
+                                    total_cx_dia = int(df_dia_ops['Qtd_Caixas'].sum())
+                                    
+                                    eh_hoje = (data_dia == HOJE_PROJETO.date())
+                                    bg_cor = "#EFF6FF" if eh_hoje else "#F8FAFC"
+                                    borda_cor = "#3B82F6" if eh_hoje else "#E2E8F0"
+                                    
+                                    if total_ops_dia > 0:
+                                        if st.button(f"{data_dia.day}\n({total_ops_dia} OPs)", key=f"btn_dia_{data_dia}", use_container_width=True):
+                                            st.session_state.dia_clicado_tv = data_dia
+                                    else:
+                                        texto_card = f"<span style='color:#94A3B8;'>{data_dia.day}</span><br><span style='color:#94A3B8; font-size:11px;'>Vazio</span><br><br>"
+                                        st.markdown(f"""
+                                            <div style="background-color: {bg_cor}; border: 1px solid {borda_cor}; padding: 5px; border-radius: 6px; text-align: center; height: 75px;">
+                                                {texto_card}
+                                            </div>
+                                        """, unsafe_allow_html=True)
+                                else:
+                                    st.markdown('<div style="height: 75px;"></div>', unsafe_allow_html=True)
+                                    
+                    st.markdown("---")
+                    
+                    # 3. EXIBIÇÃO DETALHADA E FLUXO DE BAIXA
+                    if "dia_clicado_tv" not in st.session_state:
+                        st.session_state.dia_clicado_tv = HOJE_PROJETO.date()
+                        
+                    st.subheader(f"🔍 Ordens de Trabalho para o dia: {st.session_state.dia_clicado_tv.strftime('%d/%m/%Y')}")
+                    
+                    df_detalhe_dia = df_chapas_obra[df_chapas_obra['Data_Producao_Programada'] == st.session_state.dia_clicado_tv]
+                    
+                    if df_detalhe_dia.empty:
+                        st.info("💡 Toque em um dia marcado com as OPs no calendário acima para gerenciar a produção.")
                     else:
-                        df_tv_filtrado = df_chapas_obra.copy()
-                        
-                    df_tv_filtrado = df_tv_filtrado.sort_values(by="Data_Producao_Programada", ascending=True)
-                    
-                    if not df_tv_filtrado.empty:
-                        total_cx_periodo = df_tv_filtrado['Qtd_Caixas'].sum()
-                        total_m2_periodo = df_tv_filtrado['M2_Item'].sum()
-                        
-                        c_meta1, c_meta2 = st.columns(2)
-                        c_meta1.metric("VOLUME TOTAL DE CAIXAS EM EXECUÇÃO", f"{int(total_cx_periodo)} cx")
-                        c_meta2.metric("METRAGEM TOTAL EM PRODUÇÃO", f"{total_m2_periodo:,.2f} m²")
-                        
-                        st.markdown(f"#### 📋 Fila de Execução na Fábrica ({semana_foco}):")
-                        for idx, row in df_tv_filtrado.iterrows():
-                            with st.container():
-                                col_l1, col_l2, col_l3 = st.columns([2, 1, 1])
-                                op_txt = row['Num_OP'] if row['Num_OP'] else "Sem OP"
-                                fase = row['Fase_Produtiva'] if 'Fase_Produtiva' in row and row['Fase_Produtiva'] else "Corte/Montagem"
-                                cor_fase = "🔴" if "CORTE" in fase.upper() else "🔵"
+                        for idx, row in df_detalhe_dia.iterrows():
+                            id_item = row['id']
+                            op_txt = row['Num_OP'] if row['Num_OP'] else "S/ OP"
+                            nome_da_obra = row['Obra_Vinculada'] # Puxando a informação real do banco
+                            
+                            with st.container(border=True):
+                                col_dados, col_acao = st.columns([4, 1])
+                                with col_dados:
+                                    # Modificação 2: Inclusão do nome do projeto/obra bem destacado em laranjinha (estilo crachá)
+                                    st.markdown(f"""
+                                        <span style="background-color: #FFEDD5; color: #EA580C; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 13px; margin-right: 8px;">🏗️ OBRA: {nome_da_obra}</span>
+                                        <span style="background-color: #E0E7FF; color: #4338CA; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 13px;">Lote Técnico: {row['Cod_Lote']}</span>
+                                    """, unsafe_allow_html=True)
+                                    
+                                    st.markdown(f"#### 📦 OP: **{op_txt}**")
+                                    st.markdown(f"**Material:** {row['Tipo_Material']} | **Meta do Dia:** `{int(row['Qtd_Caixas'])} caixas` ({row['M2_Item']:.2f} m²)")
+                                    st.caption(f"Pavimentos atendidos: {row['Romaneio_Chapas']} | Prazo Final de Engenharia: {pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')}")
                                 
-                                col_l1.markdown(f"**OP:** `{op_txt}` | **Lote:** `{row['Cod_Lote']}` | **Material:** {row['Tipo_Material']}")
-                                col_l2.markdown(f"**Meta do Dia:** {int(row['Qtd_Caixas'])} cx | {row['M2_Item']} m²")
-                                col_l3.markdown(f"{cor_fase} **Fase Alvo:** `{fase}`")
-                                
-                                st.caption(f"Pavimentos: {row['Romaneio_Chapas']} | Dia Programado: {row['Data_Producao_Programada'].strftime('%d/%m/%Y')} | Limite Obra: {row['Data_Limite_Obra'].strftime('%d/%m/%Y')}")
-                                st.markdown("---")
+                                with col_acao:
+                                    st.write("") 
+                                    if st.button("✅ PRONTO", key=f"baixa_mural_{id_item}", type="primary", use_container_width=True):
+                                        conn = conectar_banco()
+                                        cursor = conn.cursor()
+                                        cursor.execute("UPDATE itens_detalhado SET Status_Item = 'Concluído' WHERE id = ?", (id_item,))
+                                        conn.commit()
+                                        conn.close()
+                                        st.toast(f"Boa! Lote {row['Cod_Lote']} da obra {nome_da_obra} concluído! 🚀")
+                                        time.sleep(0.3)
+                                        st.rerun()
                 else:
-                    st.info(f"Nenhuma Ordem de Produção (OP) liberada para a {obra_selecionada} no momento.")
+                    st.success(f"🙌 Sem ordens liberadas para os filtros selecionados!")
             else:
-                st.info("Nenhum lote técnico importado ou liberado para esta obra ainda.")
+                st.info("Nenhum lote técnico importado ou liberado no sistema ainda.")
 
     # ----------------------------------------------------
     # ABA: LIBERAR OPS DA SEMANA
@@ -450,47 +517,128 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             else:
                 st.info("Nenhum lote pendente encontrado.")
 
+# ----------------------------------------------------
+    # ABA: VISÃO MACRO (DIRETORIA) - COM CORTE SEMANAL
     # ----------------------------------------------------
-    # ABA: VISÃO MACRO DIRETORIA
-    # ----------------------------------------------------
-    elif nome_aba == "Visão Macro (Diretoria)":
+    if nome_aba == "Visão Macro (Diretoria)":
         with aba_objeto:
-            st.header("Dashboard Executivo e Cronograma Macro")
-            df_macro_completo = carregar_macro()
+            st.header("📊 Dashboard Executivo e Cronograma Macro")
             
-            if not df_macro_completo.empty:
-                df_macro_calculado_geral = aplicar_planejamento_reverso(df_macro_completo)
+            
+            # Filtro de Obras para a Diretoria
+            obras_disponiveis = ["TODAS AS OBRAS"] + list(df_banco_micro['Obra_Vinculada'].dropna().unique()) if not df_banco_micro.empty else ["TODAS AS OBRAS"]
+            obra_exec = st.selectbox("Filtrar Painel Executivo por Obra:", obras_disponiveis, key="sb_obra_exec")
+            
+            # Aplicar filtro de obra no DataFrame da diretoria
+            if obra_exec == "TODAS AS OBRAS":
+                df_diretoria = df_banco_micro.copy()
+            else:
+                df_diretoria = df_banco_micro[df_banco_micro['Obra_Vinculada'] == obra_exec].copy()
                 
-                lista_filtro_diretoria = ["TODAS AS OBRAS"] + sorted(list(df_macro_calculado_geral['Obra'].unique()))
-                filtro_dir = st.selectbox("Filtrar Painel Executivo por Obra:", lista_filtro_diretoria)
+            if not df_diretoria.empty:
+                # KPIs Superiores
+                kpi_m2 = df_diretoria['M2_Item'].sum()
+                kpi_frentes = df_diretoria['EDT_Vinculado'].nunique()
                 
-                if filtro_dir != "TODAS AS OBRAS":
-                    df_macro_calculado_geral = df_macro_calculado_geral[df_macro_calculado_geral['Obra'] == filtro_dir]
+                df_diretoria['Data_Limite_Obra'] = pd.to_datetime(df_diretoria['Data_Limite_Obra'])
+                data_max = df_diretoria['Data_Limite_Obra'].max().strftime('%d/%m/%Y') if not df_diretoria['Data_Limite_Obra'].isna().all() else "N/A"
+                
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    st.metric("Metragem Total no Filtro", f"{kpi_m2:,.2f} m²")
+                with c2:
+                    st.metric("Subdivisões Exibidas", f"{kpi_frentes} frentes")
+                with c3:
+                    st.metric("Prazo de Entrega Mais Distante", data_max)
                     
-                m_col1, m_col2, m_col3 = st.columns(3)
-                m_col1.metric("Metragem Total no Filtro", f"{df_macro_calculado_geral['M2_Total_Tarefa'].sum():,.2f} m²")
-                m_col2.metric("Subdivisões Exibidas", f"{len(df_macro_calculado_geral)} frentes")
-                m_col3.metric("Prazo de Entrega Mais Distante", df_macro_calculado_geral['Termino_Obra'].max().strftime('%d/%m/%Y'))
-                
                 st.markdown("---")
-                st.markdown("### 📊 Linha do Tempo de Execução (Gantt)")
-                df_macro_calculado_geral['Identificador_Visual'] = (
-                    df_macro_calculado_geral['Obra'] + " - " + 
-                    df_macro_calculado_geral['Tarefa'] + " (" + 
-                    df_macro_calculado_geral['Subdivisao'].fillna('Geral') + ")"
-                )
                 
-                fig_gantt = px.timeline(
-                    df_macro_calculado_geral, 
-                    x_start="Inicio_Previsto", 
-                    x_end="Termino_Obra", 
-                    y="Identificador_Visual", 
-                    color="Obra" if filtro_dir == "TODAS AS OBRAS" else "Status",
-                    labels={"Identificador_Visual": "Frente de Trabalho / Balancim"}
-                )
-                fig_gantt.update_yaxes(autorange="reversed")
-                fig_gantt.update_xaxes(dtick="M1", hoverformat="%d/%m/%Y")
-                st.plotly_chart(fig_gantt, use_container_width=True)
+# ----------------------------------------------------
+                # NOVA SEÇÃO: DETALHAMENTO DE CARGA SEMANAL (PEDIDO DIRETORIA - MULTI-OBRAS)
+                # ----------------------------------------------------
+                st.subheader("📈 Planejamento de Carga Semanal da Produção")
+                st.markdown("Veja abaixo a distribuição exata do volume que está liberado para a fábrica por semanas e obras específicas:")
+                
+                # Filtrar apenas o que está efetivamente liberado ou em andamento na produção
+                df_liberados = df_diretoria[df_diretoria['Status_Item'].isin(["Liberado para Fábrica", "Produção", "Concluído"])].copy()
+                
+                if not df_liberados.empty:
+                    # Garantir tratamento de datas corretas
+                    df_liberados['Data_Producao_Programada'] = pd.to_datetime(df_liberados['Data_Producao_Programada'])
+                    
+                    # Extrair o Ano, Número da Semana ISO
+                    df_liberados['Ano_Semana'] = df_liberados['Data_Producao_Programada'].dt.isocalendar().year
+                    df_liberados['Num_Semana'] = df_liberados['Data_Producao_Programada'].dt.isocalendar().week
+                    
+                    # Função auxiliar para gerar o texto descritivo da semana "DD/MM a DD/MM"
+                    def formatar_periodo_semana(row):
+                        try:
+                            segunda = pd.to_datetime(f"{int(row['Ano_Semana'])}-W{int(row['Num_Semana'])}-1", format="%G-W%V-%u")
+                            domingo = segunda + timedelta(days=6)
+                            return f"Semana {int(row['Num_Semana']):02d} ({segunda.strftime('%d/%m')} até {domingo.strftime('%d/%m/%Y')})"
+                        except:
+                            return f"Semana {row['Num_Semana']}"
+                    
+                    # Criar a coluna de período formatada
+                    df_liberados['Período Semanal'] = df_liberados.apply(formatar_periodo_semana, axis=1)
+                    
+                    # AGRUPAMENTO ATUALIZADO: Incluindo 'Obra_Vinculada' para separar os projetos na mesma semana
+                    df_semanal_resumo = df_liberados.groupby(['Ano_Semana', 'Num_Semana', 'Período Semanal', 'Obra_Vinculada']).agg({
+                        'id': 'count',
+                        'Qtd_Caixas': 'sum',
+                        'M2_Item': 'sum',
+                        'Status_Item': lambda x: f"{((x == 'Concluído').sum() / len(x)) * 100:.0f}% concluído"
+                    }).reset_index()
+                    
+                    # Organizar colunas para exibição limpa
+                    df_semanal_resumo = df_semanal_resumo.sort_values(by=['Ano_Semana', 'Num_Semana', 'Obra_Vinculada'])
+                    df_semanal_resumo.columns = ['Ano', 'Semana Nº', 'Período Comercial', 'Obra', 'Qtd Lotes técnicos', 'Total Caixas (cx)', 'Volume Total (m²)', 'Status de Evolução']
+                    
+                    # Exibir tabela dinâmica e estilizada para os diretores (agora com a coluna 'Obra')
+                    st.dataframe(
+                        df_semanal_resumo[['Período Comercial', 'Obra', 'Qtd Lotes técnicos', 'Total Caixas (cx)', 'Volume Total (m²)', 'Status de Evolução']], 
+                        hide_index=True, 
+                        use_container_width=True
+                    )
+                else:
+                    st.warning("⚠️ Nenhuma Ordem de Production foi liberada para a fábrica ainda nesta obra, portanto não há carga semanal cadastrada.")
+                
+                # ----------------------------------------------------
+                # SEÇÃO: CRONOGRAMA EM GRÁFICO DE GANTT (EXISTENTE)
+                # ----------------------------------------------------
+                st.subheader("📊 Linha do Tempo de Execução (Gantt)")
+                
+                # Agrupar para o gráfico Gantt por Frente de Trabalho
+                df_gantt = df_diretoria.groupby(['Obra_Vinculada', 'EDT_Vinculado', 'Romaneio_Chapas']).agg({
+                    'Data_Producao_Programada': 'min',
+                    'Data_Limite_Obra': 'max',
+                    'M2_Item': 'sum'
+                }).reset_index()
+                
+                df_gantt['Data_Producao_Programada'] = pd.to_datetime(df_gantt['Data_Producao_Programada'])
+                df_gantt['Data_Limite_Obra'] = pd.to_datetime(df_gantt['Data_Limite_Obra'])
+                
+                # Evitar quebras se houver datas vazias
+                df_gantt = df_gantt.dropna(subset=['Data_Producao_Programada', 'Data_Limite_Obra'])
+                
+                if not df_gantt.empty:
+                    fig = px.timeline(
+                        df_gantt, 
+                        x_start="Data_Producao_Programada", 
+                        x_end="Data_Limite_Obra", 
+                        y="EDT_Vinculado",
+                        color="Obra_Vinculada",
+                        hover_data=["Romaneio_Chapas", "M2_Item"],
+                        labels={"EDT_Vinculado": "Frente de Trabalho / Balancim"},
+                        title="Período Estimado Ocupação de Fábrica vs Entrega"
+                    )
+                    fig.update_yaxes(autorange="reversed")
+                    fig.update_layout(height=400, margin=dict(l=20, r=20, t=40, b=20))
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Insira datas válidas de fabricação e limite de obra para plotar a linha do tempo.")
+            else:
+                st.info("Nenhum dado encontrado para gerar a visão macro.")
 
 # ----------------------------------------------------
     # ABA: VINCULAR DATAS MATERIAIS (AGORA EDITÁVEL E COM EXCLUSÃO)
@@ -722,13 +870,53 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ----------------------------------------------------
     elif nome_aba == "Painel Técnico da Engenharia":
         with aba_objeto:
-            st.header("📐 Painel Técnico de Liberação - Engenharia")
+            st.header("Painel Técnico de Liberação - Engenharia")
             
-            if not obra_selecionada:
-                st.info("Nenhuma obra cadastrada para monitoramento técnico.")
-            else:
-                st.subheader(f"Esteira de Curto Prazo (Próximas 4 Semanas) - {obra_selecionada}")
-                st.caption("Frentes macro agendadas. Forneça o feedback técnico mudando os status abaixo:")
+# --- NOVO: ESPELHO DE CARGA DA FÁBRICA COM NOME DA OBRA ---
+            with st.expander("🔍 Verificar Capacidade / Carga Ocupada da Fábrica Semanal", expanded=False):
+                st.markdown("#### 📈 Carga Total Já Liberada para Produção por Semana:")
+                st.caption("Consulte esta tabela antes de prometer novos prazos para garantir que a fábrica não seja sobrecarregada.")
+                
+                if not df_banco_micro.empty:
+                    # Filtrar o que está efetivamente com a produção (liberado ou fabricando)
+                    df_eng_ver = df_banco_micro[df_banco_micro['Status_Item'] == "Liberado para Fábrica"].copy()
+                    
+                    if not df_eng_ver.empty:
+                        df_eng_ver['Data_Producao_Programada'] = pd.to_datetime(df_eng_ver['Data_Producao_Programada'])
+                        df_eng_ver['Ano_Semana'] = df_eng_ver['Data_Producao_Programada'].dt.isocalendar().year
+                        df_eng_ver['Num_Semana'] = df_eng_ver['Data_Producao_Programada'].dt.isocalendar().week
+                        
+                        # Montar o período comercial da semana
+                        def texto_semana_eng(row):
+                            try:
+                                seg = pd.to_datetime(f"{int(row['Ano_Semana'])}-W{int(row['Num_Semana'])}-1", format="%G-W%V-%u")
+                                dom = seg + timedelta(days=6)
+                                return f"Semana {int(row['Num_Semana']):02d} ({seg.strftime('%d/%m')} até {dom.strftime('%d/%m')})"
+                            except:
+                                return f"Semana {row['Num_Semana']}"
+                                
+                        df_eng_ver['Período Semanal'] = df_eng_ver.apply(texto_semana_eng, axis=1)
+                        
+                        # ADICIONADO 'Obra_Vinculada' no agrupamento para separar os volumes por projeto
+                        resumo_eng = df_eng_ver.groupby(['Ano_Semana', 'Num_Semana', 'Período Semanal', 'Obra_Vinculada']).agg({
+                            'id': 'count',
+                            'Qtd_Caixas': 'sum',
+                            'M2_Item': 'sum'
+                        }).reset_index()
+                        
+                        resumo_eng = resumo_eng.sort_values(by=['Ano_Semana', 'Num_Semana', 'Obra_Vinculada'])
+                        resumo_eng.columns = ['Ano', 'Semana', 'Período Semanal', 'Obra', 'Qtd Lotes na Fábrica', 'Total Caixas (cx)', 'Metragem Alocada (m²)']
+                        
+                        # Exibindo a tabela com a nova coluna 'Obra' explícita
+                        st.dataframe(
+                            resumo_eng[['Período Semanal', 'Obra', 'Total Caixas (cx)', 'Metragem Alocada (m²)']], 
+                            hide_index=True, 
+                            use_container_width=True
+                        )
+                    else:
+                        st.success("🌴 A fábrica está sem OPs pendentes no momento. Capacidade 100% livre!")
+                else:
+                    st.info("Sem dados de OPs disponíveis para consulta de carga.")
                 
                 # Definimos a janela de curto prazo (Hoje do projeto até 4 semanas para a frente)
                 DATA_LIMITE_ESTEIRA = HOJE_PROJETO + timedelta(weeks=4)
