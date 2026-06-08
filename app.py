@@ -100,7 +100,8 @@ def inicializar_banco_de_dados():
             Inicio_Previsto TEXT,
             Termino_Obra TEXT,
             Status TEXT,
-            Status_Engenharia TEXT DEFAULT '🔴 Aguardando Medição In Loco'
+            Status_Engenharia TEXT DEFAULT '🔴 Aguardando Medição In Loco',
+            Prazo_Engenharia TEXT
         )
     """)
 
@@ -155,6 +156,12 @@ def inicializar_banco_de_dados():
     except sqlite3.OperationalError:
         pass
 
+    # MIGRAÇÃO: adicionar Prazo_Engenharia em bancos já existentes
+    try:
+        cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN Prazo_Engenharia TEXT")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -174,6 +181,10 @@ def carregar_macro():
             df['Subdivisao'] = "Geral"
         if 'Status_Engenharia' not in df.columns:
             df['Status_Engenharia'] = "🔴 Aguardando Medição In Loco"
+        # Garantir coluna Prazo_Engenharia mesmo em DataFrames de bancos antigos
+        if 'Prazo_Engenharia' not in df.columns:
+            df['Prazo_Engenharia'] = None
+        df['Prazo_Engenharia'] = pd.to_datetime(df['Prazo_Engenharia'], errors='coerce')
     return df
 
 def carregar_micro():
@@ -717,6 +728,18 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
                             df_novos = pd.DataFrame(novos_registros)
                             salvar_lotes_micro(df_novos)
+
+                            # PONTO 3: Persistir o prazo calculado na frente correspondente
+                            # prazo_engenharia já foi calculado acima na pré-visualização do formulário
+                            conn_prazo = conectar_banco()
+                            cursor_prazo = conn_prazo.cursor()
+                            cursor_prazo.execute(
+                                "UPDATE cronograma_macro SET Prazo_Engenharia = ? WHERE EDT = ?",
+                                (prazo_engenharia.strftime('%Y-%m-%d'), edt_puro)
+                            )
+                            conn_prazo.commit()
+                            conn_prazo.close()
+
                             st.session_state.lote_salvo_sucesso = True
                             st.rerun()
 
@@ -852,58 +875,15 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             st.caption(f"Referência de data do sistema: {HOJE_PROJETO.strftime('%d/%m/%Y')} | Obra selecionada: **{obra_selecionada or 'Nenhuma'}**")
 
             # ================================================================
-            # FUNÇÃO PURA: Cálculo do prazo da engenharia
-            # Isolada aqui para fácil reutilização futura e persistência em BD
-            # ================================================================
-            def calcular_prazo_engenharia(data_limite_obra, dias_producao, dias_pulmao, margem_eng=3):
-                """
-                Calcula a data limite para a Engenharia entregar os desenhos.
-                Parâmetros:
-                    data_limite_obra : datetime — data de entrega final na obra
-                    dias_producao    : int      — dias úteis estimados de fabricação
-                    dias_pulmao      : int      — dias de segurança/buffer
-                    margem_eng       : int      — margem técnica fixa da engenharia (padrão: 3)
-                Retorna: datetime
-                """
-                return data_limite_obra - timedelta(days=int(dias_pulmao) + int(dias_producao) + int(margem_eng))
-
-            # ================================================================
-            # FUNÇÃO AUXILIAR: Calcular prazo a partir dos lotes micro da frente
-            # Busca o lote mais restritivo (menor data de produção programada)
-            # vinculado à frente (EDT), extrai dias de produção e pulmão reais
-            # ================================================================
-            def obter_prazo_engenharia_da_frente(edt, df_micro):
-                """
-                Tenta derivar o prazo da engenharia a partir dos lotes já fatiados
-                para a frente. Se não houver lotes, retorna None.
-                """
-                if df_micro.empty:
-                    return None
-                lotes_frente = df_micro[df_micro['EDT_Vinculado'] == edt].copy()
-                if lotes_frente.empty:
-                    return None
-
-                lotes_frente['Data_Producao_Programada'] = pd.to_datetime(lotes_frente['Data_Producao_Programada'])
-                lotes_frente['Data_Limite_Obra'] = pd.to_datetime(lotes_frente['Data_Limite_Obra'])
-
-                data_limite = lotes_frente['Data_Limite_Obra'].max()
-                data_inicio_prod = lotes_frente['Data_Producao_Programada'].min()
-
-                # Dias de produção = diferença em dias úteis entre início e limite
-                dias_producao_est = max(1, (data_limite - data_inicio_prod).days)
-                dias_pulmao_est = 2  # padrão do sistema
-
-                return calcular_prazo_engenharia(data_limite, dias_producao_est, dias_pulmao_est)
-
-            # ================================================================
             # FUNÇÃO AUXILIAR: Ícone e texto de situação com base nos dias restantes
+            # Fonte da verdade: cronograma_macro.Prazo_Engenharia (gravado pelo PCP)
             # ================================================================
             def classificar_situacao(dias_restantes, status_tecnico):
-                STATUS_LIBERADO = "🟢 Desenhos Liberados para o PCP"
+                STATUS_LIBERADO = "🟢 Projetos Liberados para o PCP"
                 if status_tecnico == STATUS_LIBERADO:
                     return "concluido", "✅ Liberado para o PCP", None
                 if dias_restantes is None:
-                    return "sem_prazo", "⚪ Sem prazo definido", None
+                    return "sem_prazo", "⚪ Aguardando programação pelo PCP", None
                 if dias_restantes < 0:
                     return "vencido", f"🔴 VENCIDO há {abs(int(dias_restantes))} dias", abs(int(dias_restantes))
                 if dias_restantes <= 7:
@@ -915,21 +895,24 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             # ================================================================
             ESTADOS_TECNICOS = [
                 "🔴 Aguardando Medição In Loco",
-                "🟡 Medição Realizada — Em Desenho",
-                "🔵 Desenho em Revisão Interna",
-                "🟢 Desenhos Liberados para o PCP",
+                "🟡 Medição Realizada — Em Projetos",
+                "🔵 Projetos em Revisão Interna",
+                "🟢 Projetos Liberados para o PCP",
                 "⚪ Arquivado / Concluído",
             ]
 
             # ================================================================
             # PRÉ-PROCESSAMENTO: montar lista enriquecida de frentes
+            # Prazo lido diretamente de cronograma_macro.Prazo_Engenharia
+            # Sem recálculo — única fonte da verdade é o que o PCP gravou
             # ================================================================
             frentes_processadas = []
 
             if not df_macro_filtrado.empty:
                 for _, row in df_macro_filtrado.iterrows():
-                    prazo_eng = obter_prazo_engenharia_da_frente(row['EDT'], df_banco_micro)
-                    dias_rest = (prazo_eng - HOJE_PROJETO).days if prazo_eng else None
+                    # Leitura direta da coluna persistida pelo PCP no fatiamento
+                    prazo_eng = row['Prazo_Engenharia'] if pd.notna(row.get('Prazo_Engenharia')) else None
+                    dias_rest = (prazo_eng - HOJE_PROJETO).days if prazo_eng is not None else None
                     situacao_key, situacao_txt, dias_num = classificar_situacao(
                         dias_rest,
                         row.get('Status_Engenharia', ESTADOS_TECNICOS[0])
@@ -966,7 +949,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 if not frentes_criticas:
                     st.success("✅ Nenhuma frente crítica no momento. Tudo dentro do prazo!")
                 else:
-                    st.caption("Frentes com prazo vencido ou com menos de 7 dias para entrega dos desenhos ao PCP.")
+                    st.caption("Frentes com prazo vencido ou com menos de 7 dias para entrega dos projetos ao PCP.")
                     st.markdown("---")
 
                     for frente in sorted(frentes_criticas, key=lambda x: (x['dias_restantes'] or 0)):
@@ -1071,7 +1054,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 with col_datas:
                                     st.caption("Início instalação")
                                     st.write(frente['inicio_previsto'].strftime('%d/%m/%Y'))
-                                    st.caption("Prazo PCP p/ desenhos")
+                                    st.caption("Prazo PCP p/ projetos")
                                     prazo_txt = frente['prazo_eng'].strftime('%d/%m/%Y') if frente['prazo_eng'] else "—"
                                     st.write(f"`{prazo_txt}`")
 
