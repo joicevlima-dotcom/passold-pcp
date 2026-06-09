@@ -88,6 +88,7 @@ def inicializar_banco_de_dados():
             M2_Item REAL,
             Data_Producao_Programada DATE,
             Data_Limite_Obra DATE,
+            Data_Despacho DATE,
             Romaneio_Chapas TEXT,
             Status_Item TEXT DEFAULT 'Pendente',
             Dificuldade INTEGER DEFAULT 3,
@@ -176,47 +177,37 @@ def calcular_cronograma_reverso(inicio_previsto, dias_logistica: int, dias_uteis
     prazo_engenharia      = subtrair_dias_uteis(primeiro_dia_producao, int(dias_antecedencia_eng))
     return prazo_engenharia, primeiro_dia_producao, data_limite_despacho
 
-def gerar_lotes_ordenados(primeiro_dia, data_despacho, dias_uteis_fab, total_cx, total_m2,
-                           obra, edt, cod_lote, especificacao, txt_pav, dificuldade):
+def gerar_lote_unico(data_limite_obra, dias_logistica, dias_uteis_fab,
+                      total_cx, total_m2, obra, edt, cod_lote,
+                      especificacao, txt_pav, dificuldade):
     """
-    Gera 1 registro por dia útil, em ordem progressiva.
-    FASE: os primeiros 50% dos dias = CORTE E USINAGEM (fase completa)
-          os últimos 50% dos dias   = MONTAGEM FINAL (fase completa)
-    A soma de caixas e m² fecha exatamente o total informado.
+    Cria 1 único registro por lote.
+    - data_inicio_producao = calculado retroativamente
+    - data_fim_producao    = data_limite_obra - dias_logistica
+    - O calendário mostra este lote em TODOS os dias entre início e fim
     """
-    n = int(dias_uteis_fab)
-    dias_corte    = n // 2          # primeira metade → CORTE
-    cx_por_dia    = total_cx / n
-    m2_por_dia    = total_m2 / n
-    cx_acum = 0; m2_acum = 0.0
-    lotes = []; dia = primeiro_dia; contados = 0
+    dt_limite  = datetime.combine(data_limite_obra, datetime.min.time()) \
+                 if not isinstance(data_limite_obra, datetime) else data_limite_obra
+    dt_despacho = dt_limite - timedelta(days=int(dias_logistica))
+    dt_inicio   = subtrair_dias_uteis(dt_despacho, int(dias_uteis_fab))
 
-    while contados < n:
-        if dia.weekday() in [5, 6]:
-            dia += timedelta(days=1); continue
-        contados += 1
-        # CORTE nos primeiros dias, MONTAGEM nos últimos
-        fase = "CORTE E USINAGEM" if contados <= dias_corte else "MONTAGEM FINAL"
-        # Último lote recebe o saldo para fechar o total exato
-        if contados == n:
-            cx_dia = total_cx - cx_acum
-            m2_dia = round(total_m2 - m2_acum, 2)
-        else:
-            cx_dia = max(1, round(cx_por_dia))
-            m2_dia = round(m2_por_dia, 2)
-        cx_acum += cx_dia; m2_acum += m2_dia
-        lotes.append({
-            "Obra_Vinculada": obra, "EDT_Vinculado": edt, "Cod_Lote": cod_lote,
-            "Num_OP": None, "Tipo_Material": especificacao,
-            "Qtd_Caixas": int(cx_dia), "M2_Item": float(m2_dia),
-            "Data_Producao_Programada": dia.strftime('%Y-%m-%d'),
-            "Data_Limite_Obra": data_despacho.strftime('%Y-%m-%d'),
-            "Romaneio_Chapas": txt_pav, "Status_Item": "Pendente",
-            "Dificuldade": int(dificuldade), "Fase_Produtiva": fase,
-            "Enviado_Logistica": 0
-        })
-        dia += timedelta(days=1)
-    return lotes
+    return [{
+        "Obra_Vinculada":           obra,
+        "EDT_Vinculado":            edt,
+        "Cod_Lote":                 cod_lote,
+        "Num_OP":                   None,
+        "Tipo_Material":            especificacao,
+        "Qtd_Caixas":               int(total_cx),
+        "M2_Item":                  float(round(total_m2, 2)),
+        "Data_Producao_Programada": dt_inicio.strftime('%Y-%m-%d'),   # início produção
+        "Data_Limite_Obra":         dt_limite.strftime('%Y-%m-%d'),   # data na obra
+        "Data_Despacho":            dt_despacho.strftime('%Y-%m-%d'), # saída fábrica
+        "Romaneio_Chapas":          txt_pav,
+        "Status_Item":              "Pendente",
+        "Dificuldade":              int(dificuldade),
+        "Fase_Produtiva":           f"CORTE→MONTAGEM ({dias_uteis_fab} dias úteis)",
+        "Enviado_Logistica":        0
+    }]
 
 def prazo_valido(valor) -> bool:
     if valor is None: return False
@@ -421,7 +412,7 @@ if not st.session_state.autenticado:
     st.markdown("<h4 style='text-align:center;color:#6B7280;margin-bottom:30px;'>PCP & Controle Operacional</h4>", unsafe_allow_html=True)
     with st.container():
         st.markdown('<div class="login-container">', unsafe_allow_html=True)
-        st.subheader("🔑 login do Sistema")
+        st.subheader("🔑 Login do Sistema")
         user_input = st.text_input("Usuário:")
         pass_input = st.text_input("Senha:", type="password")
         if st.button("Entrar no PCP"):
@@ -500,7 +491,17 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 df_base = df_base if obra_tv == "TODAS AS OBRAS" else df_base[df_base['Obra_Vinculada'] == obra_tv]
 
                 if not df_base.empty:
-                    df_base['Data_Producao_Programada'] = pd.to_datetime(df_base['Data_Producao_Programada']).dt.date
+                    # Expande cada lote para todos os dias do período (início → fim na obra)
+                    registros_exp = []
+                    for _, row in df_base.iterrows():
+                        dt_ini = pd.to_datetime(row['Data_Producao_Programada']).date()
+                        dt_fim = pd.to_datetime(row['Data_Limite_Obra']).date()
+                        dia = dt_ini
+                        while dia <= dt_fim:
+                            r = row.to_dict(); r['_dia'] = dia
+                            registros_exp.append(r)
+                            dia += timedelta(days=1)
+                    df_exp = pd.DataFrame(registros_exp) if registros_exp else pd.DataFrame()
 
                     if "prog_mes" not in st.session_state: st.session_state.prog_mes = HOJE_PROJETO.month
                     if "prog_ano" not in st.session_state: st.session_state.prog_ano = HOJE_PROJETO.year
@@ -527,10 +528,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     cal     = py_calendar.Calendar(firstweekday=6)
                     semanas = cal.monthdatescalendar(st.session_state.prog_ano, st.session_state.prog_mes)
 
-                    # Cabeçalho e dias sempre numa única chamada st.columns(7) por linha
-                    nomes_dias = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"]
                     cols_h = st.columns(7)
-                    for i, nome in enumerate(nomes_dias):
+                    for i, nome in enumerate(["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"]):
                         cols_h[i].markdown(f"<div style='text-align:center;font-weight:bold;color:#475569;padding:4px 0;'>{nome}</div>", unsafe_allow_html=True)
 
                     for semana in semanas:
@@ -538,13 +537,15 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         for i, data_dia in enumerate(semana):
                             with cols[i]:
                                 if data_dia.month == st.session_state.prog_mes:
-                                    ops_dia = df_base[df_base['Data_Producao_Programada'] == data_dia]
-                                    n_ops   = len(ops_dia)
-                                    eh_hoje = (data_dia == HOJE_PROJETO.date())
+                                    lotes_dia = df_exp[df_exp['_dia'] == data_dia] if not df_exp.empty else pd.DataFrame()
+                                    n_lotes   = lotes_dia['Cod_Lote'].nunique() if not lotes_dia.empty else 0
+                                    eh_hoje   = (data_dia == HOJE_PROJETO.date())
                                     bg = "#EFF6FF" if eh_hoje else "#F8FAFC"
                                     bd = "#3B82F6" if eh_hoje else "#E2E8F0"
-                                    if n_ops > 0:
-                                        if st.button(f"{data_dia.day}\n({n_ops} OPs)", key=f"btn_{data_dia}", use_container_width=True):
+                                    if n_lotes > 0:
+                                        obras_d = lotes_dia['Obra_Vinculada'].unique()
+                                        label_o = ", ".join(obras_d[:1])
+                                        if st.button(f"{data_dia.day}\n🔧{n_lotes} {label_o}", key=f"btn_{data_dia}", use_container_width=True):
                                             st.session_state.dia_clicado_tv = data_dia
                                     else:
                                         st.markdown(f"<div style='background:{bg};border:1px solid {bd};padding:5px;border-radius:6px;text-align:center;height:70px;'><span style='color:#94A3B8;font-size:15px;'>{data_dia.day}</span><br><span style='color:#CBD5E1;font-size:10px;'>—</span></div>", unsafe_allow_html=True)
@@ -555,25 +556,34 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     if "dia_clicado_tv" not in st.session_state:
                         st.session_state.dia_clicado_tv = HOJE_PROJETO.date()
 
-                    st.subheader(f"🔍 OPs para: {st.session_state.dia_clicado_tv.strftime('%d/%m/%Y')}")
-                    df_dia = df_base[df_base['Data_Producao_Programada'] == st.session_state.dia_clicado_tv]
+                    dia_sel = st.session_state.dia_clicado_tv
+                    st.subheader(f"🔍 Lotes em produção: {dia_sel.strftime('%d/%m/%Y')}")
 
-                    if df_dia.empty:
-                        st.info("💡 Clique em um dia com OPs no calendário acima.")
+                    lotes_sel = df_exp[df_exp['_dia'] == dia_sel].drop_duplicates(subset=['id']) if not df_exp.empty else pd.DataFrame()
+
+                    if lotes_sel.empty:
+                        st.info("💡 Clique em um dia com lotes no calendário acima.")
                     else:
-                        for _, row in df_dia.iterrows():
+                        kc1,kc2,kc3 = st.columns(3)
+                        kc1.metric("Lotes em prod.", lotes_sel['Cod_Lote'].nunique())
+                        kc2.metric("Total caixas", int(lotes_sel['Qtd_Caixas'].sum()))
+                        kc3.metric("Total m²", f"{lotes_sel['M2_Item'].sum():.2f}")
+                        st.markdown("---")
+                        for _, row in lotes_sel.iterrows():
                             with st.container(border=True):
                                 cd, ca = st.columns([4, 1])
                                 with cd:
+                                    dt_i = pd.to_datetime(row['Data_Producao_Programada']).strftime('%d/%m/%Y')
+                                    dt_f = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
                                     st.markdown(f"""
-                                        <span style="background:#FFEDD5;color:#EA580C;padding:3px 8px;border-radius:4px;font-weight:bold;font-size:13px;margin-right:8px;">🏗️ {row['Obra_Vinculada']}</span>
-                                        <span style="background:#E0E7FF;color:#4338CA;padding:3px 8px;border-radius:4px;font-weight:bold;font-size:13px;">Lote: {row['Cod_Lote']}</span>
+                                        <span style="background:#FFEDD5;color:#EA580C;padding:3px 8px;border-radius:4px;font-weight:bold;font-size:13px;margin-right:6px;">🏗️ {row['Obra_Vinculada']}</span>
+                                        <span style="background:#E0E7FF;color:#4338CA;padding:3px 8px;border-radius:4px;font-weight:bold;font-size:13px;margin-right:6px;">{row['EDT_Vinculado']}</span>
+                                        <span style="background:#DCFCE7;color:#16A34A;padding:3px 8px;border-radius:4px;font-weight:bold;font-size:13px;">{row['Cod_Lote']}</span>
                                     """, unsafe_allow_html=True)
-                                    op_txt = row['Num_OP'] if row['Num_OP'] else "S/ OP"
-                                    st.markdown(f"#### 📦 OP: **{op_txt}**")
-                                    st.markdown(f"**Material:** {row['Tipo_Material']} | **Fase:** `{row.get('Fase_Produtiva','—')}` | `{int(row['Qtd_Caixas'])} cx` ({row['M2_Item']:.2f} m²)")
-                                    desp_txt = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y') if prazo_valido(row['Data_Limite_Obra']) else "—"
-                                    st.caption(f"Pavimentos: {row['Romaneio_Chapas']} | Despacho: {desp_txt}")
+                                    st.markdown(f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} caixas` — {row['M2_Item']:.2f} m²")
+                                    st.caption(f"📅 {dt_i} → {dt_f} | {row['Romaneio_Chapas']}")
+                                    op_txt = row['Num_OP'] if row.get('Num_OP') else "Aguardando OP"
+                                    st.caption(f"OP: {op_txt} | {row.get('Fase_Produtiva','—')}")
                                 with ca:
                                     st.write("")
                                     if st.button("✅ PRONTO", key=f"baixa_{row['id']}", type="primary", use_container_width=True):
@@ -586,10 +596,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                         cursor.execute("UPDATE itens_detalhado SET Status_Item='Concluído' WHERE id=%s", (row['id'],))
                                         conn.commit(); conn.close()
                                         enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
-                                        st.toast(f"✅ Lote {row['Cod_Lote']} concluído → enviado para Logística! 🚚")
+                                        st.toast(f"✅ {row['Cod_Lote']} concluído → Logística! 🚚")
                                         time.sleep(0.3); st.rerun()
                 else:
-                    st.success("🙌 Sem ordens liberadas para este filtro.")
+                    st.success("🙌 Sem lotes liberados para este filtro.")
             else:
                 st.info("Nenhum lote liberado no sistema ainda.")
 
@@ -685,7 +695,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     elif nome_aba == "Vincular Datas (Materiais)":
         with aba_objeto:
-            st.header("Inteligência Temporal: Fatiamento de Lotes")
+            st.header("📦 Fatiamento de Lotes")
             if st.session_state.get('lote_salvo_sucesso'):
                 st.success("✅ Lote gerado com sucesso!")
                 st.session_state.lote_salvo_sucesso = False
@@ -698,8 +708,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     label = f"{row['EDT']} - {row['Tarefa']}{sub}"
                     opcoes_edt.append(label); mapa_rows[label] = row
 
-                st.markdown("### 🛠️ Criar Nova Entrega")
-                st.caption("Cada entrega é um lote independente. Você define quantas caixas quer prontas e até quando — o sistema calcula tudo retroativamente.")
+                st.markdown("### ➕ Nova Entrega")
+                st.caption("1 lote = 1 entrega. Informe quantas caixas e até quando — o sistema calcula quando começa a produção.")
 
                 with st.form("form_fatiamento"):
                     c1, c2 = st.columns(2)
@@ -707,71 +717,55 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         edt_sel  = st.selectbox("Frente (EDT):", opcoes_edt)
                         row_sel  = mapa_rows[edt_sel]
                         edt_puro = edt_sel.split(" - ")[0].strip()
-                        cod_lote = st.text_input("Nome desta Entrega (ex: LOTE 1, ENTREGA A):")
+                        cod_lote = st.text_input("Nome do Lote (ex: LOTE 1, LOTE 2):")
                         txt_pav  = st.text_area("Pavimentos / Destino:", value="Pav 39 ao 43")
                         espec    = st.text_input("Material:", value="ACM BRANCO")
-
-                    with c2:
-                        # ÂNCORA: data que você quer o material NA OBRA
-                        inicio_prev = row_sel['Inicio_Previsto']
-                        data_alvo_default = pd.to_datetime(inicio_prev).date() if prazo_valido(inicio_prev) else (datetime.now() + timedelta(days=30)).date()
-
-                        data_alvo_obra = st.date_input(
-                            "📅 Data que precisa estar na obra:",
-                            value=data_alvo_default,
-                            format="DD/MM/YYYY",
-                            help="Âncora do cálculo — tudo é calculado retroativamente a partir desta data"
-                        )
-                        dias_log = st.number_input("Dias de logística/transporte (corridos):", min_value=1, value=3,
-                                                   help="Quantos dias entre sair da fábrica e chegar na obra")
-                        dias_fab = st.number_input("Dias úteis de produção:", min_value=1, value=10,
-                                                   help="Quantos dias úteis a fábrica precisa para produzir esta entrega")
-                        total_cx = st.number_input("Quantidade de caixas desta entrega:", min_value=1, value=24)
-                        total_m2 = st.number_input("Metragem desta entrega (m²):", min_value=0.1, value=50.0)
                         dific    = st.selectbox("Complexidade:", [1,2,3,4,5], index=2)
 
-                        # Preview do cronograma calculado retroativamente
-                        dt_alvo   = datetime.combine(data_alvo_obra, datetime.min.time())
-                        despacho  = dt_alvo - timedelta(days=int(dias_log))
-                        prim_prod = subtrair_dias_uteis(despacho, int(dias_fab))
+                    with c2:
+                        inicio_prev = row_sel['Inicio_Previsto']
+                        default_dt  = pd.to_datetime(inicio_prev).date() if prazo_valido(inicio_prev) \
+                                      else (datetime.now() + timedelta(days=30)).date()
 
-                        st.markdown("---")
+                        data_alvo = st.date_input(
+                            "📅 Precisa estar na obra até:",
+                            value=default_dt, format="DD/MM/YYYY",
+                            help="Data limite — tudo é calculado retroativamente a partir daqui"
+                        )
+                        dias_log = st.number_input("Dias de transporte até a obra (corridos):", min_value=1, value=3)
+                        dias_fab = st.number_input("Dias úteis de produção:", min_value=1, value=10)
+                        total_cx = st.number_input("Quantidade de caixas:", min_value=1, value=31)
+                        total_m2 = st.number_input("Metragem (m²):", min_value=0.1, value=70.0)
+
+                        # Preview retroativo
+                        dt_alvo   = datetime.combine(data_alvo, datetime.min.time())
+                        dt_desp   = dt_alvo - timedelta(days=int(dias_log))
+                        dt_inicio = subtrair_dias_uteis(dt_desp, int(dias_fab))
                         st.success(
-                            f"🗓️ **Cronograma desta entrega:**\n\n"
-                            f"🏭 Começa produção: **{prim_prod.strftime('%d/%m/%Y')}**\n\n"
-                            f"🚚 Sai da fábrica: **{despacho.strftime('%d/%m/%Y')}**\n\n"
-                            f"🏗️ Chega na obra: **{data_alvo_obra.strftime('%d/%m/%Y')}**"
+                            f"🗓️ **Cronograma:**\n\n"
+                            f"🏭 Início produção: **{dt_inicio.strftime('%d/%m/%Y')}**\n\n"
+                            f"🚚 Sai da fábrica: **{dt_desp.strftime('%d/%m/%Y')}**\n\n"
+                            f"🏗️ Chega na obra: **{data_alvo.strftime('%d/%m/%Y')}**"
                         )
 
                     if "🟢" not in str(row_sel.get('Status_Engenharia','')):
-                        st.warning(f"⚠️ Engenharia ainda não liberou: `{row_sel.get('Status_Engenharia','—')}`")
+                        st.warning(f"⚠️ Engenharia: `{row_sel.get('Status_Engenharia','—')}`")
 
-                    if st.form_submit_button("✅ Gerar Esta Entrega"):
+                    if st.form_submit_button("✅ Gerar Lote"):
                         if not cod_lote.strip():
-                            st.error("Digite o nome desta entrega.")
+                            st.error("Digite o nome do lote.")
                         else:
-                            dt_alvo_calc  = datetime.combine(data_alvo_obra, datetime.min.time())
-                            despacho_calc = dt_alvo_calc - timedelta(days=int(dias_log))
-                            prim_prod_calc = subtrair_dias_uteis(despacho_calc, int(dias_fab))
-
-                            # Apaga lotes anteriores do mesmo EDT+Lote (evita duplicata se refazer)
                             deletar_lotes_por_edt_lote(obra_selecionada, edt_puro, cod_lote.strip())
-
-                            lotes = gerar_lotes_ordenados(
-                                prim_prod_calc, despacho_calc, dias_fab,
+                            lote = gerar_lote_unico(
+                                data_alvo, int(dias_log), int(dias_fab),
                                 int(total_cx), float(total_m2),
                                 obra_selecionada, edt_puro, cod_lote.strip(),
                                 espec, txt_pav, dific
                             )
-                            salvar_lotes_micro(lotes)
-
-                            # Atualiza o cronograma macro com a data de despacho desta entrega
-                            # (usa a mais próxima como referência para o prazo de engenharia)
-                            prazo_eng = subtrair_dias_uteis(prim_prod_calc, 3)
-                            atualizar_cronograma_macro_datas(edt_puro, prazo_eng, prim_prod_calc, despacho_calc)
-
-                            st.session_state.lote_salvo_sucesso = True
-                            st.rerun()
+                            salvar_lotes_micro(lote)
+                            prazo_eng = subtrair_dias_uteis(dt_inicio, 3)
+                            atualizar_cronograma_macro_datas(edt_puro, prazo_eng, dt_inicio, dt_desp)
+                            st.session_state.lote_salvo_sucesso = True; st.rerun()
 
                 st.markdown("---")
                 st.markdown("### 📝 Lotes Gerados")
@@ -1199,7 +1193,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             st.header("⚙️ Painel de Controle Master")
             with st.expander("➕ Cadastrar Novo Usuário"):
                 with st.form("form_user"):
-                    nu=st.text_input("login:").lower().strip()
+                    nu=st.text_input("Login:").lower().strip()
                     nn=st.text_input("Nome:")
                     ns=st.selectbox("Setor:",["Produção","Engenharia","Diretoria","Logística","Master"])
                     np=st.text_input("Senha:",type="password")
@@ -1215,11 +1209,11 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             finally: conn.close()
 
             conn=conectar_banco()
-            df_u=pd.read_sql_query("SELECT id, usuario as login, nome as Nome, setor as Setor FROM usuarios",conn)
+            df_u=pd.read_sql_query("SELECT id, usuario, nome, setor FROM usuarios ORDER BY id", conn)
             conn.close()
-            st.dataframe(df_u,hide_index=True,use_container_width=True)
+            st.dataframe(df_u, hide_index=True, use_container_width=True)
             if len(df_u)>1:
-                del_u=st.selectbox("Remover:",df_u['login'].tolist())
+                del_u=st.selectbox("Remover:",df_u['usuario'].tolist())
                 if del_u=='master': st.caption("🔒 Master não pode ser deletado.")
                 else:
                     if st.button(f"❌ Excluir {del_u}"):
