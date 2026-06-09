@@ -421,7 +421,7 @@ if not st.session_state.autenticado:
     st.markdown("<h4 style='text-align:center;color:#6B7280;margin-bottom:30px;'>PCP & Controle Operacional</h4>", unsafe_allow_html=True)
     with st.container():
         st.markdown('<div class="login-container">', unsafe_allow_html=True)
-        st.subheader("🔑 Login do Sistema")
+        st.subheader("🔑 login do Sistema")
         user_input = st.text_input("Usuário:")
         pass_input = st.text_input("Senha:", type="password")
         if st.button("Entrar no PCP"):
@@ -1199,7 +1199,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             st.header("⚙️ Painel de Controle Master")
             with st.expander("➕ Cadastrar Novo Usuário"):
                 with st.form("form_user"):
-                    nu=st.text_input("Login:").lower().strip()
+                    nu=st.text_input("login:").lower().strip()
                     nn=st.text_input("Nome:")
                     ns=st.selectbox("Setor:",["Produção","Engenharia","Diretoria","Logística","Master"])
                     np=st.text_input("Senha:",type="password")
@@ -1215,11 +1215,11 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             finally: conn.close()
 
             conn=conectar_banco()
-            df_u=pd.read_sql_query("SELECT id, usuario as Login, nome as Nome, setor as Setor FROM usuarios",conn)
+            df_u=pd.read_sql_query("SELECT id, usuario as login, nome as Nome, setor as Setor FROM usuarios",conn)
             conn.close()
             st.dataframe(df_u,hide_index=True,use_container_width=True)
             if len(df_u)>1:
-                del_u=st.selectbox("Remover:",df_u['Login'].tolist())
+                del_u=st.selectbox("Remover:",df_u['login'].tolist())
                 if del_u=='master': st.caption("🔒 Master não pode ser deletado.")
                 else:
                     if st.button(f"❌ Excluir {del_u}"):
