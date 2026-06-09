@@ -6,7 +6,6 @@ import sqlite3
 import os
 import time
 
-# Configuração da página do Streamlit
 st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide")
 
 st.markdown("""
@@ -69,11 +68,10 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Data atual real do sistema
 HOJE_PROJETO = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
 # ========================================================
-# ESTRUTURA DO BANCO DE DADOS (SQLITE)
+# BANCO DE DADOS
 # ========================================================
 if os.path.exists("/data"):
     DB_NAME = "/data/passold_pcp.db"
@@ -141,25 +139,16 @@ def inicializar_banco_de_dados():
             VALUES ('master', 'Joice Master', 'Master', 'Jv568279.')
         """)
 
-    try:
-        cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN Subdivisao TEXT")
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN Status_Engenharia TEXT DEFAULT '🔴 Aguardando Medição In Loco'")
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN Fase_Produtiva TEXT")
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN Prazo_Engenharia TEXT")
-    except sqlite3.OperationalError:
-        pass
+    for alter in [
+        "ALTER TABLE cronograma_macro ADD COLUMN Subdivisao TEXT",
+        "ALTER TABLE cronograma_macro ADD COLUMN Status_Engenharia TEXT DEFAULT '🔴 Aguardando Medição In Loco'",
+        "ALTER TABLE itens_detalhado ADD COLUMN Fase_Produtiva TEXT",
+        "ALTER TABLE cronograma_macro ADD COLUMN Prazo_Engenharia TEXT",
+    ]:
+        try:
+            cursor.execute(alter)
+        except sqlite3.OperationalError:
+            pass
 
     conn.commit()
     conn.close()
@@ -167,8 +156,54 @@ def inicializar_banco_de_dados():
 inicializar_banco_de_dados()
 
 # ========================================================
+# FUNÇÕES UTILITÁRIAS
+# ========================================================
+
+def subtrair_dias_uteis(data_base, n_dias_uteis):
+    """
+    Subtrai n_dias_uteis (pulando sábado e domingo) de data_base.
+    Retorna a data resultante.
+    """
+    data = data_base
+    dias_contados = 0
+    while dias_contados < n_dias_uteis:
+        data -= timedelta(days=1)
+        if data.weekday() < 5:  # 0=seg ... 4=sex
+            dias_contados += 1
+    return data
+
+def calcular_prazo_engenharia(data_limite_obra, recuo_dias, dias_uteis_fabricacao, dias_antecedencia_eng=3):
+    """
+    Calcula o prazo que a engenharia precisa entregar os projetos ao PCP.
+
+    Fluxo correto:
+      data_limite_obra
+        → recua recuo_dias corridos  → dia_fim_producao
+        → recua dias_uteis_fabricacao úteis → primeiro_dia_producao
+        → recua dias_antecedencia_eng úteis → prazo_engenharia
+    """
+    dt = datetime.combine(data_limite_obra, datetime.min.time()) if not isinstance(data_limite_obra, datetime) else data_limite_obra
+    dia_fim_producao = dt - timedelta(days=int(recuo_dias))
+    primeiro_dia_producao = subtrair_dias_uteis(dia_fim_producao, int(dias_uteis_fabricacao))
+    prazo_engenharia = subtrair_dias_uteis(primeiro_dia_producao, int(dias_antecedencia_eng))
+    return prazo_engenharia, primeiro_dia_producao, dia_fim_producao
+
+def prazo_valido(valor):
+    """
+    Retorna True se o valor é uma data válida (não None, não NaT, não NaN).
+    Corrige o bug onde pd.notna(NaT) retorna False incorretamente em alguns casos.
+    """
+    if valor is None:
+        return False
+    try:
+        return not pd.isnull(valor)
+    except Exception:
+        return False
+
+# ========================================================
 # FUNÇÕES DE BANCO DE DADOS
 # ========================================================
+
 def carregar_macro():
     conn = conectar_banco()
     df = pd.read_sql_query("SELECT * FROM cronograma_macro", conn)
@@ -182,6 +217,7 @@ def carregar_macro():
             df['Status_Engenharia'] = "🔴 Aguardando Medição In Loco"
         if 'Prazo_Engenharia' not in df.columns:
             df['Prazo_Engenharia'] = None
+        # Converte para datetime; valores inválidos viram NaT
         df['Prazo_Engenharia'] = pd.to_datetime(df['Prazo_Engenharia'], errors='coerce')
     return df
 
@@ -225,7 +261,7 @@ def verificar_login(usuario, senha):
     return resultado
 
 # ========================================================
-# CONTROLE DE SESSÃO E LOGIN
+# LOGIN
 # ========================================================
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
@@ -255,7 +291,6 @@ if not st.session_state.autenticado:
                 st.error("Usuário ou Senha inválidos.")
     st.stop()
 
-# Título Principal do Sistema Logado
 col_header1, col_header2 = st.columns([4, 1])
 with col_header1:
     st.title("Passold - PCP Inteligente")
@@ -266,11 +301,9 @@ with col_header2:
         st.session_state.autenticado = False
         st.rerun()
 
-# Carregar dados fundamentais
 df_banco_macro = carregar_macro()
 df_banco_micro = carregar_micro()
 
-# Seletor único de obra — usado por todas as abas
 if not df_banco_macro.empty:
     lista_obras_disponiveis = sorted(list(df_banco_macro['Obra'].unique()))
     obra_selecionada = st.selectbox("Selecione a Obra de Trabalho:", lista_obras_disponiveis)
@@ -280,7 +313,7 @@ else:
     df_macro_filtrado = pd.DataFrame()
 
 # ========================================================
-# FILTRO DINÂMICO DE ABAS POR PERFIL DE ACESSO
+# ABAS POR PERFIL
 # ========================================================
 setor = st.session_state.usuario_setor
 
@@ -300,14 +333,13 @@ if setor in ["Master"]:
     abas_disponiveis.append("Configurações do Sistema")
 
 conteudo_sistema = st.container()
-
 with conteudo_sistema:
     abas_objetos = st.tabs(abas_disponiveis)
 
 for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
     # ----------------------------------------------------
-    # ABA: PAINEL DA TV (MURAL OPERACIONAL DA PRODUÇÃO)
+    # ABA: PAINEL DA TV
     # ----------------------------------------------------
     if nome_aba == "PAINEL DA TV (Chão de Fábrica)":
         import calendar as py_calendar
@@ -343,11 +375,9 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 st.session_state.prog_mes = 12
                                 st.session_state.prog_ano -= 1
                             st.rerun()
-
                     with col_nav2:
                         meses_nomes = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
                         st.markdown(f"<h3 style='text-align: center; color: #1E3A8A; margin:0;'>📅 {meses_nomes[st.session_state.prog_mes]} / {st.session_state.prog_ano}</h3>", unsafe_allow_html=True)
-
                     with col_nav3:
                         if st.button("Próximo Mês ➡️", use_container_width=True, key="btn_mes_prox"):
                             st.session_state.prog_mes += 1
@@ -371,15 +401,12 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         for idx_dia, data_dia in enumerate(semana):
                             with colunas_dias[idx_dia]:
                                 do_mes_corrente = (data_dia.month == st.session_state.prog_mes)
-
                                 if do_mes_corrente:
                                     df_dia_ops = df_chapas_obra[df_chapas_obra['Data_Producao_Programada'] == data_dia]
                                     total_ops_dia = len(df_dia_ops)
-
                                     eh_hoje = (data_dia == HOJE_PROJETO.date())
                                     bg_cor = "#EFF6FF" if eh_hoje else "#F8FAFC"
                                     borda_cor = "#3B82F6" if eh_hoje else "#E2E8F0"
-
                                     if total_ops_dia > 0:
                                         if st.button(f"{data_dia.day}\n({total_ops_dia} OPs)", key=f"btn_dia_{data_dia}", use_container_width=True):
                                             st.session_state.dia_clicado_tv = data_dia
@@ -399,7 +426,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         st.session_state.dia_clicado_tv = HOJE_PROJETO.date()
 
                     st.subheader(f"🔍 Ordens de Trabalho para o dia: {st.session_state.dia_clicado_tv.strftime('%d/%m/%Y')}")
-
                     df_detalhe_dia = df_chapas_obra[df_chapas_obra['Data_Producao_Programada'] == st.session_state.dia_clicado_tv]
 
                     if df_detalhe_dia.empty:
@@ -409,7 +435,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             id_item = row['id']
                             op_txt = row['Num_OP'] if row['Num_OP'] else "S/ OP"
                             nome_da_obra = row['Obra_Vinculada']
-
                             with st.container(border=True):
                                 col_dados, col_acao = st.columns([4, 1])
                                 with col_dados:
@@ -417,11 +442,9 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                         <span style="background-color: #FFEDD5; color: #EA580C; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 13px; margin-right: 8px;">🏗️ OBRA: {nome_da_obra}</span>
                                         <span style="background-color: #E0E7FF; color: #4338CA; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 13px;">Lote Técnico: {row['Cod_Lote']}</span>
                                     """, unsafe_allow_html=True)
-
                                     st.markdown(f"#### 📦 OP: **{op_txt}**")
                                     st.markdown(f"**Material:** {row['Tipo_Material']} | **Meta do Dia:** `{int(row['Qtd_Caixas'])} caixas` ({row['M2_Item']:.2f} m²)")
                                     st.caption(f"Pavimentos atendidos: {row['Romaneio_Chapas']} | Prazo Final de Engenharia: {pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')}")
-
                                 with col_acao:
                                     st.write("")
                                     if st.button("✅ PRONTO", key=f"baixa_mural_{id_item}", type="primary", use_container_width=True):
@@ -494,13 +517,11 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
     # ----------------------------------------------------
     # ABA: VISÃO MACRO (DIRETORIA)
-    # Usa obra_selecionada global — sem filtro duplicado
     # ----------------------------------------------------
     elif nome_aba == "Visão Macro (Diretoria)":
         with aba_objeto:
             st.header("📊 Dashboard Executivo e Cronograma Macro")
 
-            # Filtra micro pela obra já selecionada no topo
             if obra_selecionada and not df_banco_micro.empty:
                 df_diretoria = df_banco_micro[df_banco_micro['Obra_Vinculada'] == obra_selecionada].copy()
             elif not df_banco_micro.empty:
@@ -524,9 +545,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     st.metric("Prazo de Entrega Mais Distante", data_max)
 
                 st.markdown("---")
-
                 st.subheader("📈 Planejamento de Carga Semanal da Produção")
-                st.markdown("Veja abaixo a distribuição exata do volume que está liberado para a fábrica por semanas e obras específicas:")
 
                 df_liberados = df_diretoria[df_diretoria['Status_Item'].isin(["Liberado para Fábrica", "Produção", "Concluído"])].copy()
 
@@ -561,7 +580,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         use_container_width=True
                     )
                 else:
-                    st.warning("⚠️ Nenhuma Ordem de Produção foi liberada para a fábrica ainda nesta obra, portanto não há carga semanal cadastrada.")
+                    st.warning("⚠️ Nenhuma OP foi liberada para a fábrica ainda nesta obra.")
 
                 st.subheader("📊 Linha do Tempo de Execução (Gantt)")
 
@@ -596,6 +615,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
     # ----------------------------------------------------
     # ABA: VINCULAR DATAS MATERIAIS
+    # *** CORRIGIDO: cálculo de dias úteis e salvamento do Prazo_Engenharia ***
     # ----------------------------------------------------
     elif nome_aba == "Vincular Datas (Materiais)":
         with aba_objeto:
@@ -637,17 +657,15 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             index=3
                         )
 
-                        # Prazo da engenharia = primeiro dia de produção - 3 dias
-                        # Lógica: engenharia libera → produção começa → despacho → instalação
-                        dt_limite_preview = datetime.combine(data_necessidade_obra, datetime.min.time())
-                        dia_fim_preview = dt_limite_preview - timedelta(days=int(recuo_dias_base))
-                        primeiro_dia_producao_preview = dia_fim_preview - timedelta(days=int(dias_uteis_fabricacao))
-                        dias_engenharia = 3
-                        prazo_engenharia = primeiro_dia_producao_preview - timedelta(days=dias_engenharia)
+                        # *** CORRIGIDO: usa a função unificada calcular_prazo_engenharia ***
+                        prazo_engenharia_preview, primeiro_dia_preview, dia_fim_preview = calcular_prazo_engenharia(
+                            data_necessidade_obra, recuo_dias_base, dias_uteis_fabricacao
+                        )
 
                         st.info(
                             f"📐 Engenharia deve liberar até:\n\n"
-                            f"**{prazo_engenharia.strftime('%d/%m/%Y')}**"
+                            f"**{prazo_engenharia_preview.strftime('%d/%m/%Y')}**\n\n"
+                            f"_(1º dia produção: {primeiro_dia_preview.strftime('%d/%m/%Y')})_"
                         )
 
                     st.markdown("---")
@@ -661,7 +679,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
                     status_da_frente = status_eng_map.get(edt_puro, "🔴 Aguardando Medição In Loco")
                     if "🟢" not in status_da_frente:
-                        st.warning(f"⚠️ Atenção Joice: A engenharia marcou essa frente como `{status_da_frente}`. Tem certeza que deseja fatiar agora?")
+                        st.warning(f"⚠️ Atenção: A engenharia marcou essa frente como `{status_da_frente}`. Tem certeza que deseja fatiar agora?")
 
                     btn_calcular_tudo = st.form_submit_button("Distribuir Remessa Realista")
 
@@ -669,14 +687,12 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         if not cod_lote.strip():
                             st.error("Por favor, digite uma identificação de lote.")
                         else:
+                            # *** CORRIGIDO: mesmo cálculo do preview, usando a função centralizada ***
+                            prazo_engenharia, primeiro_dia_producao, dia_fim_producao = calcular_prazo_engenharia(
+                                data_necessidade_obra, recuo_dias_base, dias_uteis_fabricacao
+                            )
+
                             dt_limite_conv = datetime.combine(data_necessidade_obra, datetime.min.time())
-                            dia_fim_producao = dt_limite_conv - timedelta(days=int(recuo_dias_base))
-
-                            # Âncora é o primeiro dia de produção
-                            primeiro_dia_producao = dia_fim_producao - timedelta(days=int(dias_uteis_fabricacao))
-                            dias_engenharia = 3
-                            prazo_engenharia = primeiro_dia_producao - timedelta(days=dias_engenharia)
-
                             caixas_por_dia_real = total_cx / float(dias_uteis_fabricacao)
                             m2_por_dia_real = total_m2 / float(dias_uteis_fabricacao)
 
@@ -712,6 +728,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             df_novos = pd.DataFrame(novos_registros)
                             salvar_lotes_micro(df_novos)
 
+                            # *** CORRIGIDO: salva o prazo calculado corretamente no banco ***
                             conn_prazo = conectar_banco()
                             cursor_prazo = conn_prazo.cursor()
                             cursor_prazo.execute(
@@ -848,13 +865,14 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
     # ----------------------------------------------------
     # ABA: PAINEL TÉCNICO DA ENGENHARIA
+    # *** CORRIGIDO: leitura do Prazo_Engenharia com prazo_valido() ***
     # ----------------------------------------------------
     elif nome_aba == "Painel Técnico da Engenharia":
         with aba_objeto:
             st.header("🏗️ Painel Técnico da Engenharia — Central de Gestão de Frentes")
             st.caption(f"Referência de data do sistema: {HOJE_PROJETO.strftime('%d/%m/%Y')} | Obra selecionada: **{obra_selecionada or 'Nenhuma'}**")
 
-            # Recarga fresca do banco para garantir Prazo_Engenharia atualizado
+            # Sempre faz leitura fresca do banco — garante que o Prazo_Engenharia recém-salvo apareça
             df_macro_engenharia = carregar_macro()
             if obra_selecionada:
                 df_macro_engenharia = df_macro_engenharia[df_macro_engenharia['Obra'] == obra_selecionada]
@@ -885,7 +903,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
             if not df_macro_engenharia.empty:
                 for _, row in df_macro_engenharia.iterrows():
-                    prazo_eng = row['Prazo_Engenharia'] if pd.notna(row.get('Prazo_Engenharia')) else None
+                    # *** CORRIGIDO: usa prazo_valido() em vez de pd.notna() isolado ***
+                    prazo_raw = row.get('Prazo_Engenharia')
+                    prazo_eng = prazo_raw if prazo_valido(prazo_raw) else None
+
                     dias_rest = (prazo_eng - HOJE_PROJETO).days if prazo_eng is not None else None
                     situacao_key, situacao_txt, dias_num = classificar_situacao(
                         dias_rest,
@@ -918,7 +939,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             # ================================================================
             label_criticas = f"🚨 Frentes Críticas — {len(frentes_criticas)} alerta(s)"
             with st.expander(label_criticas, expanded=True):
-
                 if not frentes_criticas:
                     st.success("✅ Nenhuma frente crítica no momento. Tudo dentro do prazo!")
                 else:
@@ -951,7 +971,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     st.warning(f"⏳ FALTAM\n\n**{frente['dias_num']} dias**\npara entrega")
 
                             st.markdown("---")
-
                             col_acao1, col_acao2 = st.columns(2)
                             with col_acao1:
                                 chave_sel = f"eng_crit_status_{frente['id']}"
@@ -975,7 +994,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             # EXPANDER 2 — 📋 TODAS AS FRENTES
             # ================================================================
             with st.expander(f"📋 Todas as Frentes da Engenharia — {len(frentes_processadas)} frente(s)", expanded=False):
-
                 if not frentes_processadas:
                     st.info("Nenhuma frente cadastrada para esta obra.")
                 else:
@@ -1066,7 +1084,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             label_sol = f"📝 Solicitações de Prazo" + (f" — {len(pendentes_solicitacao)} pendente(s)" if pendentes_solicitacao else "")
 
             with st.expander(label_sol, expanded=False):
-                st.caption("Use esta seção para registrar pedidos de extensão de prazo ao PCP. Em breve com persistência no banco de dados.")
+                st.caption("Use esta seção para registrar pedidos de extensão de prazo ao PCP.")
 
                 if setor in ["Engenharia", "Master"]:
                     st.markdown("#### ✍️ Nova Solicitação de Extensão de Prazo")
@@ -1101,7 +1119,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 key="eng_sol_justificativa"
                             )
 
-                        if st.button("📤 Enviar Solicitação ao PCP", key="eng_sol_enviar", use_container_width=False):
+                        if st.button("📤 Enviar Solicitação ao PCP", key="eng_sol_enviar"):
                             if not justificativa_sol.strip():
                                 st.error("Informe a justificativa técnica antes de enviar.")
                             else:
@@ -1117,7 +1135,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 lista_atual = st.session_state.get('eng_solicitacoes_pendentes', [])
                                 lista_atual.append(nova_sol)
                                 st.session_state['eng_solicitacoes_pendentes'] = lista_atual
-                                st.success("Solicitação enviada para o PCP! O prazo atual permanece até aprovação.")
+                                st.success("Solicitação enviada para o PCP!")
                                 st.rerun()
 
                 st.markdown("---")
@@ -1142,16 +1160,12 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     col_ap, col_rej = st.columns(2)
                                     with col_ap:
                                         if st.button("✅ Aprovar", key=f"sol_aprovar_{i}", use_container_width=True):
-                                            st.session_state['eng_solicitacoes_pendentes'][
-                                                lista_sol.index(sol)
-                                            ]['status'] = "✅ Aprovado"
+                                            st.session_state['eng_solicitacoes_pendentes'][lista_sol.index(sol)]['status'] = "✅ Aprovado"
                                             st.toast("Solicitação aprovada!", icon="✅")
                                             st.rerun()
                                     with col_rej:
                                         if st.button("❌ Rejeitar", key=f"sol_rejeitar_{i}", use_container_width=True):
-                                            st.session_state['eng_solicitacoes_pendentes'][
-                                                lista_sol.index(sol)
-                                            ]['status'] = "❌ Rejeitado"
+                                            st.session_state['eng_solicitacoes_pendentes'][lista_sol.index(sol)]['status'] = "❌ Rejeitado"
                                             st.toast("Solicitação rejeitada.", icon="❌")
                                             st.rerun()
 
@@ -1167,7 +1181,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             # ================================================================
             with st.expander("🔍 Verificar Capacidade / Carga Ocupada da Fábrica Semanal", expanded=False):
                 st.markdown("#### 📈 Carga Total Já Liberada para Produção por Semana:")
-                st.caption("Consulte esta tabela antes de prometer novos prazos para garantir que a fábrica não seja sobrecarregada.")
 
                 if not df_banco_micro.empty:
                     df_eng_ver = df_banco_micro[df_banco_micro['Status_Item'] == "Liberado para Fábrica"].copy()
@@ -1212,7 +1225,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     elif nome_aba == "Configurações do Sistema":
         with aba_objeto:
             st.header("⚙️ Painel de Controle Master e Segurança do PCP")
-
             st.markdown("### 👥 Gerenciador de Usuários da Passold")
 
             with st.expander("➕ Cadastrar Novo Usuário / Setor"):
