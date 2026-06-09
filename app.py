@@ -69,8 +69,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Data atual de simulação do projeto (Ancorada em Junho de 2026)
-HOJE_PROJETO = datetime(2026, 6, 3)
+# Data atual real do sistema
+HOJE_PROJETO = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
 # ========================================================
 # ESTRUTURA DO BANCO DE DADOS (SQLITE)
@@ -156,7 +156,6 @@ def inicializar_banco_de_dados():
     except sqlite3.OperationalError:
         pass
 
-    # MIGRAÇÃO: adicionar Prazo_Engenharia em bancos já existentes
     try:
         cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN Prazo_Engenharia TEXT")
     except sqlite3.OperationalError:
@@ -181,7 +180,6 @@ def carregar_macro():
             df['Subdivisao'] = "Geral"
         if 'Status_Engenharia' not in df.columns:
             df['Status_Engenharia'] = "🔴 Aguardando Medição In Loco"
-        # Garantir coluna Prazo_Engenharia mesmo em DataFrames de bancos antigos
         if 'Prazo_Engenharia' not in df.columns:
             df['Prazo_Engenharia'] = None
         df['Prazo_Engenharia'] = pd.to_datetime(df['Prazo_Engenharia'], errors='coerce')
@@ -194,7 +192,6 @@ def carregar_micro():
     if not df.empty:
         df['Data_Producao_Programada'] = pd.to_datetime(df['Data_Producao_Programada'])
         df['Data_Limite_Obra'] = pd.to_datetime(df['Data_Limite_Obra'])
-        # CORREÇÃO 5: Garantir que Fase_Produtiva existe mesmo em dados antigos
         if 'Fase_Produtiva' not in df.columns:
             df['Fase_Produtiva'] = "N/A"
     return df
@@ -210,24 +207,6 @@ def salvar_lotes_micro(df_novos_lotes):
     conn = conectar_banco()
     df_novos_lotes.to_sql('itens_detalhado', conn, if_exists='append', index=False)
     conn.close()
-
-def aplicar_planejamento_reverso(df):
-    df_novo = df.copy()
-    df_novo['Prazo_Final_Fabrica'] = pd.NaT
-    df_novo['Prazo_Fase_Intermediaria'] = pd.NaT
-    df_novo['Prazo_Medicao_InLoco'] = pd.NaT
-
-    for idx, row in df_novo.iterrows():
-        dt_fim = pd.to_datetime(row['Termino_Obra'])
-        if row['Tipo_Escopo'] == "ACM":
-            df_novo.at[idx, 'Prazo_Final_Fabrica'] = dt_fim - timedelta(days=10)
-            df_novo.at[idx, 'Prazo_Fase_Intermediaria'] = dt_fim - timedelta(days=17)
-            df_novo.at[idx, 'Prazo_Medicao_InLoco'] = dt_fim - timedelta(days=32)
-        else:
-            df_novo.at[idx, 'Prazo_Final_Fabrica'] = dt_fim - timedelta(days=15)
-            df_novo.at[idx, 'Prazo_Fase_Intermediaria'] = dt_fim - timedelta(days=35)
-            df_novo.at[idx, 'Prazo_Medicao_InLoco'] = dt_fim - timedelta(days=50)
-    return df_novo
 
 def resetar_banco_dados_completo():
     conn = conectar_banco()
@@ -291,6 +270,7 @@ with col_header2:
 df_banco_macro = carregar_macro()
 df_banco_micro = carregar_micro()
 
+# Seletor único de obra — usado por todas as abas
 if not df_banco_macro.empty:
     lista_obras_disponiveis = sorted(list(df_banco_macro['Obra'].unique()))
     obra_selecionada = st.selectbox("Selecione a Obra de Trabalho:", lista_obras_disponiveis)
@@ -324,7 +304,6 @@ conteudo_sistema = st.container()
 with conteudo_sistema:
     abas_objetos = st.tabs(abas_disponiveis)
 
-# CORREÇÃO 4: Todas as abas usam elif de forma consistente dentro do loop
 for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
     # ----------------------------------------------------
@@ -467,7 +446,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             st.header("Gerenciador de Ordens de Produção Semanais")
 
             if obra_selecionada and not df_banco_micro.empty:
-                df_pendentes = df_banco_micro[(df_banco_micro['Obra_Vinculada'] == obra_selecionada) & (df_banco_micro['Status_Item'] == "Pendente")].copy()
+                df_pendentes = df_banco_micro[
+                    (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
+                    (df_banco_micro['Status_Item'] == "Pendente")
+                ].copy()
 
                 if not df_pendentes.empty:
                     df_pendentes['Data_Producao_Programada'] = pd.to_datetime(df_pendentes['Data_Producao_Programada'])
@@ -493,7 +475,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         if ids_selecionados:
                             conn = conectar_banco()
                             cursor = conn.cursor()
-
                             for index, item_id in enumerate(ids_selecionados):
                                 num_op_gerada = f"{prefixo_op}{str(item_id).zfill(3)}"
                                 cursor.execute("""
@@ -501,7 +482,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     SET Status_Item = 'Liberado para Fábrica', Num_OP = ?
                                     WHERE id = ?
                                 """, (num_op_gerada, item_id))
-
                             conn.commit()
                             conn.close()
                             st.toast("Ordens de Produção liberadas com sucesso!", icon="✅")
@@ -514,18 +494,19 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
     # ----------------------------------------------------
     # ABA: VISÃO MACRO (DIRETORIA)
+    # Usa obra_selecionada global — sem filtro duplicado
     # ----------------------------------------------------
     elif nome_aba == "Visão Macro (Diretoria)":
         with aba_objeto:
             st.header("📊 Dashboard Executivo e Cronograma Macro")
 
-            obras_disponiveis = ["TODAS AS OBRAS"] + list(df_banco_micro['Obra_Vinculada'].dropna().unique()) if not df_banco_micro.empty else ["TODAS AS OBRAS"]
-            obra_exec = st.selectbox("Filtrar Painel Executivo por Obra:", obras_disponiveis, key="sb_obra_exec")
-
-            if obra_exec == "TODAS AS OBRAS":
+            # Filtra micro pela obra já selecionada no topo
+            if obra_selecionada and not df_banco_micro.empty:
+                df_diretoria = df_banco_micro[df_banco_micro['Obra_Vinculada'] == obra_selecionada].copy()
+            elif not df_banco_micro.empty:
                 df_diretoria = df_banco_micro.copy()
             else:
-                df_diretoria = df_banco_micro[df_banco_micro['Obra_Vinculada'] == obra_exec].copy()
+                df_diretoria = pd.DataFrame()
 
             if not df_diretoria.empty:
                 kpi_m2 = df_diretoria['M2_Item'].sum()
@@ -632,7 +613,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     sub_txt = f" [{row['Subdivisao']}]" if 'Subdivisao' in row and row['Subdivisao'] else ""
                     label_edt = f"{row['EDT']} - {row['Tarefa']}{sub_txt}"
                     opcoes_edt.append(label_edt)
-                    # CORREÇÃO 3: Chave corrigida de 'Status_Engineharia' para 'Status_Engenharia'
                     status_eng_map[row['EDT']] = row.get('Status_Engenharia', '🔴 Aguardando Medição In Loco')
 
                 st.markdown("### 🛠️ Fatiar Nova Remessa de Materiais")
@@ -643,7 +623,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         edt_puro = edt_selecionado.split(" ")[0]
                         cod_lote = st.text_input("Identificação desta Remessa:")
                     with col_in2:
-                        data_necessidade_obra = st.date_input("Data Limite de Despacho:", value=datetime(2026, 7, 10).date(), format="DD/MM/YYYY")
+                        data_necessidade_obra = st.date_input("Data Limite de Despacho:", value=(datetime.now() + timedelta(days=30)).date(), format="DD/MM/YYYY")
                         recuo_dias_base = st.number_input("Dias de Pulmão (Segurança):", min_value=0, value=2)
                     with col_in3:
                         dias_uteis_fabricacao = st.number_input(
@@ -657,14 +637,13 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             index=3
                         )
 
+                        # Prazo da engenharia = primeiro dia de produção - 3 dias
+                        # Lógica: engenharia libera → produção começa → despacho → instalação
                         dt_limite_preview = datetime.combine(data_necessidade_obra, datetime.min.time())
                         dia_fim_preview = dt_limite_preview - timedelta(days=int(recuo_dias_base))
+                        primeiro_dia_producao_preview = dia_fim_preview - timedelta(days=int(dias_uteis_fabricacao))
                         dias_engenharia = 3
-                        prazo_engenharia = (
-                            dia_fim_preview
-                            - timedelta(days=int(dias_uteis_fabricacao))
-                            - timedelta(days=dias_engenharia)
-                        )
+                        prazo_engenharia = primeiro_dia_producao_preview - timedelta(days=dias_engenharia)
 
                         st.info(
                             f"📐 Engenharia deve liberar até:\n\n"
@@ -693,6 +672,11 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             dt_limite_conv = datetime.combine(data_necessidade_obra, datetime.min.time())
                             dia_fim_producao = dt_limite_conv - timedelta(days=int(recuo_dias_base))
 
+                            # Âncora é o primeiro dia de produção
+                            primeiro_dia_producao = dia_fim_producao - timedelta(days=int(dias_uteis_fabricacao))
+                            dias_engenharia = 3
+                            prazo_engenharia = primeiro_dia_producao - timedelta(days=dias_engenharia)
+
                             caixas_por_dia_real = total_cx / float(dias_uteis_fabricacao)
                             m2_por_dia_real = total_m2 / float(dias_uteis_fabricacao)
 
@@ -706,7 +690,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     continue
 
                                 dias_uteis_contados += 1
-                                # CORREÇÃO 2: Fase produtiva com lógica correta (primeiro corte, depois montagem)
                                 fase_atual = "CORTE E USINAGEM" if dias_uteis_contados <= (int(dias_uteis_fabricacao) / 2) else "MONTAGEM FINAL"
 
                                 novos_registros.append({
@@ -729,8 +712,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             df_novos = pd.DataFrame(novos_registros)
                             salvar_lotes_micro(df_novos)
 
-                            # PONTO 3: Persistir o prazo calculado na frente correspondente
-                            # prazo_engenharia já foi calculado acima na pré-visualização do formulário
                             conn_prazo = conectar_banco()
                             cursor_prazo = conn_prazo.cursor()
                             cursor_prazo.execute(
@@ -766,7 +747,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         if not df_editado.equals(df_obra_atual):
                             conn = conectar_banco()
                             cursor = conn.cursor()
-
                             for idx, row in df_editado.iterrows():
                                 cursor.execute("""
                                     UPDATE itens_detalhado
@@ -874,10 +854,13 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             st.header("🏗️ Painel Técnico da Engenharia — Central de Gestão de Frentes")
             st.caption(f"Referência de data do sistema: {HOJE_PROJETO.strftime('%d/%m/%Y')} | Obra selecionada: **{obra_selecionada or 'Nenhuma'}**")
 
-            # ================================================================
-            # FUNÇÃO AUXILIAR: Ícone e texto de situação com base nos dias restantes
-            # Fonte da verdade: cronograma_macro.Prazo_Engenharia (gravado pelo PCP)
-            # ================================================================
+            # Recarga fresca do banco para garantir Prazo_Engenharia atualizado
+            df_macro_engenharia = carregar_macro()
+            if obra_selecionada:
+                df_macro_engenharia = df_macro_engenharia[df_macro_engenharia['Obra'] == obra_selecionada]
+            else:
+                df_macro_engenharia = pd.DataFrame()
+
             def classificar_situacao(dias_restantes, status_tecnico):
                 STATUS_LIBERADO = "🟢 Projetos Liberados para o PCP"
                 if status_tecnico == STATUS_LIBERADO:
@@ -890,9 +873,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     return "critico", f"🟡 Crítico — faltam {int(dias_restantes)} dias", int(dias_restantes)
                 return "ok", f"🟢 Dentro do prazo ({int(dias_restantes)} dias)", int(dias_restantes)
 
-            # ================================================================
-            # ESTADOS TÉCNICOS DISPONÍVEIS (máquina de estados)
-            # ================================================================
             ESTADOS_TECNICOS = [
                 "🔴 Aguardando Medição In Loco",
                 "🟡 Medição Realizada — Em Projetos",
@@ -901,16 +881,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 "⚪ Arquivado / Concluído",
             ]
 
-            # ================================================================
-            # PRÉ-PROCESSAMENTO: montar lista enriquecida de frentes
-            # Prazo lido diretamente de cronograma_macro.Prazo_Engenharia
-            # Sem recálculo — única fonte da verdade é o que o PCP gravou
-            # ================================================================
             frentes_processadas = []
 
-            if not df_macro_filtrado.empty:
-                for _, row in df_macro_filtrado.iterrows():
-                    # Leitura direta da coluna persistida pelo PCP no fatiamento
+            if not df_macro_engenharia.empty:
+                for _, row in df_macro_engenharia.iterrows():
                     prazo_eng = row['Prazo_Engenharia'] if pd.notna(row.get('Prazo_Engenharia')) else None
                     dias_rest = (prazo_eng - HOJE_PROJETO).days if prazo_eng is not None else None
                     situacao_key, situacao_txt, dias_num = classificar_situacao(
@@ -934,14 +908,13 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         "status_tecnico": row.get('Status_Engenharia', ESTADOS_TECNICOS[0]),
                     })
 
-            # Separar críticas: vencidas ou com ≤ 7 dias E não liberadas
             frentes_criticas = [
                 f for f in frentes_processadas
                 if f['situacao_key'] in ('critico', 'vencido')
             ]
 
             # ================================================================
-            # EXPANDER 1 — 🚨 FRENTES CRÍTICAS  (sempre aberto)
+            # EXPANDER 1 — 🚨 FRENTES CRÍTICAS
             # ================================================================
             label_criticas = f"🚨 Frentes Críticas — {len(frentes_criticas)} alerta(s)"
             with st.expander(label_criticas, expanded=True):
@@ -957,7 +930,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             col_id, col_contador = st.columns([7, 3])
 
                             with col_id:
-                                # Título da frente
                                 sub_txt = f" · {frente['subdivisao']}" if frente['subdivisao'] else ""
                                 st.markdown(f"### {frente['tarefa']}{sub_txt}")
 
@@ -970,11 +942,9 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     st.write(f"📐 **Prazo PCP:** `{prazo_txt}`")
                                     st.write(f"📊 **Metragem:** {frente['m2']:,.2f} m²")
 
-                                # Status técnico atual
                                 st.write(f"🔧 **Status técnico:** {frente['status_tecnico']}")
 
                             with col_contador:
-                                # Contador de dias — elemento visual dominante
                                 if frente['situacao_key'] == 'vencido':
                                     st.error(f"⏰ VENCIDO\n\n**{frente['dias_num']} dias**\natraso")
                                 else:
@@ -982,7 +952,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
                             st.markdown("---")
 
-                            # Ações rápidas no card crítico
                             col_acao1, col_acao2 = st.columns(2)
                             with col_acao1:
                                 chave_sel = f"eng_crit_status_{frente['id']}"
@@ -1003,14 +972,13 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     st.rerun()
 
             # ================================================================
-            # EXPANDER 2 — 📋 TODAS AS FRENTES  (fechado por padrão)
+            # EXPANDER 2 — 📋 TODAS AS FRENTES
             # ================================================================
             with st.expander(f"📋 Todas as Frentes da Engenharia — {len(frentes_processadas)} frente(s)", expanded=False):
 
                 if not frentes_processadas:
                     st.info("Nenhuma frente cadastrada para esta obra.")
                 else:
-                    # Filtros acima da lista
                     col_f1, col_f2 = st.columns([3, 2])
                     with col_f1:
                         filtro_status = st.selectbox(
@@ -1026,7 +994,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             key="eng_filtro_situacao"
                         )
 
-                    # Aplicar filtros
                     frentes_exibir = frentes_processadas.copy()
                     if filtro_status != "Todos os status":
                         frentes_exibir = [f for f in frentes_exibir if f['status_tecnico'] == filtro_status]
@@ -1059,7 +1026,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     st.write(f"`{prazo_txt}`")
 
                                 with col_acao:
-                                    # Badge de situação
                                     sk = frente['situacao_key']
                                     if sk == 'vencido':
                                         st.error(frente['situacao_txt'])
@@ -1072,7 +1038,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     else:
                                         st.info(frente['situacao_txt'])
 
-                                # Linha de atualização de status — inline
                                 col_sel, col_btn = st.columns([4, 1])
                                 with col_sel:
                                     idx_atual = ESTADOS_TECNICOS.index(frente['status_tecnico']) if frente['status_tecnico'] in ESTADOS_TECNICOS else 0
@@ -1091,10 +1056,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                         st.rerun()
 
             # ================================================================
-            # EXPANDER 3 — 📝 SOLICITAÇÕES DE PRAZO  (fechado por padrão)
-            # Arquitetura preparada para persistência futura:
-            # Tabela sugerida: solicitacoes_prazo (id, edt, prazo_solicitado,
-            #   justificativa, status, criado_por, criado_em, decidido_por, decidido_em)
+            # EXPANDER 3 — 📝 SOLICITAÇÕES DE PRAZO
             # ================================================================
             frentes_nao_liberadas = [
                 f for f in frentes_processadas
@@ -1106,7 +1068,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             with st.expander(label_sol, expanded=False):
                 st.caption("Use esta seção para registrar pedidos de extensão de prazo ao PCP. Em breve com persistência no banco de dados.")
 
-                # --- VISÃO ENGENHARIA: criar nova solicitação ---
                 if setor in ["Engenharia", "Master"]:
                     st.markdown("#### ✍️ Nova Solicitação de Extensão de Prazo")
 
@@ -1156,12 +1117,11 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 lista_atual = st.session_state.get('eng_solicitacoes_pendentes', [])
                                 lista_atual.append(nova_sol)
                                 st.session_state['eng_solicitacoes_pendentes'] = lista_atual
-                                st.success(f"Solicitação enviada para o PCP! O prazo atual permanece até aprovação.")
+                                st.success("Solicitação enviada para o PCP! O prazo atual permanece até aprovação.")
                                 st.rerun()
 
                 st.markdown("---")
 
-                # --- VISÃO PCP/MASTER: aprovar ou rejeitar ---
                 if setor in ["Master"]:
                     st.markdown("#### ✅ Decisão do PCP sobre Solicitações Recebidas")
                     lista_sol = st.session_state.get('eng_solicitacoes_pendentes', [])
@@ -1195,7 +1155,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                             st.toast("Solicitação rejeitada.", icon="❌")
                                             st.rerun()
 
-                # Histórico de decisões tomadas (aprovadas/rejeitadas)
                 lista_sol_full = st.session_state.get('eng_solicitacoes_pendentes', [])
                 historico = [s for s in lista_sol_full if s['status'] != "⏳ Pendente de Aprovação"]
                 if historico:
@@ -1204,7 +1163,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         st.caption(f"{sol['status']} | **{sol['tarefa']}** | Pedido: {sol['prazo_solicitado']} | Por: {sol['criado_por']}")
 
             # ================================================================
-            # EXPANDER 4 — 🔍 CARGA DA FÁBRICA  (inalterado — já funcionava)
+            # EXPANDER 4 — 🔍 CARGA DA FÁBRICA
             # ================================================================
             with st.expander("🔍 Verificar Capacidade / Carga Ocupada da Fábrica Semanal", expanded=False):
                 st.markdown("#### 📈 Carga Total Já Liberada para Produção por Semana:")
@@ -1280,7 +1239,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 time.sleep(0.5)
                                 st.rerun()
                             except sqlite3.IntegrityError:
-                                # CORREÇÃO 1: 'East.error' corrigido para 'st.error'
                                 st.error("Este nome de usuário (Login) já existe.")
                             finally:
                                 conn.close()
