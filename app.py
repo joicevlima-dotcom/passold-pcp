@@ -319,14 +319,30 @@ def deletar_lotes_por_edt_lote(obra, edt, cod_lote):
     conn.commit(); conn.close()
 
 def atualizar_cronograma_macro_datas(edt, prazo_eng, primeiro_prod, despacho):
+    """Sempre guarda a data MAIS PRÓXIMA — o lote mais urgente é a referência."""
     conn = conectar_banco(); cursor = conn.cursor()
+    cursor.execute("SELECT prazo_engenharia, primeiro_dia_producao, data_limite_despacho FROM cronograma_macro WHERE EDT=%s", (edt,))
+    row = cursor.fetchone()
+    def to_dt(v):
+        try: return pd.to_datetime(v) if v else None
+        except: return None
+    if row:
+        pa, pp, pd_ = to_dt(row[0]), to_dt(row[1]), to_dt(row[2])
+        novo_prazo    = min(pa,  pd.to_datetime(prazo_eng))    if pa  else pd.to_datetime(prazo_eng)
+        novo_primeiro = min(pp,  pd.to_datetime(primeiro_prod)) if pp  else pd.to_datetime(primeiro_prod)
+        novo_despacho = min(pd_, pd.to_datetime(despacho))     if pd_ else pd.to_datetime(despacho)
+    else:
+        novo_prazo    = pd.to_datetime(prazo_eng)
+        novo_primeiro = pd.to_datetime(primeiro_prod)
+        novo_despacho = pd.to_datetime(despacho)
     cursor.execute("""
         UPDATE cronograma_macro
         SET Prazo_Engenharia=%s, Primeiro_Dia_Producao=%s, Data_Limite_Despacho=%s
         WHERE EDT=%s
-    """, (prazo_eng.strftime('%Y-%m-%d'), primeiro_prod.strftime('%Y-%m-%d'),
-          despacho.strftime('%Y-%m-%d'), edt))
+    """, (novo_prazo.strftime('%Y-%m-%d'), novo_primeiro.strftime('%Y-%m-%d'),
+          novo_despacho.strftime('%Y-%m-%d'), edt))
     conn.commit(); conn.close()
+
 
 def atualizar_status_engenharia(edt_id, novo_status):
     conn = conectar_banco(); cursor = conn.cursor()
