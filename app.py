@@ -92,7 +92,7 @@ div[data-testid="stMetricLabel"] {
 /* BOTÕES */
 .stButton > button {
     background-color: var(--primary-color)!important;
-    color: white!important;
+    color: #FFFFFF!important;
     font-weight: 600!important;
     border-radius: 6px!important;
     border: none!important;
@@ -101,10 +101,25 @@ div[data-testid="stMetricLabel"] {
     box-shadow: var(--shadow-sm)!important;
     transition: all 0.2s ease!important;
 }
+.stButton > button p,
+.stButton > button span,
+.stButton > button div {
+    color: #FFFFFF!important;
+}
 .stButton > button:hover {
     background-color: var(--primary-light)!important;
     transform: translateY(-1px);
     box-shadow: var(--shadow-md)!important;
+    color: #FFFFFF!important;
+}
+.stButton > button:hover p,
+.stButton > button:hover span {
+    color: #FFFFFF!important;
+}
+/* FIX: garante letra branca em todos os estados do botão, inclusive o "Sair" */
+.stButton > button *, 
+.stButton > button p,
+.stButton > button span {
     color: white!important;
 }
 .stButton > button[kind="primary"] {
