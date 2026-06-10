@@ -172,27 +172,58 @@ def get_logo_base64():
 def render_topbar(nome, setor):
     logo_b64 = get_logo_base64()
     if logo_b64:
-        logo_html = f'<div class="topbar-logo-box"><img src="data:image/png;base64,{logo_b64}" alt="Logo"/></div>'
+        logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:36px;display:block;" alt="Logo"/>'
     else:
-        logo_html = '<div class="topbar-logo-box"><span style="font-family:Barlow Condensed,sans-serif;font-weight:800;font-size:22px;color:#D4A017;">P</span></div>'
-    st.markdown(f"""
-        <div class="topbar">
-            <div class="topbar-left">
+        logo_html = '<span style="font-family:Barlow Condensed,sans-serif;font-weight:800;font-size:26px;color:#FFFFFF;letter-spacing:1px;">PASS<span style=\'color:#D4A017;\'>OLD</span></span>'
+
+    col_logo, col_user, col_btn = st.columns([3, 6, 1])
+    with col_logo:
+        st.markdown(f"""
+            <div style="
+                background: linear-gradient(90deg,#0A1628 0%,#0F1F3D 100%);
+                height: 56px;
+                display: flex;
+                align-items: center;
+                padding: 0 20px;
+                border-bottom: 2px solid #D4A017;
+                margin: 0 -1rem;
+            ">
                 {logo_html}
-                <div>
-                    <div class="topbar-brand">PASS<span class="topbar-accent">OLD</span></div>
-                    <div class="topbar-sub">Sistemas de Fachadas · PCP</div>
+            </div>
+        """, unsafe_allow_html=True)
+    with col_user:
+        st.markdown(f"""
+            <div style="
+                background: linear-gradient(90deg,#0F1F3D 0%,#0A1628 100%);
+                height: 56px;
+                display: flex;
+                align-items: center;
+                justify-content: flex-end;
+                padding: 0 20px;
+                border-bottom: 2px solid #D4A017;
+                margin: 0 -1rem;
+            ">
+                <div style="text-align:right;">
+                    <div style="font-size:13px;font-weight:600;color:#FFFFFF;">{nome}</div>
+                    <div style="font-size:10px;color:rgba(255,255,255,0.45);text-transform:uppercase;letter-spacing:1px;">{setor}</div>
                 </div>
             </div>
-            <div class="topbar-right">
-                <div>
-                    <div class="topbar-user-name">{nome}</div>
-                    <div class="topbar-user-role">{setor}</div>
-                </div>
-                <div class="topbar-divider"></div>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+    with col_btn:
+        st.markdown(f"""
+            <div style="
+                background: #0A1628;
+                height: 56px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 0 8px;
+                border-bottom: 2px solid #D4A017;
+                margin: 0 -1rem;
+            "></div>
+        """, unsafe_allow_html=True)
+        if st.button("Sair", key="btn_sair_topbar"):
+            st.session_state.autenticado = False; st.rerun()
 
 def section_header(title, subtitle=""):
     st.markdown(f'<div class="section-header">{title}</div>', unsafe_allow_html=True)
@@ -449,7 +480,7 @@ if not st.session_state.autenticado:
     """, unsafe_allow_html=True)
 
     if logo_b64:
-        logo_tag = f'<img src="data:image/png;base64,{logo_b64}" style="height:180px;display:block;margin:0 auto 28px auto;" />'
+        logo_tag = f'<img src="data:image/png;base64,{logo_b64}" style="height:80px;display:block;margin:0 auto 28px auto;" />'
     else:
         logo_tag = '<div style="font-family:Barlow Condensed,sans-serif;font-weight:800;font-size:48px;color:#0A1628;text-align:center;letter-spacing:2px;margin-bottom:28px;">PASS<span style=\"color:#D4A017;\">OLD</span></div>'
 
@@ -475,19 +506,14 @@ if not st.session_state.autenticado:
 # ══════════════════════════════════════════════════════════
 render_topbar(st.session_state.usuario_nome, st.session_state.usuario_setor)
 
-col_obra, col_sair = st.columns([10, 1])
-with col_obra:
-    df_banco_macro = carregar_macro()
-    df_banco_micro = carregar_micro()
-    if not df_banco_macro.empty:
-        obras_lista = sorted(df_banco_macro['Obra'].unique().tolist())
-        obra_selecionada = st.selectbox("", obras_lista, label_visibility="collapsed")
-        df_macro_filtrado = df_banco_macro[df_banco_macro['Obra'] == obra_selecionada].copy()
-    else:
-        obra_selecionada = None; df_macro_filtrado = pd.DataFrame()
-with col_sair:
-    if st.button("Sair"):
-        st.session_state.autenticado = False; st.rerun()
+df_banco_macro = carregar_macro()
+df_banco_micro = carregar_micro()
+if not df_banco_macro.empty:
+    obras_lista = sorted(df_banco_macro['Obra'].unique().tolist())
+    obra_selecionada = st.selectbox("", obras_lista, label_visibility="collapsed")
+    df_macro_filtrado = df_banco_macro[df_banco_macro['Obra'] == obra_selecionada].copy()
+else:
+    obra_selecionada = None; df_macro_filtrado = pd.DataFrame()
 
 st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
