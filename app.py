@@ -12,86 +12,204 @@ st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide")
 
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+st.markdown("""
+<style>
+/* IMPORTAR FONTES */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    .main .block-container { padding-top: 2rem; }
+/* VARIÁVEIS GLOBAIS DE COR (Identidade Passold Modernizada) */
+:root {
+--primary-color: #0F172A; /* Azul Noturno Profundo */
+--primary-light: #334155; /* Cinza Ardósia */
+--accent-color: #EA580C; /* Laranja Queimado (Ação/Engenharia) */
+--success-color: #059669; /* Verde Esmeralda */
+--warning-color: #D97706; /* Âmbar */
+--danger-color: #DC2626; /* Vermelho Tijolo */
+--bg-body: #F8FAFC; /* Branco Gelo (Fundo Suave) */
+--bg-card: #FFFFFF; /* Branco Puro */
+--border-color: #E2E8F0; /* Cinza Claro */
+--text-main: #1E293B; /* Texto Principal */
+--text-muted: #64748B; /* Texto Secundário */
+--shadow-sm: 0 1px 3px rgba(0,0,0,0.1);
+--shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+--radius: 8px;
+}
 
-    h1 { color: #1E3A8A; font-weight: 700; letter-spacing: -0.5px; }
-    h2 { color: #1E3A8A; }
-    h3 { color: #1e293b; }
+/* RESET E FUNDO GERAL */
+.stApp {
+background-color: var(--bg-body);
+font-family: 'Inter', sans-serif;
+color: var(--text-main);
+}
 
-    /* Métricas */
-    div[data-testid="metric-container"] {
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-left: 4px solid #1E3A8A;
-        border-radius: 8px;
-        padding: 12px 16px;
-    }
+/* Remove a barra lateral padrão feia se não estiver em uso crítico, ou estiliza */
+section[data-testid="stSidebar"] {
+background-color: var(--bg-card);
+border-right: 1px solid var(--border-color);
+box-shadow: var(--shadow-sm);
+}
 
-    /* Botão primário */
-    div.stButton > button {
-        background-color: #1E3A8A;
-        color: white;
-        font-weight: 600;
-        font-size: 14px;
-        padding: 8px 16px;
-        border-radius: 6px;
-        border: none;
-        transition: background 0.2s;
-    }
-    div.stButton > button:hover { background-color: #2563EB; color: white; }
+/* TIPOGRAFIA */
+h1, h2, h3, h4, h5, h6 {
+color: var(--primary-color)!important;
+font-weight: 700!important;
+letter-spacing: -0.02em;
+margin-bottom: 1rem!important;
+}
 
-    /* Login */
-    .login-container {
-        max-width: 400px; margin: 0 auto; padding: 30px;
-        background-color: #F8FAFC; border-radius: 10px; border: 1px solid #E2E8F0;
-    }
+p, label, div[data-testid="stWidgetLabel"] {
+color: var(--text-main);
+font-size: 0.95rem;
+}
 
-    /* Tag badges */
-    .badge-obra  { background:#FFF7ED; color:#C2410C; padding:2px 8px; border-radius:4px; font-weight:600; font-size:12px; }
-    .badge-edt   { background:#EEF2FF; color:#3730A3; padding:2px 8px; border-radius:4px; font-weight:600; font-size:12px; }
-    .badge-lote  { background:#F0FDF4; color:#15803D; padding:2px 8px; border-radius:4px; font-weight:600; font-size:12px; }
+/* CARDS E CONTAINERS (Efeito de Profundidade) */
+.stContainer, div[data-testid="stVerticalBlock"], div.element-container {
+/* Aplica suavidade aos blocos */
+}
 
-    /* Card calendário — dia com lotes */
-    .cal-day-active {
-        background: #EFF6FF;
-        border: 1px solid #93C5FD;
-        border-radius: 6px;
-        padding: 5px;
-        text-align: center;
-        height: 70px;
-        cursor: pointer;
-    }
-    .cal-day-empty {
-        background: #F8FAFC;
-        border: 1px solid #E2E8F0;
-        border-radius: 6px;
-        padding: 5px;
-        text-align: center;
-        height: 70px;
-    }
-    .cal-day-today {
-        background: #DBEAFE;
-        border: 2px solid #3B82F6;
-        border-radius: 6px;
-        padding: 5px;
-        text-align: center;
-        height: 70px;
-    }
+/* MÉTRICAS (KPIs) - Visual de Dashboard Profissional */
+div[data-testid="metric-container"] {
+background: var(--bg-card)!important;
+border: 1px solid var(--border-color)!important;
+border-left: 5px solid var(--primary-color)!important;
+border-radius: var(--radius)!important;
+padding: 16px!important;
+box-shadow: var(--shadow-sm)!important;
+transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+div[data-testid="metric-container"]:hover {
+transform: translateY(-2px);
+box-shadow: var(--shadow-md)!important;
+border-left-color: var(--accent-color)!important;
+}
+div[data-testid="stMetricValue"] {
+font-size: 1.8rem!important;
+font-weight: 700!important;
+color: var(--primary-color)!important;
+}
+div[data-testid="stMetricLabel"] {
+color: var(--text-muted)!important;
+font-weight: 500!important;
+text-transform: uppercase;
+font-size: 0.75rem!important;
+letter-spacing: 0.05em;
+}
 
-    /* Sidebar e tabs */
-    .stTabs [data-baseweb="tab"] { font-weight: 500; }
-    .stTabs [aria-selected="true"] { color: #1E3A8A; border-bottom-color: #1E3A8A; }
+/* BOTÕES - Modernos e Tátil */
+.stButton > button {
+background-color: var(--primary-color)!important;
+color: white!important;
+font-weight: 600!important;
+border-radius: 6px!important;
+border: none!important;
+padding: 10px 24px!important;
+font-size: 0.9rem!important;
+box-shadow: var(--shadow-sm)!important;
+transition: all 0.2s ease!important;
+}
+.stButton > button:hover {
+background-color: var(--primary-light)!important;
+transform: translateY(-1px);
+box-shadow: var(--shadow-md)!important;
+color: white!important;
+}
+.stButton > button[kind="primary"] {
+background-color: var(--accent-color)!important; /* Destaque para ação principal */
+}
+.stButton > button[kind="primary"]:hover {
+background-color: #c2410c!important;
+}
 
-    /* Status bar urgência */
-    .bar-ok      { border-left: 4px solid #22C55E; background: #F0FDF4; padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
-    .bar-warn    { border-left: 4px solid #EAB308; background: #FEF9C3; padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
-    .bar-danger  { border-left: 4px solid #EF4444; background: #FEE2E2; padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
-    .bar-neutral { border-left: 4px solid #94A3B8; background: #F8FAFC;  padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
-    </style>
+/* INPUTS E SELECTBOX - Limpos */
+.stTextInput > div > div > input,
+.stSelectbox > div > div > select,
+.stNumberInput > div > div > input {
+background-color: var(--bg-card)!important;
+border: 1px solid var(--border-color)!important;
+border-radius: 6px!important;
+color: var(--text-main)!important;
+padding: 10px!important;
+font-size: 0.9rem!important;
+box-shadow: none!important;
+}
+.stTextInput > div > div > input:focus,
+.stSelectbox > div > div > select:focus {
+border-color: var(--primary-color)!important;
+box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.1)!important;
+}
+
+/* TABELAS E DATAFRAMES - Mais legíveis */
+div[data-testid="stDataFrame"] {
+border-radius: var(--radius)!important;
+border: 1px solid var(--border-color)!important;
+overflow: hidden;
+}
+thead tr th {
+background-color: #F1F5F9!important;
+color: var(--primary-light)!important;
+font-weight: 600!important;
+text-transform: uppercase;
+font-size: 0.75rem!important;
+letter-spacing: 0.05em;
+border-bottom: 2px solid var(--border-color)!important;
+}
+
+/* ABAS (TABS) - Estilo Clean */
+.stTabs [data-baseweb="tab-list"] {
+gap: 24px;
+border-bottom: 1px solid var(--border-color);
+}
+.stTabs [data-baseweb="tab"] {
+height: 50px;
+white-space: pre-wrap;
+background-color: transparent;
+border-radius: 4px 4px 0px 0px;
+color: var(--text-muted);
+font-weight: 500;
+transition: all 0.2s;
+}
+.stTabs [aria-selected="true"] {
+background-color: var(--bg-body);
+color: var(--accent-color);
+font-weight: 700;
+border-bottom: 3px solid var(--accent-color);
+}
+
+/* ALERTAS E BADGES PERSONALIZADOS */
+.badge-obra { background:#FFF7ED; color:#C2410C; padding:4px 10px; border-radius:6px; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; }
+.badge-edt { background:#F1F5F9; color:#334155; padding:4px 10px; border-radius:6px; font-weight:600; font-size:11px; border:1px solid #E2E8F0; }
+.badge-lote { background:#ECFDF5; color:#047857; padding:4px 10px; border-radius:6px; font-weight:700; font-size:11px; }
+
+/* CALENDÁRIO E CARDS DE DIA */
+.cal-day-active,.cal-day-today {
+background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%);
+border: 1px solid #3B82F6;
+box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+}
+
+/* BARRAS DE STATUS (Urgência) */
+.bar-ok { border-left: 5px solid var(--success-color); background: #F0FDF4; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
+.bar-warn { border-left: 5px solid var(--warning-color); background: #FFFBEB; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
+.bar-danger { border-left: 5px solid var(--danger-color); background: #FEF2F2; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
+.bar-neutral { border-left: 5px solid var(--text-muted); background: #F8FAFC; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
+
+/* LOGIN CARD */
+.login-container {
+background: var(--bg-card);
+padding: 40px;
+border-radius: 12px;
+box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+border: 1px solid var(--border-color);
+text-align: center;
+}
+
+/* ESCONDER ELEMENTOS FEIOS DO STREAMLIT */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+</style>
 """, unsafe_allow_html=True)
+
 
 HOJE_PROJETO = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
