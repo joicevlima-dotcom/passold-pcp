@@ -12,20 +12,84 @@ st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide")
 
 st.markdown("""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     .main .block-container { padding-top: 2rem; }
-    h1 { color: #1E3A8A; font-weight: 700; }
-    h2 { color: #2563EB; }
-    .stMetric { background-color: #F3F4F6; padding: 15px; border-radius: 10px; border-left: 5px solid #2563EB; }
+
+    h1 { color: #1E3A8A; font-weight: 700; letter-spacing: -0.5px; }
+    h2 { color: #1E3A8A; }
+    h3 { color: #1e293b; }
+
+    /* Métricas */
+    div[data-testid="metric-container"] {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-left: 4px solid #1E3A8A;
+        border-radius: 8px;
+        padding: 12px 16px;
+    }
+
+    /* Botão primário */
     div.stButton > button {
-        width: 100%; background-color: #1E3A8A; color: white;
-        font-weight: bold; font-size: 16px; padding: 10px; border-radius: 8px;
+        background-color: #1E3A8A;
+        color: white;
+        font-weight: 600;
+        font-size: 14px;
+        padding: 8px 16px;
+        border-radius: 6px;
+        border: none;
+        transition: background 0.2s;
     }
     div.stButton > button:hover { background-color: #2563EB; color: white; }
+
+    /* Login */
     .login-container {
         max-width: 400px; margin: 0 auto; padding: 30px;
         background-color: #F8FAFC; border-radius: 10px; border: 1px solid #E2E8F0;
     }
-    @keyframes blinker { 50% { opacity: 0.5; } }
+
+    /* Tag badges */
+    .badge-obra  { background:#FFF7ED; color:#C2410C; padding:2px 8px; border-radius:4px; font-weight:600; font-size:12px; }
+    .badge-edt   { background:#EEF2FF; color:#3730A3; padding:2px 8px; border-radius:4px; font-weight:600; font-size:12px; }
+    .badge-lote  { background:#F0FDF4; color:#15803D; padding:2px 8px; border-radius:4px; font-weight:600; font-size:12px; }
+
+    /* Card calendário — dia com lotes */
+    .cal-day-active {
+        background: #EFF6FF;
+        border: 1px solid #93C5FD;
+        border-radius: 6px;
+        padding: 5px;
+        text-align: center;
+        height: 70px;
+        cursor: pointer;
+    }
+    .cal-day-empty {
+        background: #F8FAFC;
+        border: 1px solid #E2E8F0;
+        border-radius: 6px;
+        padding: 5px;
+        text-align: center;
+        height: 70px;
+    }
+    .cal-day-today {
+        background: #DBEAFE;
+        border: 2px solid #3B82F6;
+        border-radius: 6px;
+        padding: 5px;
+        text-align: center;
+        height: 70px;
+    }
+
+    /* Sidebar e tabs */
+    .stTabs [data-baseweb="tab"] { font-weight: 500; }
+    .stTabs [aria-selected="true"] { color: #1E3A8A; border-bottom-color: #1E3A8A; }
+
+    /* Status bar urgência */
+    .bar-ok      { border-left: 4px solid #22C55E; background: #F0FDF4; padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
+    .bar-warn    { border-left: 4px solid #EAB308; background: #FEF9C3; padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
+    .bar-danger  { border-left: 4px solid #EF4444; background: #FEE2E2; padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
+    .bar-neutral { border-left: 4px solid #94A3B8; background: #F8FAFC;  padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -35,12 +99,6 @@ HOJE_PROJETO = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 # CONEXÃO SUPABASE (via st.secrets)
 # ========================================================
 def conectar_banco():
-    """
-    Lê a URL de conexão dos Streamlit Secrets.
-    No arquivo .streamlit/secrets.toml coloque:
-      [supabase]
-      url = "postgresql://postgres:[SENHA]@db.[REF].supabase.co:5432/postgres"
-    """
     url = st.secrets["supabase"]["url"]
     conn = psycopg2.connect(url)
     conn.autocommit = False
@@ -69,7 +127,7 @@ def inicializar_banco_de_dados():
             Inicio_Previsto DATE,
             Termino_Obra DATE,
             Status TEXT DEFAULT 'Pendente',
-            Status_Engenharia TEXT DEFAULT '🔴 Aguardando Medição In Loco',
+            Status_Engenharia TEXT DEFAULT 'Aguardando Medicao In Loco',
             Prazo_Engenharia DATE,
             Data_Limite_Despacho DATE,
             Primeiro_Dia_Producao DATE
@@ -116,7 +174,7 @@ def inicializar_banco_de_dados():
             prazo_solicitado TEXT,
             justificativa TEXT,
             criado_por TEXT,
-            status TEXT DEFAULT '⏳ Pendente de Aprovação',
+            status TEXT DEFAULT 'Pendente de Aprovacao',
             criado_em TEXT
         )
     """)
@@ -144,7 +202,6 @@ def inicializar_banco_de_dados():
         )
     """)
 
-    # Cria usuário master se não existir
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
         cursor.execute(
@@ -180,12 +237,6 @@ def calcular_cronograma_reverso(inicio_previsto, dias_logistica: int, dias_uteis
 def gerar_lote_unico(data_limite_obra, dias_logistica, dias_uteis_fab,
                       total_cx, total_m2, obra, edt, cod_lote,
                       especificacao, txt_pav, dificuldade):
-    """
-    Cria 1 único registro por lote.
-    - data_inicio_producao = calculado retroativamente
-    - data_fim_producao    = data_limite_obra - dias_logistica
-    - O calendário mostra este lote em TODOS os dias entre início e fim
-    """
     dt_limite  = datetime.combine(data_limite_obra, datetime.min.time()) \
                  if not isinstance(data_limite_obra, datetime) else data_limite_obra
     dt_despacho = dt_limite - timedelta(days=int(dias_logistica))
@@ -199,13 +250,13 @@ def gerar_lote_unico(data_limite_obra, dias_logistica, dias_uteis_fab,
         "Tipo_Material":            especificacao,
         "Qtd_Caixas":               int(total_cx),
         "M2_Item":                  float(round(total_m2, 2)),
-        "Data_Producao_Programada": dt_inicio.strftime('%Y-%m-%d'),   # início produção
-        "Data_Limite_Obra":         dt_limite.strftime('%Y-%m-%d'),   # data na obra
-        "Data_Despacho":            dt_despacho.strftime('%Y-%m-%d'), # saída fábrica
+        "Data_Producao_Programada": dt_inicio.strftime('%Y-%m-%d'),
+        "Data_Limite_Obra":         dt_limite.strftime('%Y-%m-%d'),
+        "Data_Despacho":            dt_despacho.strftime('%Y-%m-%d'),
         "Romaneio_Chapas":          txt_pav,
         "Status_Item":              "Pendente",
         "Dificuldade":              int(dificuldade),
-        "Fase_Produtiva":           f"CORTE→MONTAGEM ({dias_uteis_fab} dias úteis)",
+        "Fase_Produtiva":           f"CORTE→MONTAGEM ({dias_uteis_fab} dias uteis)",
         "Enviado_Logistica":        0
     }]
 
@@ -214,8 +265,16 @@ def prazo_valido(valor) -> bool:
     try: return not pd.isnull(valor)
     except: return False
 
+def ultima_semana_producao(dt_inicio, dt_fim):
+    """Retorna o início da última semana de produção (7 dias antes do fim)."""
+    dt_fim_dt = pd.to_datetime(dt_fim)
+    inicio_ultima_semana = dt_fim_dt - timedelta(days=6)
+    dt_inicio_dt = pd.to_datetime(dt_inicio)
+    # Garante que não vai antes do início real
+    return max(inicio_ultima_semana, dt_inicio_dt)
+
 # ========================================================
-# FUNÇÕES DE BANCO — todas usando psycopg2 + %s
+# FUNÇÕES DE BANCO
 # ========================================================
 def carregar_macro():
     conn = conectar_banco()
@@ -225,9 +284,7 @@ def carregar_macro():
                 'data_limite_despacho','primeiro_dia_producao']:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
-    # Normaliza nomes de colunas para o padrão do código
     df.columns = [c.replace('_',' ').title().replace(' ','_') if c != 'id' else c for c in df.columns]
-    # Re-mapeia para os nomes exatos esperados
     rename = {
         'Inicio_Previsto':'Inicio_Previsto','Termino_Obra':'Termino_Obra',
         'Prazo_Engenharia':'Prazo_Engenharia','Data_Limite_Despacho':'Data_Limite_Despacho',
@@ -319,7 +376,6 @@ def deletar_lotes_por_edt_lote(obra, edt, cod_lote):
     conn.commit(); conn.close()
 
 def atualizar_cronograma_macro_datas(edt, prazo_eng, primeiro_prod, despacho):
-    """Sempre guarda a data MAIS PRÓXIMA — o lote mais urgente é a referência."""
     conn = conectar_banco(); cursor = conn.cursor()
     cursor.execute("SELECT prazo_engenharia, primeiro_dia_producao, data_limite_despacho FROM cronograma_macro WHERE EDT=%s", (edt,))
     row = cursor.fetchone()
@@ -343,7 +399,6 @@ def atualizar_cronograma_macro_datas(edt, prazo_eng, primeiro_prod, despacho):
           novo_despacho.strftime('%Y-%m-%d'), edt))
     conn.commit(); conn.close()
 
-
 def atualizar_status_engenharia(edt_id, novo_status):
     conn = conectar_banco(); cursor = conn.cursor()
     cursor.execute("UPDATE cronograma_macro SET Status_Engenharia=%s WHERE id=%s", (novo_status, edt_id))
@@ -353,7 +408,7 @@ def salvar_solicitacao(edt, tarefa, prazo_atual, prazo_sol, justif, criado_por):
     conn = conectar_banco(); cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO solicitacoes_prazo (edt,tarefa,prazo_atual,prazo_solicitado,justificativa,criado_por,status,criado_em)
-        VALUES (%s,%s,%s,%s,%s,%s,'⏳ Pendente de Aprovação',%s)
+        VALUES (%s,%s,%s,%s,%s,%s,'Pendente de Aprovacao',%s)
     """, (edt, tarefa, prazo_atual, prazo_sol, justif, criado_por,
           datetime.now().strftime('%d/%m/%Y %H:%M')))
     conn.commit(); conn.close()
@@ -396,7 +451,7 @@ def confirmar_despacho(log_id, usuario):
     conn = conectar_banco(); cursor = conn.cursor()
     cursor.execute("""
         UPDATE logistica_envios
-        SET Status_Logistica='Despachado ✅', Confirmado_Por=%s, Confirmado_Em=%s
+        SET Status_Logistica='Despachado', Confirmado_Por=%s, Confirmado_Em=%s
         WHERE id=%s
     """, (usuario, datetime.now().strftime('%d/%m/%Y %H:%M'), log_id))
     conn.commit(); conn.close()
@@ -425,13 +480,13 @@ if 'autenticado' not in st.session_state:
 
 if not st.session_state.autenticado:
     st.markdown("<h1 style='text-align:center;color:#1E3A8A;'>Passold Sistemas</h1>", unsafe_allow_html=True)
-    st.markdown("<h4 style='text-align:center;color:#6B7280;margin-bottom:30px;'>PCP & Controle Operacional</h4>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center;color:#6B7280;margin-bottom:30px;font-size:15px;'>PCP & Controle Operacional</p>", unsafe_allow_html=True)
     with st.container():
         st.markdown('<div class="login-container">', unsafe_allow_html=True)
-        st.subheader("🔑 Login do Sistema")
+        st.subheader("Acesso ao Sistema")
         user_input = st.text_input("Usuário:")
         pass_input = st.text_input("Senha:", type="password")
-        if st.button("Entrar no PCP"):
+        if st.button("Entrar"):
             dados = verificar_login(user_input.strip(), pass_input)
             if dados:
                 st.session_state.autenticado   = True
@@ -439,7 +494,7 @@ if not st.session_state.autenticado:
                 st.session_state.usuario_setor = dados[1]
                 st.rerun()
             else:
-                st.error("Usuário ou Senha inválidos.")
+                st.error("Usuário ou senha inválidos.")
         st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
@@ -448,11 +503,11 @@ if not st.session_state.autenticado:
 # ========================================================
 ch1, ch2 = st.columns([4, 1])
 with ch1:
-    st.title("Passold - PCP Inteligente")
+    st.title("Passold — PCP Inteligente")
     st.caption(f"Usuário: **{st.session_state.usuario_nome}** | Setor: `{st.session_state.usuario_setor}`")
 with ch2:
     st.write("")
-    if st.button("🚪 Sair"):
+    if st.button("Sair"):
         st.session_state.autenticado = False; st.rerun()
 
 df_banco_macro = carregar_macro()
@@ -460,7 +515,7 @@ df_banco_micro = carregar_micro()
 
 if not df_banco_macro.empty:
     obras_lista      = sorted(df_banco_macro['Obra'].unique().tolist())
-    obra_selecionada = st.selectbox("Selecione a Obra de Trabalho:", obras_lista)
+    obra_selecionada = st.selectbox("Obra de trabalho:", obras_lista)
     df_macro_filtrado = df_banco_macro[df_banco_macro['Obra'] == obra_selecionada].copy()
 else:
     obra_selecionada  = None
@@ -471,21 +526,21 @@ else:
 # ========================================================
 setor = st.session_state.usuario_setor
 abas_disponiveis = []
-if setor in ["Master","Produção","Diretoria","Engenharia"]:
-    abas_disponiveis.append("PAINEL DA TV (Chão de Fábrica)")
+if setor in ["Master","Producao","Diretoria","Engenharia"]:
+    abas_disponiveis.append("Painel da Producao")
 if setor in ["Master"]:
     abas_disponiveis.append("Liberar OPs da Semana")
 if setor in ["Master","Diretoria"]:
-    abas_disponiveis.append("Visão Macro (Diretoria)")
+    abas_disponiveis.append("Visao Macro")
 if setor in ["Master"]:
-    abas_disponiveis.append("Vincular Datas (Materiais)")
-    abas_disponiveis.append("Cadastrar Nova Obra")
+    abas_disponiveis.append("Vincular Datas")
+    abas_disponiveis.append("Cadastrar Obra")
 if setor in ["Master","Engenharia"]:
-    abas_disponiveis.append("Painel Técnico da Engenharia")
-if setor in ["Master","Logística"]:
-    abas_disponiveis.append("Painel de Logística")
+    abas_disponiveis.append("Painel de Engenharia")
+if setor in ["Master","Logistica"]:
+    abas_disponiveis.append("Logistica")
 if setor in ["Master"]:
-    abas_disponiveis.append("Configurações do Sistema")
+    abas_disponiveis.append("Configuracoes")
 
 with st.container():
     abas_objetos = st.tabs(abas_disponiveis)
@@ -493,28 +548,34 @@ with st.container():
 for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
     # ==================================================
-    # PAINEL DA TV
+    # PAINEL DA PRODUCAO (TV)
     # ==================================================
-    if nome_aba == "PAINEL DA TV (Chão de Fábrica)":
+    if nome_aba == "Painel da Producao":
         import calendar as py_calendar
         with aba_objeto:
-            st.header("📆 Mural de Metas da Produção - Passold")
-            obras_tv = ["TODAS AS OBRAS"] + (list(df_banco_micro['Obra_Vinculada'].dropna().unique()) if not df_banco_micro.empty else [])
-            obra_tv  = st.selectbox("Filtrar por Obra:", obras_tv, key="sb_obra_tv")
+            st.header("Mural de Metas — Producao")
+            obras_tv = ["Todas as obras"] + (list(df_banco_micro['Obra_Vinculada'].dropna().unique()) if not df_banco_micro.empty else [])
+            obra_tv  = st.selectbox("Filtrar por obra:", obras_tv, key="sb_obra_tv")
 
             if not df_banco_micro.empty:
-                df_base = df_banco_micro[df_banco_micro['Status_Item'] == "Liberado para Fábrica"].copy()
-                df_base = df_base if obra_tv == "TODAS AS OBRAS" else df_base[df_base['Obra_Vinculada'] == obra_tv]
+                df_base = df_banco_micro[df_banco_micro['Status_Item'] == "Liberado para Fabrica"].copy()
+                df_base = df_base if obra_tv == "Todas as obras" else df_base[df_base['Obra_Vinculada'] == obra_tv]
 
                 if not df_base.empty:
-                    # Expande cada lote para todos os dias do período (início → fim na obra)
+                    # Expande cada lote para TODOS os dias do período (lote aparece no calendário normalmente)
                     registros_exp = []
                     for _, row in df_base.iterrows():
                         dt_ini = pd.to_datetime(row['Data_Producao_Programada']).date()
                         dt_fim = pd.to_datetime(row['Data_Limite_Obra']).date()
+                        # Calcula início da última semana deste lote
+                        ini_ultima_semana = (pd.to_datetime(dt_fim) - timedelta(days=6)).date()
+                        ini_ultima_semana = max(ini_ultima_semana, dt_ini)
                         dia = dt_ini
                         while dia <= dt_fim:
-                            r = row.to_dict(); r['_dia'] = dia
+                            r = row.to_dict()
+                            r['_dia'] = dia
+                            # Flag: botão "Pronto" só aparece na última semana
+                            r['_pode_concluir'] = (dia >= ini_ultima_semana)
                             registros_exp.append(r)
                             dia += timedelta(days=1)
                     df_exp = pd.DataFrame(registros_exp) if registros_exp else pd.DataFrame()
@@ -524,17 +585,17 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
                     c1, c2, c3 = st.columns([1, 2, 1])
                     with c1:
-                        if st.button("⬅️ Mês Anterior", use_container_width=True, key="btn_ant"):
+                        if st.button("Mes Anterior", use_container_width=True, key="btn_ant"):
                             st.session_state.prog_mes -= 1
                             if st.session_state.prog_mes == 0:
                                 st.session_state.prog_mes = 12; st.session_state.prog_ano -= 1
                             st.rerun()
                     with c2:
-                        nomes_meses = ["","Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                        nomes_meses = ["","Janeiro","Fevereiro","Marco","Abril","Maio","Junho",
                                        "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
-                        st.markdown(f"<h3 style='text-align:center;color:#1E3A8A;margin:0;'>📅 {nomes_meses[st.session_state.prog_mes]} / {st.session_state.prog_ano}</h3>", unsafe_allow_html=True)
+                        st.markdown(f"<h3 style='text-align:center;color:#1E3A8A;margin:0;'>{nomes_meses[st.session_state.prog_mes]} / {st.session_state.prog_ano}</h3>", unsafe_allow_html=True)
                     with c3:
-                        if st.button("Próximo Mês ➡️", use_container_width=True, key="btn_prox"):
+                        if st.button("Proximo Mes", use_container_width=True, key="btn_prox"):
                             st.session_state.prog_mes += 1
                             if st.session_state.prog_mes == 13:
                                 st.session_state.prog_mes = 1; st.session_state.prog_ano += 1
@@ -545,8 +606,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     semanas = cal.monthdatescalendar(st.session_state.prog_ano, st.session_state.prog_mes)
 
                     cols_h = st.columns(7)
-                    for i, nome in enumerate(["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"]):
-                        cols_h[i].markdown(f"<div style='text-align:center;font-weight:bold;color:#475569;padding:4px 0;'>{nome}</div>", unsafe_allow_html=True)
+                    for i, nome in enumerate(["Dom","Seg","Ter","Qua","Qui","Sex","Sab"]):
+                        cols_h[i].markdown(f"<div style='text-align:center;font-weight:600;color:#475569;padding:4px 0;font-size:13px;'>{nome}</div>", unsafe_allow_html=True)
 
                     for semana in semanas:
                         cols = st.columns(7)
@@ -556,15 +617,16 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     lotes_dia = df_exp[df_exp['_dia'] == data_dia] if not df_exp.empty else pd.DataFrame()
                                     n_lotes   = lotes_dia['Cod_Lote'].nunique() if not lotes_dia.empty else 0
                                     eh_hoje   = (data_dia == HOJE_PROJETO.date())
-                                    bg = "#EFF6FF" if eh_hoje else "#F8FAFC"
-                                    bd = "#3B82F6" if eh_hoje else "#E2E8F0"
+
                                     if n_lotes > 0:
-                                        obras_d = lotes_dia['Obra_Vinculada'].unique()
-                                        label_o = ", ".join(obras_d[:1])
-                                        if st.button(f"{data_dia.day}\n🔧{n_lotes} {label_o}", key=f"btn_{data_dia}", use_container_width=True):
+                                        obras_d  = lotes_dia['Obra_Vinculada'].unique()
+                                        label_o  = obras_d[0] if len(obras_d) == 1 else f"{len(obras_d)} obras"
+                                        btn_label = f"{data_dia.day}  |  {n_lotes} lote(s)\n{label_o}"
+                                        if st.button(btn_label, key=f"btn_{data_dia}", use_container_width=True):
                                             st.session_state.dia_clicado_tv = data_dia
                                     else:
-                                        st.markdown(f"<div style='background:{bg};border:1px solid {bd};padding:5px;border-radius:6px;text-align:center;height:70px;'><span style='color:#94A3B8;font-size:15px;'>{data_dia.day}</span><br><span style='color:#CBD5E1;font-size:10px;'>—</span></div>", unsafe_allow_html=True)
+                                        css_class = "cal-day-today" if eh_hoje else "cal-day-empty"
+                                        st.markdown(f"<div class='{css_class}'><span style='color:#94A3B8;font-size:15px;'>{data_dia.day}</span><br><span style='color:#CBD5E1;font-size:10px;'>—</span></div>", unsafe_allow_html=True)
                                 else:
                                     st.markdown('<div style="height:70px;"></div>', unsafe_allow_html=True)
 
@@ -573,49 +635,86 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         st.session_state.dia_clicado_tv = HOJE_PROJETO.date()
 
                     dia_sel = st.session_state.dia_clicado_tv
-                    st.subheader(f"🔍 Lotes em produção: {dia_sel.strftime('%d/%m/%Y')}")
+                    st.subheader(f"Lotes em producao — {dia_sel.strftime('%d/%m/%Y')}")
 
                     lotes_sel = df_exp[df_exp['_dia'] == dia_sel].drop_duplicates(subset=['id']) if not df_exp.empty else pd.DataFrame()
 
                     if lotes_sel.empty:
-                        st.info("💡 Clique em um dia com lotes no calendário acima.")
+                        st.info("Clique em um dia com lotes no calendario acima.")
                     else:
                         kc1,kc2,kc3 = st.columns(3)
-                        kc1.metric("Lotes em prod.", lotes_sel['Cod_Lote'].nunique())
+                        kc1.metric("Lotes em producao", lotes_sel['Cod_Lote'].nunique())
                         kc2.metric("Total caixas", int(lotes_sel['Qtd_Caixas'].sum()))
                         kc3.metric("Total m²", f"{lotes_sel['M2_Item'].sum():.2f}")
                         st.markdown("---")
+
                         for _, row in lotes_sel.iterrows():
+                            pode_concluir = bool(row.get('_pode_concluir', False))
+                            dt_i = pd.to_datetime(row['Data_Producao_Programada']).strftime('%d/%m/%Y')
+                            dt_f = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
+
+                            # Cor da borda do card: laranja na última semana, azul fora
+                            border_color = "#EA580C" if pode_concluir else "#3B82F6"
+                            bg_color     = "#FFF7ED" if pode_concluir else "#F8FAFC"
+
+                            st.markdown(f"""
+                                <div style="border-left:4px solid {border_color};background:{bg_color};
+                                            padding:12px 16px;border-radius:6px;margin-bottom:4px;">
+                                </div>
+                            """, unsafe_allow_html=True)
+
                             with st.container(border=True):
                                 cd, ca = st.columns([4, 1])
                                 with cd:
-                                    dt_i = pd.to_datetime(row['Data_Producao_Programada']).strftime('%d/%m/%Y')
-                                    dt_f = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
-                                    st.markdown(f"""
-                                        <span style="background:#FFEDD5;color:#EA580C;padding:3px 8px;border-radius:4px;font-weight:bold;font-size:13px;margin-right:6px;">🏗️ {row['Obra_Vinculada']}</span>
-                                        <span style="background:#E0E7FF;color:#4338CA;padding:3px 8px;border-radius:4px;font-weight:bold;font-size:13px;margin-right:6px;">{row['EDT_Vinculado']}</span>
-                                        <span style="background:#DCFCE7;color:#16A34A;padding:3px 8px;border-radius:4px;font-weight:bold;font-size:13px;">{row['Cod_Lote']}</span>
-                                    """, unsafe_allow_html=True)
-                                    st.markdown(f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} caixas` — {row['M2_Item']:.2f} m²")
-                                    st.caption(f"📅 {dt_i} → {dt_f} | {row['Romaneio_Chapas']}")
+                                    st.markdown(
+                                        f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;'
+                                        f'<span class="badge-edt">{row["EDT_Vinculado"]}</span>&nbsp;'
+                                        f'<span class="badge-lote">{row["Cod_Lote"]}</span>',
+                                        unsafe_allow_html=True
+                                    )
+                                    st.markdown(f"**{row['Tipo_Material']}** &nbsp;|&nbsp; `{int(row['Qtd_Caixas'])} caixas` — {row['M2_Item']:.2f} m²")
+                                    st.caption(f"Periodo: {dt_i} a {dt_f} &nbsp;|&nbsp; {row['Romaneio_Chapas']}")
                                     op_txt = row['Num_OP'] if row.get('Num_OP') else "Aguardando OP"
-                                    st.caption(f"OP: {op_txt} | {row.get('Fase_Produtiva','—')}")
+                                    st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {row.get('Fase_Produtiva','—')}")
+
+                                    if pode_concluir:
+                                        st.markdown(
+                                            "<span style='color:#EA580C;font-size:12px;font-weight:600;'>"
+                                            "Ultima semana de producao — liberado para concluir</span>",
+                                            unsafe_allow_html=True
+                                        )
+                                    else:
+                                        dias_restantes = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel).days
+                                        st.markdown(
+                                            f"<span style='color:#3B82F6;font-size:12px;'>"
+                                            f"Em producao — {dias_restantes} dias ate o prazo</span>",
+                                            unsafe_allow_html=True
+                                        )
+
                                 with ca:
-                                    st.write("")
-                                    if st.button("✅ PRONTO", key=f"baixa_{row['id']}", type="primary", use_container_width=True):
-                                        limite_desp = None
-                                        if not df_banco_macro.empty:
-                                            fr = df_banco_macro[df_banco_macro['EDT'] == row['EDT_Vinculado']]
-                                            if not fr.empty:
-                                                limite_desp = fr.iloc[0].get('Data_Limite_Despacho')
-                                        conn = conectar_banco(); cursor = conn.cursor()
-                                        cursor.execute("UPDATE itens_detalhado SET Status_Item='Concluído' WHERE id=%s", (row['id'],))
-                                        conn.commit(); conn.close()
-                                        enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
-                                        st.toast(f"✅ {row['Cod_Lote']} concluído → Logística! 🚚")
-                                        time.sleep(0.3); st.rerun()
+                                    if pode_concluir:
+                                        st.write("")
+                                        if st.button("Pronto", key=f"baixa_{row['id']}", type="primary", use_container_width=True):
+                                            limite_desp = None
+                                            if not df_banco_macro.empty:
+                                                fr = df_banco_macro[df_banco_macro['EDT'] == row['EDT_Vinculado']]
+                                                if not fr.empty:
+                                                    limite_desp = fr.iloc[0].get('Data_Limite_Despacho')
+                                            conn = conectar_banco(); cursor = conn.cursor()
+                                            cursor.execute("UPDATE itens_detalhado SET Status_Item='Concluido' WHERE id=%s", (row['id'],))
+                                            conn.commit(); conn.close()
+                                            enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
+                                            st.toast(f"{row['Cod_Lote']} concluido — enviado para Logistica!")
+                                            time.sleep(0.3); st.rerun()
+                                    else:
+                                        st.write("")
+                                        st.markdown(
+                                            "<div style='text-align:center;color:#94A3B8;font-size:12px;padding:8px;'>"
+                                            "Em producao</div>",
+                                            unsafe_allow_html=True
+                                        )
                 else:
-                    st.success("🙌 Sem lotes liberados para este filtro.")
+                    st.success("Sem lotes liberados para este filtro.")
             else:
                 st.info("Nenhum lote liberado no sistema ainda.")
 
@@ -624,7 +723,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     elif nome_aba == "Liberar OPs da Semana":
         with aba_objeto:
-            st.header("Gerenciador de Ordens de Produção Semanais")
+            st.header("Ordens de Producao — Liberacao Semanal")
             if obra_selecionada and not df_banco_micro.empty:
                 df_pend = df_banco_micro[
                     (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
@@ -639,28 +738,28 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                            disabled=[c for c in cols_exib if c != 'Selecionar'])
                     ids_sel  = df_ed[df_ed['Selecionar'] == True]['id'].tolist()
                     prefixo  = st.text_input("Prefixo da OP:", value=f"OP-{datetime.now().strftime('%Y')}-")
-                    if st.button("Liberar Selecionados para a TV"):
+                    if st.button("Liberar para producao"):
                         if ids_sel:
                             conn = conectar_banco(); cursor = conn.cursor()
                             for item_id in ids_sel:
                                 cursor.execute(
-                                    "UPDATE itens_detalhado SET Status_Item='Liberado para Fábrica', Num_OP=%s WHERE id=%s",
+                                    "UPDATE itens_detalhado SET Status_Item='Liberado para Fabrica', Num_OP=%s WHERE id=%s",
                                     (f"{prefixo}{str(item_id).zfill(3)}", item_id))
                             conn.commit(); conn.close()
-                            st.toast("OPs liberadas!", icon="✅"); time.sleep(0.5); st.rerun()
+                            st.toast("OPs liberadas!"); time.sleep(0.5); st.rerun()
                         else:
                             st.warning("Selecione pelo menos um item.")
                 else:
-                    st.success("Todos os lotes já foram liberados.")
+                    st.success("Todos os lotes ja foram liberados.")
             else:
                 st.info("Nenhum lote pendente encontrado.")
 
     # ==================================================
-    # VISÃO MACRO
+    # VISAO MACRO
     # ==================================================
-    elif nome_aba == "Visão Macro (Diretoria)":
+    elif nome_aba == "Visao Macro":
         with aba_objeto:
-            st.header("📊 Dashboard Executivo")
+            st.header("Dashboard Executivo")
             df_dir = df_banco_micro[df_banco_micro['Obra_Vinculada'] == obra_selecionada].copy() \
                      if obra_selecionada and not df_banco_micro.empty else df_banco_micro.copy()
 
@@ -668,12 +767,12 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 data_max = df_dir['Data_Limite_Obra'].max()
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Metragem Total", f"{df_dir['M2_Item'].sum():,.2f} m²")
-                c2.metric("Subdivisões", f"{df_dir['EDT_Vinculado'].nunique()} frentes")
-                c3.metric("Prazo Despacho Mais Distante", data_max.strftime('%d/%m/%Y') if prazo_valido(data_max) else "N/A")
+                c2.metric("Subdivisoes", f"{df_dir['EDT_Vinculado'].nunique()} frentes")
+                c3.metric("Prazo de Despacho Mais Distante", data_max.strftime('%d/%m/%Y') if prazo_valido(data_max) else "N/A")
 
                 st.markdown("---")
-                st.subheader("📈 Carga Semanal")
-                df_lib = df_dir[df_dir['Status_Item'].isin(["Liberado para Fábrica","Produção","Concluído"])].copy()
+                st.subheader("Carga Semanal")
+                df_lib = df_dir[df_dir['Status_Item'].isin(["Liberado para Fabrica","Producao","Concluido"])].copy()
                 if not df_lib.empty:
                     df_lib['Ano_Semana'] = df_lib['Data_Producao_Programada'].dt.isocalendar().year
                     df_lib['Num_Semana'] = df_lib['Data_Producao_Programada'].dt.isocalendar().week
@@ -682,24 +781,25 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             s = pd.to_datetime(f"{int(r['Ano_Semana'])}-W{int(r['Num_Semana'])}-1", format="%G-W%V-%u")
                             return f"Semana {int(r['Num_Semana']):02d} ({s.strftime('%d/%m')} – {(s+timedelta(days=6)).strftime('%d/%m/%Y')})"
                         except: return f"Semana {r['Num_Semana']}"
-                    df_lib['Período'] = df_lib.apply(fmt_sem, axis=1)
-                    res = df_lib.groupby(['Ano_Semana','Num_Semana','Período','Obra_Vinculada']).agg(
+                    df_lib['Periodo'] = df_lib.apply(fmt_sem, axis=1)
+                    res = df_lib.groupby(['Ano_Semana','Num_Semana','Periodo','Obra_Vinculada']).agg(
                         Lotes=('id','count'), Caixas=('Qtd_Caixas','sum'), M2=('M2_Item','sum'),
-                        Evolucao=('Status_Item', lambda x: f"{(x=='Concluído').sum()/len(x)*100:.0f}% concluído")
+                        Evolucao=('Status_Item', lambda x: f"{(x=='Concluido').sum()/len(x)*100:.0f}% concluido")
                     ).reset_index().sort_values(['Ano_Semana','Num_Semana'])
-                    res.columns = ['Ano','Sem','Período','Obra','Lotes','Caixas','Volume (m²)','Evolução']
-                    st.dataframe(res[['Período','Obra','Lotes','Caixas','Volume (m²)','Evolução']], hide_index=True, use_container_width=True)
+                    res.columns = ['Ano','Sem','Periodo','Obra','Lotes','Caixas','Volume (m²)','Evolucao']
+                    st.dataframe(res[['Periodo','Obra','Lotes','Caixas','Volume (m²)','Evolucao']], hide_index=True, use_container_width=True)
                 else:
                     st.warning("Nenhuma OP liberada ainda.")
 
-                st.subheader("📊 Gantt")
+                st.subheader("Gantt — Ocupacao da Fabrica")
                 df_gantt = df_dir.groupby(['Obra_Vinculada','EDT_Vinculado','Romaneio_Chapas']).agg(
                     Inicio=('Data_Producao_Programada','min'), Fim=('Data_Limite_Obra','max'), M2=('M2_Item','sum')
                 ).reset_index().dropna(subset=['Inicio','Fim'])
                 if not df_gantt.empty:
                     fig = px.timeline(df_gantt, x_start="Inicio", x_end="Fim", y="EDT_Vinculado",
                                       color="Obra_Vinculada", hover_data=["Romaneio_Chapas","M2"],
-                                      title="Ocupação Fábrica vs Prazo Despacho")
+                                      title="Ocupacao Fabrica vs Prazo Despacho",
+                                      color_discrete_sequence=["#1E3A8A","#EA580C","#0891B2","#15803D"])
                     fig.update_yaxes(autorange="reversed")
                     fig.update_layout(height=400, margin=dict(l=20,r=20,t=40,b=20))
                     st.plotly_chart(fig, use_container_width=True)
@@ -709,11 +809,11 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     # VINCULAR DATAS
     # ==================================================
-    elif nome_aba == "Vincular Datas (Materiais)":
+    elif nome_aba == "Vincular Datas":
         with aba_objeto:
-            st.header("📦 Fatiamento de Lotes")
+            st.header("Fatiamento de Lotes")
             if st.session_state.get('lote_salvo_sucesso'):
-                st.success("✅ Lote gerado com sucesso!")
+                st.success("Lote gerado com sucesso!")
                 st.session_state.lote_salvo_sucesso = False
 
             if obra_selecionada and not df_macro_filtrado.empty:
@@ -724,8 +824,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     label = f"{row['EDT']} - {row['Tarefa']}{sub}"
                     opcoes_edt.append(label); mapa_rows[label] = row
 
-                st.markdown("### ➕ Nova Entrega")
-                st.caption("1 lote = 1 entrega. Informe quantas caixas e até quando — o sistema calcula quando começa a produção.")
+                st.markdown("### Nova Entrega")
+                st.caption("1 lote = 1 entrega. Informe quantas caixas e ate quando — o sistema calcula quando comeca a producao.")
 
                 with st.form("form_fatiamento"):
                     c1, c2 = st.columns(2)
@@ -744,30 +844,29 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                       else (datetime.now() + timedelta(days=30)).date()
 
                         data_alvo = st.date_input(
-                            "📅 Precisa estar na obra até:",
+                            "Precisa estar na obra ate:",
                             value=default_dt, format="DD/MM/YYYY",
-                            help="Data limite — tudo é calculado retroativamente a partir daqui"
+                            help="Data limite — tudo e calculado retroativamente a partir daqui"
                         )
-                        dias_log = st.number_input("Dias de transporte até a obra (corridos):", min_value=1, value=3)
-                        dias_fab = st.number_input("Dias úteis de produção:", min_value=1, value=10)
+                        dias_log = st.number_input("Dias de transporte ate a obra (corridos):", min_value=1, value=3)
+                        dias_fab = st.number_input("Dias uteis de producao:", min_value=1, value=10)
                         total_cx = st.number_input("Quantidade de caixas:", min_value=1, value=31)
                         total_m2 = st.number_input("Metragem (m²):", min_value=0.1, value=70.0)
 
-                        # Preview retroativo
                         dt_alvo   = datetime.combine(data_alvo, datetime.min.time())
                         dt_desp   = dt_alvo - timedelta(days=int(dias_log))
                         dt_inicio = subtrair_dias_uteis(dt_desp, int(dias_fab))
                         st.success(
-                            f"🗓️ **Cronograma:**\n\n"
-                            f"🏭 Início produção: **{dt_inicio.strftime('%d/%m/%Y')}**\n\n"
-                            f"🚚 Sai da fábrica: **{dt_desp.strftime('%d/%m/%Y')}**\n\n"
-                            f"🏗️ Chega na obra: **{data_alvo.strftime('%d/%m/%Y')}**"
+                            f"Cronograma calculado:\n\n"
+                            f"Inicio producao: **{dt_inicio.strftime('%d/%m/%Y')}**\n\n"
+                            f"Saida da fabrica: **{dt_desp.strftime('%d/%m/%Y')}**\n\n"
+                            f"Chegada na obra: **{data_alvo.strftime('%d/%m/%Y')}**"
                         )
 
-                    if "🟢" not in str(row_sel.get('Status_Engenharia','')):
-                        st.warning(f"⚠️ Engenharia: `{row_sel.get('Status_Engenharia','—')}`")
+                    if "Liberados" not in str(row_sel.get('Status_Engenharia','')):
+                        st.warning(f"Atencao — Engenharia: `{row_sel.get('Status_Engenharia','—')}`")
 
-                    if st.form_submit_button("✅ Gerar Lote"):
+                    if st.form_submit_button("Gerar Lote"):
                         if not cod_lote.strip():
                             st.error("Digite o nome do lote.")
                         else:
@@ -784,7 +883,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             st.session_state.lote_salvo_sucesso = True; st.rerun()
 
                 st.markdown("---")
-                st.markdown("### 📝 Lotes Gerados")
+                st.markdown("### Lotes Gerados")
                 df_ed_raw = carregar_micro()
                 if not df_ed_raw.empty:
                     df_obra = df_ed_raw[df_ed_raw['Obra_Vinculada'] == obra_selecionada].copy()
@@ -809,20 +908,20 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                       row['Romaneio_Chapas'],row['Status_Item'],int(row['Dificuldade']),
                                       row['Fase_Produtiva'],int(row['id'])))
                             conn.commit(); conn.close()
-                            st.toast("Salvo!", icon="💾"); time.sleep(0.3); st.rerun()
+                            st.toast("Salvo!"); time.sleep(0.3); st.rerun()
 
-                        st.markdown("#### 🗑️ Remover Lote")
+                        st.markdown("#### Remover Lote")
                         lote_del = st.selectbox("Lote para excluir:", df_obra['Cod_Lote'].unique().tolist())
-                        if st.button(f"Excluir Lote {lote_del}"):
+                        if st.button(f"Excluir {lote_del}"):
                             deletar_lotes_por_edt_lote(obra_selecionada, None, lote_del)
-                            st.toast(f"Lote {lote_del} removido!", icon="🗑️"); time.sleep(0.5); st.rerun()
+                            st.toast(f"Lote {lote_del} removido!"); time.sleep(0.5); st.rerun()
                     else:
                         st.info("Nenhum lote fatiado ainda.")
 
     # ==================================================
     # CADASTRAR OBRA
     # ==================================================
-    elif nome_aba == "Cadastrar Nova Obra":
+    elif nome_aba == "Cadastrar Obra":
         with aba_objeto:
             st.header("Cadastrar Nova Obra")
             for k,v in [('mem_obra',''),('mem_frente',''),('mem_tarefa',''),
@@ -838,15 +937,14 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     frente = st.text_input("Frente Macro:", value=st.session_state.mem_frente)
                     tarefa = st.text_input("Nome da Tarefa:", value=st.session_state.mem_tarefa)
                 with co2:
-                    edt_cod = st.text_input("Código EDT (único):")
-                    subdiv  = st.text_input("Subdivisão / Balancim:").upper()
+                    edt_cod = st.text_input("Codigo EDT (unico):")
+                    subdiv  = st.text_input("Subdivisao / Balancim:").upper()
                     m2_tot  = st.number_input("Metragem (m²):", min_value=0.1, value=100.0)
                 cd1, cd2 = st.columns(2)
                 with cd1:
-                    dt_ini = st.date_input("📅 Início Instalação (âncora do PCP):",
-                                           value=st.session_state.mem_dt_ini, format="DD/MM/YYYY")
+                    dt_ini = st.date_input("Inicio da Instalacao:", value=st.session_state.mem_dt_ini, format="DD/MM/YYYY")
                 with cd2:
-                    dt_fim = st.date_input("Prazo Máximo Obra:", value=st.session_state.mem_dt_fim, format="DD/MM/YYYY")
+                    dt_fim = st.date_input("Prazo Maximo Obra:", value=st.session_state.mem_dt_fim, format="DD/MM/YYYY")
 
                 if st.form_submit_button("Registrar Frente"):
                     if not all([nome_obra.strip(), edt_cod.strip(), tarefa.strip(), subdiv.strip()]):
@@ -863,19 +961,19 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 INSERT INTO cronograma_macro
                                 (Obra,EDT,Tipo_Escopo,Etapa_Macro,Subdivisao,Tarefa,M2_Total_Tarefa,
                                  Inicio_Previsto,Termino_Obra,Status,Status_Engenharia)
-                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente','🔴 Aguardando Medição In Loco')
+                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente','Aguardando Medicao In Loco')
                             """, (nome_obra,edt_cod,escopo,frente,subdiv,tarefa,float(m2_tot),
                                   dt_ini.strftime('%Y-%m-%d'),dt_fim.strftime('%Y-%m-%d')))
                             conn.commit()
-                            st.toast("Frente registrada!", icon="🚀"); time.sleep(0.4); st.rerun()
+                            st.toast("Frente registrada!"); time.sleep(0.4); st.rerun()
                         except Exception as e:
-                            st.error(f"EDT '{edt_cod}' já existe ou erro: {e}")
+                            st.error(f"EDT '{edt_cod}' ja existe ou erro: {e}")
                         finally:
                             conn.close()
 
             if not df_banco_macro.empty:
                 st.markdown("---")
-                st.markdown("### 📋 Frentes Cadastradas")
+                st.markdown("### Frentes Cadastradas")
                 df_show = df_banco_macro.copy()
                 for col in ['Inicio_Previsto','Termino_Obra']:
                     if col in df_show.columns:
@@ -885,11 +983,11 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 st.dataframe(df_show[cols_s], hide_index=True, use_container_width=True)
 
     # ==================================================
-    # PAINEL DA ENGENHARIA
+    # PAINEL DE ENGENHARIA
     # ==================================================
-    elif nome_aba == "Painel Técnico da Engenharia":
+    elif nome_aba == "Painel de Engenharia":
         with aba_objeto:
-            st.header("🏗️ Painel Técnico da Engenharia")
+            st.header("Painel Tecnico da Engenharia")
             st.caption(f"Hoje: {HOJE_PROJETO.strftime('%d/%m/%Y')} | Obra: **{obra_selecionada or 'Nenhuma'}**")
 
             df_eng = carregar_macro()
@@ -898,15 +996,27 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             else:
                 df_eng = pd.DataFrame()
 
-            ESTADOS = ["🔴 Aguardando Medição In Loco","🟡 Medição Realizada — Em Projetos",
-                       "🔵 Projetos em Revisão Interna","🟢 Projetos Liberados para o PCP","⚪ Arquivado / Concluído"]
+            ESTADOS = [
+                "Aguardando Medicao In Loco",
+                "Medicao Realizada — Em Projetos",
+                "Projetos em Revisao Interna",
+                "Projetos Liberados para o PCP",
+                "Arquivado / Concluido"
+            ]
+            STATUS_CORES = {
+                "Aguardando Medicao In Loco":     "#EF4444",
+                "Medicao Realizada — Em Projetos":"#EAB308",
+                "Projetos em Revisao Interna":    "#3B82F6",
+                "Projetos Liberados para o PCP":  "#22C55E",
+                "Arquivado / Concluido":          "#94A3B8",
+            }
 
             def classificar(dias_rest, status_tec):
-                if status_tec == "🟢 Projetos Liberados para o PCP": return "concluido","✅ Liberado para o PCP",None
-                if dias_rest is None: return "sem_prazo","⚪ Aguardando programação pelo PCP",None
-                if dias_rest < 0:    return "vencido",f"🔴 VENCIDO há {abs(int(dias_rest))} dias",abs(int(dias_rest))
-                if dias_rest <= 7:   return "critico",f"🟡 Crítico — faltam {int(dias_rest)} dias",int(dias_rest)
-                return "ok",f"🟢 Dentro do prazo ({int(dias_rest)} dias)",int(dias_rest)
+                if status_tec == "Projetos Liberados para o PCP": return "concluido","Liberado para o PCP",None
+                if dias_rest is None: return "sem_prazo","Aguardando programacao pelo PCP",None
+                if dias_rest < 0:    return "vencido",f"VENCIDO ha {abs(int(dias_rest))} dias",abs(int(dias_rest))
+                if dias_rest <= 7:   return "critico",f"Critico — faltam {int(dias_rest)} dias",int(dias_rest)
+                return "ok",f"Dentro do prazo ({int(dias_rest)} dias)",int(dias_rest)
 
             frentes = []
             if not df_eng.empty:
@@ -930,9 +1040,9 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
             criticas = [f for f in frentes if f['situacao_key'] in ('critico','vencido')]
 
-            with st.expander(f"🚨 Frentes Críticas — {len(criticas)} alerta(s)", expanded=True):
+            with st.expander(f"Frentes Criticas — {len(criticas)} alerta(s)", expanded=True):
                 if not criticas:
-                    st.success("✅ Tudo dentro do prazo!")
+                    st.success("Tudo dentro do prazo!")
                 else:
                     for fr in sorted(criticas, key=lambda x: x['dias_restantes'] or 0):
                         with st.container(border=True):
@@ -942,41 +1052,42 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 st.markdown(f"### {fr['tarefa']}{sub}")
                                 cm1,cm2 = st.columns(2)
                                 with cm1:
-                                    st.write(f"📌 EDT: `{fr['edt']}`")
+                                    st.write(f"EDT: `{fr['edt']}`")
                                     ini = pd.to_datetime(fr['inicio_previsto']).strftime('%d/%m/%Y') if prazo_valido(fr['inicio_previsto']) else "—"
-                                    st.write(f"📅 Início instalação: {ini}")
+                                    st.write(f"Inicio instalacao: {ini}")
                                     pp = pd.to_datetime(fr['primeiro_prod']).strftime('%d/%m/%Y') if prazo_valido(fr['primeiro_prod']) else "—"
-                                    st.write(f"🏭 1º dia produção: {pp}")
+                                    st.write(f"1º dia producao: {pp}")
                                 with cm2:
                                     pe = pd.to_datetime(fr['prazo_eng']).strftime('%d/%m/%Y') if fr['prazo_eng'] else "—"
-                                    st.write(f"📐 Prazo engenharia: `{pe}`")
+                                    st.write(f"Prazo engenharia: `{pe}`")
                                     dp = pd.to_datetime(fr['despacho']).strftime('%d/%m/%Y') if prazo_valido(fr['despacho']) else "—"
-                                    st.write(f"🚚 Despacho: {dp}")
-                                st.write(f"🔧 {fr['status_tecnico']}")
+                                    st.write(f"Despacho: {dp}")
+                                cor_status = STATUS_CORES.get(fr['status_tecnico'], "#94A3B8")
+                                st.markdown(f"<span style='background:{cor_status}20;color:{cor_status};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{fr['status_tecnico']}</span>", unsafe_allow_html=True)
                             with cc:
-                                if fr['situacao_key']=='vencido': st.error(f"⏰ VENCIDO\n\n**{fr['dias_num']} dias**")
-                                else: st.warning(f"⏳ FALTAM\n\n**{fr['dias_num']} dias**")
+                                if fr['situacao_key']=='vencido': st.error(f"VENCIDO\n\n**{fr['dias_num']} dias**")
+                                else: st.warning(f"FALTAM\n\n**{fr['dias_num']} dias**")
                             st.markdown("---")
                             ca1,ca2 = st.columns(2)
                             with ca1:
                                 idx = ESTADOS.index(fr['status_tecnico']) if fr['status_tecnico'] in ESTADOS else 0
-                                ns  = st.selectbox("Atualizar:", ESTADOS, index=idx, key=f"cs_{fr['id']}")
+                                ns  = st.selectbox("Atualizar status:", ESTADOS, index=idx, key=f"cs_{fr['id']}")
                             with ca2:
                                 st.write(""); st.write("")
-                                if st.button("💾 Salvar", key=f"cb_{fr['id']}", use_container_width=True):
+                                if st.button("Salvar", key=f"cb_{fr['id']}", use_container_width=True):
                                     atualizar_status_engenharia(fr['id'], ns)
-                                    st.toast("Atualizado!", icon="✅"); time.sleep(0.3); st.rerun()
+                                    st.toast("Atualizado!"); time.sleep(0.3); st.rerun()
 
-            with st.expander(f"📋 Todas as Frentes — {len(frentes)}", expanded=False):
+            with st.expander(f"Todas as Frentes — {len(frentes)}", expanded=False):
                 if not frentes:
                     st.info("Nenhuma frente cadastrada.")
                 else:
                     cf1,cf2 = st.columns([3,2])
                     with cf1: filt_st = st.selectbox("Status:", ["Todos"]+ESTADOS, key="eng_fst")
-                    with cf2: filt_sit = st.radio("Situação:", ["Todas","Críticas","Liberadas"], horizontal=True, key="eng_fsi")
+                    with cf2: filt_sit = st.radio("Situacao:", ["Todas","Criticas","Liberadas"], horizontal=True, key="eng_fsi")
                     exibir = frentes.copy()
                     if filt_st != "Todos": exibir = [f for f in exibir if f['status_tecnico']==filt_st]
-                    if filt_sit=="Críticas": exibir = [f for f in exibir if f['situacao_key'] in ('critico','vencido')]
+                    if filt_sit=="Criticas": exibir = [f for f in exibir if f['situacao_key'] in ('critico','vencido')]
                     elif filt_sit=="Liberadas": exibir = [f for f in exibir if f['situacao_key']=='concluido']
                     st.markdown(f"**{len(exibir)} frente(s)**"); st.markdown("---")
                     for fr in exibir:
@@ -986,14 +1097,15 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 sub = f" · *{fr['subdivisao']}*" if fr['subdivisao'] else ""
                                 st.markdown(f"**{fr['tarefa']}**{sub}")
                                 st.caption(f"EDT: {fr['edt']} | {fr['tipo_escopo']} | {fr['m2']:,.2f} m²")
-                                st.write(fr['status_tecnico'])
+                                cor_status = STATUS_CORES.get(fr['status_tecnico'], "#94A3B8")
+                                st.markdown(f"<span style='background:{cor_status}20;color:{cor_status};padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{fr['status_tecnico']}</span>", unsafe_allow_html=True)
                             with cd:
                                 ini = pd.to_datetime(fr['inicio_previsto']).strftime('%d/%m/%Y') if prazo_valido(fr['inicio_previsto']) else "—"
-                                st.caption("📅 Início instalação"); st.write(ini)
+                                st.caption("Inicio instalacao"); st.write(ini)
                                 pe = pd.to_datetime(fr['prazo_eng']).strftime('%d/%m/%Y') if fr['prazo_eng'] else "—"
-                                st.caption("📐 Prazo PCP"); st.write(f"`{pe}`")
+                                st.caption("Prazo PCP"); st.write(f"`{pe}`")
                                 dp = pd.to_datetime(fr['despacho']).strftime('%d/%m/%Y') if prazo_valido(fr['despacho']) else "—"
-                                st.caption("🚚 Despacho"); st.write(dp)
+                                st.caption("Despacho"); st.write(dp)
                             with ca:
                                 sk=fr['situacao_key']
                                 if sk=='vencido': st.error(fr['situacao_txt'])
@@ -1005,35 +1117,35 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 idx = ESTADOS.index(fr['status_tecnico']) if fr['status_tecnico'] in ESTADOS else 0
                                 ns  = st.selectbox("", ESTADOS, index=idx, key=f"as_{fr['id']}", label_visibility="collapsed")
                             with cb:
-                                if st.button("💾", key=f"ab_{fr['id']}", use_container_width=True):
+                                if st.button("Salvar", key=f"ab_{fr['id']}", use_container_width=True):
                                     atualizar_status_engenharia(fr['id'], ns)
                                     st.toast("Atualizado!"); time.sleep(0.3); st.rerun()
 
             df_sols  = carregar_solicitacoes()
-            n_pend   = len(df_sols[df_sols['status']=='⏳ Pendente de Aprovação']) if not df_sols.empty else 0
-            with st.expander(f"📝 Solicitações de Prazo{f' — {n_pend} pendente(s)' if n_pend else ''}", expanded=False):
+            n_pend   = len(df_sols[df_sols['status']=='Pendente de Aprovacao']) if not df_sols.empty else 0
+            with st.expander(f"Solicitacoes de Prazo{f' — {n_pend} pendente(s)' if n_pend else ''}", expanded=False):
                 nao_lib = [f for f in frentes if f['situacao_key']!='concluido']
                 if setor in ["Engenharia","Master"] and nao_lib:
-                    st.markdown("#### ✍️ Nova Solicitação")
+                    st.markdown("#### Nova Solicitacao")
                     cs1,cs2 = st.columns(2)
                     with cs1:
                         opts = [f"{f['edt']} — {f['tarefa']}" for f in nao_lib]
                         sel  = st.selectbox("Frente:", opts, key="sol_fr")
                         fobj = nao_lib[opts.index(sel)]
-                        pat  = pd.to_datetime(fobj['prazo_eng']).strftime('%d/%m/%Y') if fobj['prazo_eng'] else "Não definido"
+                        pat  = pd.to_datetime(fobj['prazo_eng']).strftime('%d/%m/%Y') if fobj['prazo_eng'] else "Nao definido"
                         st.info(f"Prazo atual: **{pat}**")
                     with cs2:
                         nps = st.date_input("Novo prazo:", format="DD/MM/YYYY", key="sol_np",
                                             value=(pd.to_datetime(fobj['prazo_eng'])+timedelta(days=7)).date() if fobj['prazo_eng'] else HOJE_PROJETO.date())
                         jus = st.text_area("Justificativa:", key="sol_jus")
-                    if st.button("📤 Enviar", key="sol_env"):
+                    if st.button("Enviar solicitacao", key="sol_env"):
                         if not jus.strip(): st.error("Informe a justificativa.")
                         else:
                             salvar_solicitacao(fobj['edt'],fobj['tarefa'],pat,nps.strftime('%d/%m/%Y'),jus.strip(),st.session_state.usuario_nome)
                             st.success("Enviado!"); st.rerun()
                 st.markdown("---")
                 if setor=="Master" and not df_sols.empty:
-                    pend = df_sols[df_sols['status']=='⏳ Pendente de Aprovação']
+                    pend = df_sols[df_sols['status']=='Pendente de Aprovacao']
                     if pend.empty: st.info("Nenhuma pendente.")
                     else:
                         for _,sol in pend.iterrows():
@@ -1046,20 +1158,20 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 with sb:
                                     cap,cre = st.columns(2)
                                     with cap:
-                                        if st.button("✅",key=f"ap_{sol['id']}",use_container_width=True):
-                                            atualizar_status_solicitacao(sol['id'],"✅ Aprovado"); st.rerun()
+                                        if st.button("Aprovar",key=f"ap_{sol['id']}",use_container_width=True):
+                                            atualizar_status_solicitacao(sol['id'],"Aprovado"); st.rerun()
                                     with cre:
-                                        if st.button("❌",key=f"rj_{sol['id']}",use_container_width=True):
-                                            atualizar_status_solicitacao(sol['id'],"❌ Rejeitado"); st.rerun()
+                                        if st.button("Rejeitar",key=f"rj_{sol['id']}",use_container_width=True):
+                                            atualizar_status_solicitacao(sol['id'],"Rejeitado"); st.rerun()
                 if not df_sols.empty:
-                    hist = df_sols[df_sols['status']!='⏳ Pendente de Aprovação']
+                    hist = df_sols[df_sols['status']!='Pendente de Aprovacao']
                     if not hist.empty:
-                        st.markdown("#### 📂 Histórico")
+                        st.markdown("#### Historico")
                         for _,sol in hist.iterrows():
                             st.caption(f"{sol['status']} | **{sol['tarefa']}** | {sol['prazo_solicitado']} | {sol['criado_por']}")
 
-            with st.expander("🔍 Carga da Fábrica por Semana", expanded=False):
-                df_fab = df_banco_micro[df_banco_micro['Status_Item']=="Liberado para Fábrica"].copy() if not df_banco_micro.empty else pd.DataFrame()
+            with st.expander("Carga da Fabrica por Semana", expanded=False):
+                df_fab = df_banco_micro[df_banco_micro['Status_Item']=="Liberado para Fabrica"].copy() if not df_banco_micro.empty else pd.DataFrame()
                 if not df_fab.empty:
                     df_fab['Ano_Semana'] = df_fab['Data_Producao_Programada'].dt.isocalendar().year
                     df_fab['Num_Semana'] = df_fab['Data_Producao_Programada'].dt.isocalendar().week
@@ -1068,90 +1180,94 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             s = pd.to_datetime(f"{int(r['Ano_Semana'])}-W{int(r['Num_Semana'])}-1",format="%G-W%V-%u")
                             return f"Semana {int(r['Num_Semana']):02d} ({s.strftime('%d/%m')} – {(s+timedelta(days=6)).strftime('%d/%m')})"
                         except: return f"Semana {r['Num_Semana']}"
-                    df_fab['Período'] = df_fab.apply(fmt_s,axis=1)
-                    res_fab = df_fab.groupby(['Ano_Semana','Num_Semana','Período','Obra_Vinculada']).agg(
+                    df_fab['Periodo'] = df_fab.apply(fmt_s,axis=1)
+                    res_fab = df_fab.groupby(['Ano_Semana','Num_Semana','Periodo','Obra_Vinculada']).agg(
                         Caixas=('Qtd_Caixas','sum'),M2=('M2_Item','sum')).reset_index().sort_values(['Ano_Semana','Num_Semana'])
-                    res_fab.columns=['Ano','Sem','Período','Obra','Caixas (cx)','Metragem (m²)']
-                    st.dataframe(res_fab[['Período','Obra','Caixas (cx)','Metragem (m²)']],hide_index=True,use_container_width=True)
+                    res_fab.columns=['Ano','Sem','Periodo','Obra','Caixas (cx)','Metragem (m²)']
+                    st.dataframe(res_fab[['Periodo','Obra','Caixas (cx)','Metragem (m²)']],hide_index=True,use_container_width=True)
                 else:
-                    st.success("🌴 Fábrica livre!")
+                    st.success("Fabrica livre!")
 
     # ==================================================
-    # PAINEL DE LOGÍSTICA
+    # LOGISTICA
     # ==================================================
-    elif nome_aba == "Painel de Logística":
+    elif nome_aba == "Logistica":
         with aba_objeto:
-            st.header("🚚 Painel de Logística — Gestão de Despachos")
+            st.header("Logistica — Gestao de Despachos")
             st.caption(f"Hoje: {HOJE_PROJETO.strftime('%d/%m/%Y')}")
             df_log = carregar_fila_logistica()
 
             if not df_log.empty:
                 n_aguard   = len(df_log[df_log['Status_Logistica']=='Aguardando Agendamento'])
                 n_agendado = len(df_log[df_log['Status_Logistica']=='Envio Agendado'])
-                n_despach  = len(df_log[df_log['Status_Logistica']=='Despachado ✅'])
-                df_ativos  = df_log[df_log['Status_Logistica']!='Despachado ✅']
+                n_despach  = len(df_log[df_log['Status_Logistica']=='Despachado'])
+                df_ativos  = df_log[df_log['Status_Logistica']!='Despachado']
                 n_atrasado = len(df_ativos[df_ativos['Data_Limite_Despacho'].apply(lambda x: prazo_valido(x) and pd.to_datetime(x)<HOJE_PROJETO)]) if not df_ativos.empty else 0
                 c1,c2,c3,c4 = st.columns(4)
-                c1.metric("⏳ Aguardando Agendamento", n_aguard)
-                c2.metric("📅 Envios Agendados",       n_agendado)
-                c3.metric("✅ Despachados",             n_despach)
-                if n_atrasado>0: c4.metric("🔴 Atrasados",n_atrasado,delta=f"-{n_atrasado}",delta_color="inverse")
-                else: c4.metric("🟢 Sem Atrasos","OK")
+                c1.metric("Aguardando Agendamento", n_aguard)
+                c2.metric("Envios Agendados",       n_agendado)
+                c3.metric("Despachados",             n_despach)
+                if n_atrasado>0: c4.metric("Atrasados",n_atrasado,delta=f"-{n_atrasado}",delta_color="inverse")
+                else: c4.metric("Atrasos","Nenhum")
             else:
-                st.info("📭 Nenhum lote na fila. Quando a produção marcar PRONTO, aparece aqui automaticamente.")
+                st.info("Nenhum lote na fila. Quando a producao marcar como pronto, aparece aqui automaticamente.")
 
             st.markdown("---")
 
-            with st.expander("⚠️ Fila Prioritária — Aguardando Agendamento", expanded=True):
+            with st.expander("Fila Prioritaria — Aguardando Agendamento", expanded=True):
                 if df_log.empty or df_log[df_log['Status_Logistica']=='Aguardando Agendamento'].empty:
-                    st.success("✅ Todos os lotes já agendados!")
+                    st.success("Todos os lotes ja agendados!")
                 else:
                     df_ag = df_log[df_log['Status_Logistica']=='Aguardando Agendamento'].copy().sort_values('Data_Limite_Despacho',na_position='last')
                     for _,row in df_ag.iterrows():
                         prazo_d = row['Data_Limite_Despacho']
                         if prazo_valido(prazo_d):
                             dias_r = (pd.to_datetime(prazo_d) - HOJE_PROJETO).days
-                            if dias_r<0:    cor="#FEE2E2";bord="#EF4444";tag=f"🔴 ATRASADO {abs(dias_r)}d"
-                            elif dias_r<=3: cor="#FEF9C3";bord="#EAB308";tag=f"🟡 URGENTE — {dias_r}d"
-                            else:           cor="#F0FDF4";bord="#22C55E";tag=f"🟢 {dias_r}d restantes"
+                            if dias_r<0:    css_bar="bar-danger"; tag=f"ATRASADO {abs(dias_r)}d"
+                            elif dias_r<=3: css_bar="bar-warn";   tag=f"URGENTE — {dias_r}d restantes"
+                            else:           css_bar="bar-ok";     tag=f"{dias_r} dias restantes"
                         else:
-                            cor="#F8FAFC";bord="#CBD5E1";tag="⚪ Sem prazo"
-                        st.markdown(f"<div style='border-left:5px solid {bord};background:{cor};padding:12px 16px;border-radius:6px;margin-bottom:8px;'>", unsafe_allow_html=True)
+                            css_bar="bar-neutral"; tag="Sem prazo definido"
+
+                        st.markdown(f"<div class='{css_bar}'>", unsafe_allow_html=True)
                         ci,cp,ca = st.columns([5,3,2])
                         with ci:
-                            st.markdown(f"<span style='background:#FFEDD5;color:#EA580C;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:12px;'>🏗️ {row['Obra_Vinculada']}</span>&nbsp;<span style='background:#E0E7FF;color:#4338CA;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:12px;'>Lote: {row['Cod_Lote']}</span>", unsafe_allow_html=True)
+                            st.markdown(
+                                f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;'
+                                f'<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>',
+                                unsafe_allow_html=True)
                             st.markdown(f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} cx` — {row['M2_Item']:.2f} m²")
                             st.caption(f"Pavimentos: {row['Romaneio_Chapas']} | OP: {row.get('Num_OP') or 'S/OP'}")
                         with cp:
                             ptxt = pd.to_datetime(prazo_d).strftime('%d/%m/%Y') if prazo_valido(prazo_d) else "—"
-                            st.caption("Prazo máximo despacho"); st.markdown(f"**{ptxt}**"); st.markdown(f"`{tag}`")
+                            st.caption("Prazo maximo despacho"); st.markdown(f"**{ptxt}**"); st.markdown(f"`{tag}`")
                         with ca:
-                            if st.button("📅 Agendar", key=f"ag_btn_{row['id']}", use_container_width=True):
+                            if st.button("Agendar", key=f"ag_btn_{row['id']}", use_container_width=True):
                                 st.session_state[f"ag_open_{row['id']}"] = True
                         st.markdown("</div>", unsafe_allow_html=True)
 
                         if st.session_state.get(f"ag_open_{row['id']}", False):
                             with st.container(border=True):
-                                st.markdown(f"#### 📋 Agendar — Lote `{row['Cod_Lote']}` | {row['Obra_Vinculada']}")
+                                st.markdown(f"#### Agendar — Lote `{row['Cod_Lote']}` | {row['Obra_Vinculada']}")
                                 fa1,fa2 = st.columns(2)
                                 with fa1:
                                     dt_env = st.date_input("Data envio:", format="DD/MM/YYYY", key=f"dt_env_{row['id']}",
                                                            value=pd.to_datetime(prazo_d).date() if prazo_valido(prazo_d) else HOJE_PROJETO.date())
-                                    transp = st.selectbox("Transporte:", ["Frota Própria (Passold)","Transportadora Terceira","Retirada pelo Cliente"], key=f"tr_{row['id']}")
+                                    transp = st.selectbox("Transporte:", ["Frota Propria (Passold)","Transportadora Terceira","Retirada pelo Cliente"], key=f"tr_{row['id']}")
                                 with fa2:
-                                    veic = st.text_input("Veículo / Placa:", key=f"ve_{row['id']}")
-                                    obs  = st.text_area("Observações:", key=f"ob_{row['id']}", height=80)
+                                    veic = st.text_input("Veiculo / Placa:", key=f"ve_{row['id']}")
+                                    obs  = st.text_area("Observacoes:", key=f"ob_{row['id']}", height=80)
                                 cb1,cb2 = st.columns(2)
                                 with cb1:
-                                    if st.button("✅ Confirmar", key=f"conf_{row['id']}", use_container_width=True, type="primary"):
+                                    if st.button("Confirmar agendamento", key=f"conf_{row['id']}", use_container_width=True, type="primary"):
                                         agendar_envio(row['id'],dt_env,transp,veic,obs,st.session_state.usuario_nome)
                                         st.session_state[f"ag_open_{row['id']}"] = False
-                                        st.toast(f"Agendado para {dt_env.strftime('%d/%m/%Y')}! 📅"); time.sleep(0.3); st.rerun()
+                                        st.toast(f"Agendado para {dt_env.strftime('%d/%m/%Y')}!"); time.sleep(0.3); st.rerun()
                                 with cb2:
                                     if st.button("Cancelar", key=f"can_{row['id']}", use_container_width=True):
                                         st.session_state[f"ag_open_{row['id']}"] = False; st.rerun()
 
-            with st.expander("📅 Envios Agendados — Confirmar Saída", expanded=True):
+            with st.expander("Envios Agendados — Confirmar Saida", expanded=True):
                 if df_log.empty or df_log[df_log['Status_Logistica']=='Envio Agendado'].empty:
                     st.info("Nenhum envio agendado.")
                 else:
@@ -1159,59 +1275,62 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     for _,row in df_agend.iterrows():
                         pd_d = row['Data_Limite_Despacho']; de_d = row['Data_Envio_Agendado']
                         no_prazo = (pd.to_datetime(de_d)<=pd.to_datetime(pd_d)) if prazo_valido(pd_d) and prazo_valido(de_d) else True
-                        bord="#22C55E" if no_prazo else "#EF4444"; bg="#F0FDF4" if no_prazo else "#FEE2E2"
-                        st.markdown(f"<div style='border-left:5px solid {bord};background:{bg};padding:12px 16px;border-radius:6px;margin-bottom:8px;'>", unsafe_allow_html=True)
+                        css_bar = "bar-ok" if no_prazo else "bar-danger"
+                        st.markdown(f"<div class='{css_bar}'>", unsafe_allow_html=True)
                         ci2,cp2,ca2 = st.columns([5,3,2])
                         with ci2:
-                            st.markdown(f"<span style='background:#FFEDD5;color:#EA580C;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:12px;'>🏗️ {row['Obra_Vinculada']}</span>&nbsp;<span style='background:#E0E7FF;color:#4338CA;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:12px;'>Lote: {row['Cod_Lote']}</span>", unsafe_allow_html=True)
+                            st.markdown(
+                                f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;'
+                                f'<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>',
+                                unsafe_allow_html=True)
                             st.markdown(f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} cx` — {row['M2_Item']:.2f} m²")
-                            st.caption(f"🚛 {row.get('Transportadora','—')} | {row.get('Veiculo','—')}")
-                            if row.get('Observacoes'): st.caption(f"📝 {row['Observacoes']}")
+                            st.caption(f"{row.get('Transportadora','—')} | {row.get('Veiculo','—')}")
+                            if row.get('Observacoes'): st.caption(f"Obs: {row['Observacoes']}")
                         with cp2:
                             et = pd.to_datetime(de_d).strftime('%d/%m/%Y') if prazo_valido(de_d) else "—"
                             pt = pd.to_datetime(pd_d).strftime('%d/%m/%Y') if prazo_valido(pd_d) else "—"
                             st.caption("Data envio agendada"); st.markdown(f"**{et}**")
-                            st.caption("Prazo máximo"); st.write(pt)
-                            if not no_prazo: st.error("⚠️ Fora do prazo!")
+                            st.caption("Prazo maximo"); st.write(pt)
+                            if not no_prazo: st.error("Fora do prazo!")
                         with ca2:
                             st.write("")
-                            if st.button("🚚 DESPACHADO!", key=f"des_{row['id']}", use_container_width=True, type="primary"):
+                            if st.button("Confirmar Despacho", key=f"des_{row['id']}", use_container_width=True, type="primary"):
                                 confirmar_despacho(row['id'], st.session_state.usuario_nome)
-                                st.toast("Despachado! ✅"); time.sleep(0.3); st.rerun()
-                            if st.button("✏️ Reagendar", key=f"rag_{row['id']}", use_container_width=True):
+                                st.toast("Despachado!"); time.sleep(0.3); st.rerun()
+                            if st.button("Reagendar", key=f"rag_{row['id']}", use_container_width=True):
                                 conn=conectar_banco();cursor=conn.cursor()
                                 cursor.execute("UPDATE logistica_envios SET Status_Logistica='Aguardando Agendamento' WHERE id=%s",(row['id'],))
                                 conn.commit();conn.close(); st.rerun()
                         st.markdown("</div>", unsafe_allow_html=True)
 
-            with st.expander("📦 Histórico de Despachos", expanded=False):
-                if df_log.empty or df_log[df_log['Status_Logistica']=='Despachado ✅'].empty:
+            with st.expander("Historico de Despachos", expanded=False):
+                if df_log.empty or df_log[df_log['Status_Logistica']=='Despachado'].empty:
                     st.info("Nenhum despacho realizado ainda.")
                 else:
-                    df_hist = df_log[df_log['Status_Logistica']=='Despachado ✅'].copy()
+                    df_hist = df_log[df_log['Status_Logistica']=='Despachado'].copy()
                     for col in ['Data_Limite_Despacho','Data_Envio_Agendado']:
                         df_hist[col] = df_hist[col].apply(lambda x: pd.to_datetime(x).strftime('%d/%m/%Y') if prazo_valido(x) else "—")
                     cols_h = [c for c in ['Obra_Vinculada','Cod_Lote','Tipo_Material','Qtd_Caixas','M2_Item',
                                            'Transportadora','Veiculo','Data_Envio_Agendado','Data_Limite_Despacho',
                                            'Confirmado_Por','Confirmado_Em'] if c in df_hist.columns]
                     st.dataframe(df_hist[cols_h], hide_index=True, use_container_width=True)
-                    df_pont = df_log[df_log['Status_Logistica']=='Despachado ✅'].copy()
+                    df_pont = df_log[df_log['Status_Logistica']=='Despachado'].copy()
                     df_pont = df_pont[df_pont['Data_Limite_Despacho'].apply(prazo_valido) & df_pont['Data_Envio_Agendado'].apply(prazo_valido)]
                     if not df_pont.empty:
                         ok = (pd.to_datetime(df_pont['Data_Envio_Agendado'])<=pd.to_datetime(df_pont['Data_Limite_Despacho'])).sum()
-                        st.metric("📊 Pontualidade", f"{ok/len(df_pont)*100:.0f}%")
+                        st.metric("Pontualidade nos despachos", f"{ok/len(df_pont)*100:.0f}%")
 
     # ==================================================
-    # CONFIGURAÇÕES
+    # CONFIGURACOES
     # ==================================================
-    elif nome_aba == "Configurações do Sistema":
+    elif nome_aba == "Configuracoes":
         with aba_objeto:
-            st.header("⚙️ Painel de Controle Master")
-            with st.expander("➕ Cadastrar Novo Usuário"):
+            st.header("Painel de Controle Master")
+            with st.expander("Cadastrar Novo Usuario"):
                 with st.form("form_user"):
                     nu=st.text_input("Login:").lower().strip()
                     nn=st.text_input("Nome:")
-                    ns=st.selectbox("Setor:",["Produção","Engenharia","Diretoria","Logística","Master"])
+                    ns=st.selectbox("Setor:",["Producao","Engenharia","Diretoria","Logistica","Master"])
                     np=st.text_input("Senha:",type="password")
                     if st.form_submit_button("Salvar"):
                         if not all([nu,nn,np]): st.error("Preencha tudo.")
@@ -1229,18 +1348,18 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             conn.close()
             st.dataframe(df_u, hide_index=True, use_container_width=True)
             if len(df_u)>1:
-                del_u=st.selectbox("Remover:",df_u['usuario'].tolist())
-                if del_u=='master': st.caption("🔒 Master não pode ser deletado.")
+                del_u=st.selectbox("Remover usuario:",df_u['usuario'].tolist())
+                if del_u=='master': st.caption("Conta master nao pode ser removida.")
                 else:
-                    if st.button(f"❌ Excluir {del_u}"):
+                    if st.button(f"Excluir {del_u}"):
                         conn=conectar_banco();cursor=conn.cursor()
                         cursor.execute("DELETE FROM usuarios WHERE usuario=%s",(del_u,))
                         conn.commit();conn.close()
-                        st.toast("Removido!",icon="🗑️"); time.sleep(0.5); st.rerun()
+                        st.toast("Removido!"); time.sleep(0.5); st.rerun()
 
             st.markdown("---")
-            st.markdown("### 🚨 Reset Geral")
+            st.markdown("### Reset Geral")
             st.warning("Remove TODOS os dados permanentemente.")
-            if st.button("CONFIRMAR LIMPEZA TOTAL"):
+            if st.button("Confirmar limpeza total"):
                 resetar_banco_dados_completo()
-                st.toast("Resetado!",icon="🗑️"); time.sleep(0.5); st.rerun()
+                st.toast("Resetado!"); time.sleep(0.5); st.rerun()
