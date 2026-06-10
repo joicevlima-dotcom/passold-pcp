@@ -11,25 +11,24 @@ import psycopg2.extras
 st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide")
 
 st.markdown("""
-    <style>
 st.markdown("""
 <style>
 /* IMPORTAR FONTES */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-/* VARIÁVEIS GLOBAIS DE COR (Identidade Passold Modernizada) */
+/* VARIÁVEIS GLOBAIS DE COR */
 :root {
---primary-color: #0F172A; /* Azul Noturno Profundo */
---primary-light: #334155; /* Cinza Ardósia */
---accent-color: #EA580C; /* Laranja Queimado (Ação/Engenharia) */
---success-color: #059669; /* Verde Esmeralda */
---warning-color: #D97706; /* Âmbar */
---danger-color: #DC2626; /* Vermelho Tijolo */
---bg-body: #F8FAFC; /* Branco Gelo (Fundo Suave) */
---bg-card: #FFFFFF; /* Branco Puro */
---border-color: #E2E8F0; /* Cinza Claro */
---text-main: #1E293B; /* Texto Principal */
---text-muted: #64748B; /* Texto Secundário */
+--primary-color: #0F172A;
+--primary-light: #334155;
+--accent-color: #EA580C;
+--success-color: #059669;
+--warning-color: #D97706;
+--danger-color: #DC2626;
+--bg-body: #F8FAFC;
+--bg-card: #FFFFFF;
+--border-color: #E2E8F0;
+--text-main: #1E293B;
+--text-muted: #64748B;
 --shadow-sm: 0 1px 3px rgba(0,0,0,0.1);
 --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
 --radius: 8px;
@@ -42,7 +41,6 @@ font-family: 'Inter', sans-serif;
 color: var(--text-main);
 }
 
-/* Remove a barra lateral padrão feia se não estiver em uso crítico, ou estiliza */
 section[data-testid="stSidebar"] {
 background-color: var(--bg-card);
 border-right: 1px solid var(--border-color);
@@ -62,12 +60,7 @@ color: var(--text-main);
 font-size: 0.95rem;
 }
 
-/* CARDS E CONTAINERS (Efeito de Profundidade) */
-.stContainer, div[data-testid="stVerticalBlock"], div.element-container {
-/* Aplica suavidade aos blocos */
-}
-
-/* MÉTRICAS (KPIs) - Visual de Dashboard Profissional */
+/* MÉTRICAS */
 div[data-testid="metric-container"] {
 background: var(--bg-card)!important;
 border: 1px solid var(--border-color)!important;
@@ -95,7 +88,7 @@ font-size: 0.75rem!important;
 letter-spacing: 0.05em;
 }
 
-/* BOTÕES - Modernos e Tátil */
+/* BOTÕES */
 .stButton > button {
 background-color: var(--primary-color)!important;
 color: white!important;
@@ -114,13 +107,13 @@ box-shadow: var(--shadow-md)!important;
 color: white!important;
 }
 .stButton > button[kind="primary"] {
-background-color: var(--accent-color)!important; /* Destaque para ação principal */
+background-color: var(--accent-color)!important;
 }
 .stButton > button[kind="primary"]:hover {
 background-color: #c2410c!important;
 }
 
-/* INPUTS E SELECTBOX - Limpos */
+/* INPUTS */
 .stTextInput > div > div > input,
 .stSelectbox > div > div > select,
 .stNumberInput > div > div > input {
@@ -138,7 +131,7 @@ border-color: var(--primary-color)!important;
 box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.1)!important;
 }
 
-/* TABELAS E DATAFRAMES - Mais legíveis */
+/* TABELAS */
 div[data-testid="stDataFrame"] {
 border-radius: var(--radius)!important;
 border: 1px solid var(--border-color)!important;
@@ -154,7 +147,7 @@ letter-spacing: 0.05em;
 border-bottom: 2px solid var(--border-color)!important;
 }
 
-/* ABAS (TABS) - Estilo Clean */
+/* ABAS */
 .stTabs [data-baseweb="tab-list"] {
 gap: 24px;
 border-bottom: 1px solid var(--border-color);
@@ -175,25 +168,25 @@ font-weight: 700;
 border-bottom: 3px solid var(--accent-color);
 }
 
-/* ALERTAS E BADGES PERSONALIZADOS */
+/* BADGES */
 .badge-obra { background:#FFF7ED; color:#C2410C; padding:4px 10px; border-radius:6px; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; }
 .badge-edt { background:#F1F5F9; color:#334155; padding:4px 10px; border-radius:6px; font-weight:600; font-size:11px; border:1px solid #E2E8F0; }
 .badge-lote { background:#ECFDF5; color:#047857; padding:4px 10px; border-radius:6px; font-weight:700; font-size:11px; }
 
-/* CALENDÁRIO E CARDS DE DIA */
+/* CALENDÁRIO */
 .cal-day-active,.cal-day-today {
 background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%);
 border: 1px solid #3B82F6;
 box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
 }
 
-/* BARRAS DE STATUS (Urgência) */
+/* BARRAS DE STATUS */
 .bar-ok { border-left: 5px solid var(--success-color); background: #F0FDF4; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
 .bar-warn { border-left: 5px solid var(--warning-color); background: #FFFBEB; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
 .bar-danger { border-left: 5px solid var(--danger-color); background: #FEF2F2; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
 .bar-neutral { border-left: 5px solid var(--text-muted); background: #F8FAFC; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
 
-/* LOGIN CARD */
+/* LOGIN */
 .login-container {
 background: var(--bg-card);
 padding: 40px;
@@ -203,12 +196,13 @@ border: 1px solid var(--border-color);
 text-align: center;
 }
 
-/* ESCONDER ELEMENTOS FEIOS DO STREAMLIT */
+/* ESCONDER STREAMLIT */
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
+
 
 
 HOJE_PROJETO = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
