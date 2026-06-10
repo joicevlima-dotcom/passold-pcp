@@ -449,7 +449,7 @@ if not st.session_state.autenticado:
     """, unsafe_allow_html=True)
 
     if logo_b64:
-        logo_tag = f'<img src="data:image/png;base64,{logo_b64}" style="height:80px;display:block;margin:0 auto 28px auto;" />'
+        logo_tag = f'<img src="data:image/png;base64,{logo_b64}" style="height:180px;display:block;margin:0 auto 28px auto;" />'
     else:
         logo_tag = '<div style="font-family:Barlow Condensed,sans-serif;font-weight:800;font-size:48px;color:#0A1628;text-align:center;letter-spacing:2px;margin-bottom:28px;">PASS<span style=\"color:#D4A017;\">OLD</span></div>'
 
