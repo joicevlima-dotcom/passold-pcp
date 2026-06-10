@@ -734,20 +734,20 @@ else:
 setor = st.session_state.usuario_setor
 abas_disponiveis = []
 if setor in ["Master", "Producao", "Diretoria", "Engenharia"]:
-    abas_disponiveis.append("Painel da Producao")
+    abas_disponiveis.append("Painel da Producão")
 if setor in ["Master"]:
-    abas_disponiveis.append("Liberar OPs da Semana")
+    abas_disponiveis.append("Liberação Semanal")
 if setor in ["Master", "Diretoria"]:
-    abas_disponiveis.append("Visao Macro")
+    abas_disponiveis.append("Planejamento Geral")
 if setor in ["Master"]:
     abas_disponiveis.append("Vincular Datas")
-    abas_disponiveis.append("Cadastrar Obra")
+    abas_disponiveis.append("Cadastramento Obra")
 if setor in ["Master", "Engenharia"]:
     abas_disponiveis.append("Painel de Engenharia")
 if setor in ["Master", "Logistica"]:
     abas_disponiveis.append("Logistica")
 if setor in ["Master"]:
-    abas_disponiveis.append("Configuracoes")
+    abas_disponiveis.append("Configuracões")
 
 with st.container():
     abas_objetos = st.tabs(abas_disponiveis)
@@ -757,7 +757,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     # PAINEL DA PRODUCAO (TV)
     # ==================================================
-    if nome_aba == "Painel da Producao":
+    if nome_aba == "Painel da Produção":
         # FIX: import calendar movido para o topo do arquivo
         with aba_objeto:
             st.header("Mural de Metas — Producao")
@@ -959,7 +959,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     # LIBERAR OPS
     # ==================================================
-    elif nome_aba == "Liberar OPs da Semana":
+    elif nome_aba == "Liberação Semanal":
         with aba_objeto:
             st.header("Ordens de Producao — Liberacao Semanal")
             if obra_selecionada and not df_banco_micro.empty:
@@ -1006,7 +1006,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     # VISAO MACRO
     # ==================================================
-    elif nome_aba == "Visao Macro":
+    elif nome_aba == "Planejamento Geral":
         with aba_objeto:
             st.header("Dashboard Executivo")
             # FIX: garante que df_dir nunca seja ambíguo quando df_banco_micro está vazio
@@ -1226,9 +1226,9 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     # CADASTRAR OBRA
     # ==================================================
-    elif nome_aba == "Cadastrar Obra":
+    elif nome_aba == "Cadastramento obra":
         with aba_objeto:
-            st.header("Cadastrar Nova Obra")
+            st.header("Cadastramento Nova Obra")
             for k, v in [
                 ('mem_obra', ''),
                 ('mem_frente', ''),
@@ -1836,7 +1836,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     # CONFIGURACOES
     # ==================================================
-    elif nome_aba == "Configuracoes":
+    elif nome_aba == "Configurações":
         with aba_objeto:
             st.header("Painel de Controle Master")
             with st.expander("Cadastrar Novo Usuario"):
