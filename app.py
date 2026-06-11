@@ -281,7 +281,10 @@ def inicializar_banco_de_dados():
             Enviado_Logistica INTEGER DEFAULT 0
         )
     """)
-
+    cursor.execute("""
+            ALTER TABLE itens_detalhado 
+            ADD COLUMN IF NOT EXISTS Data_Despacho DATE
+        """)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             id SERIAL PRIMARY KEY,
