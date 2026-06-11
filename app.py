@@ -1301,6 +1301,24 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 ] if c in df_show.columns]
                 st.dataframe(df_show[cols_s], hide_index=True, use_container_width=True)
 
+                st.markdown("#### Excluir Frente")
+                st.warning("Isso remove a frente do cronograma macro. Lotes vinculados NÃO são removidos automaticamente.")
+                opcoes_del = [
+                    f"{row['EDT']} — {row['Tarefa']} [{row.get('Subdivisao','')}]"
+                    for _, row in df_banco_macro[df_banco_macro['Obra'] == obra_selecionada].iterrows()
+                ] if not df_banco_macro.empty else []
+                if opcoes_del:
+                    frente_del = st.selectbox("Frente para excluir:", opcoes_del, key="sel_del_frente")
+                    edt_del = frente_del.split(" — ")[0].strip()
+                    if st.button(f"Excluir frente {edt_del}", key="btn_del_frente"):
+                        conn = conectar_banco()
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM cronograma_macro WHERE EDT=%s", (edt_del,))
+                        conn.commit()
+                        conn.close()
+                        st.toast(f"Frente {edt_del} removida!")
+                        time.sleep(0.5)
+                        st.rerun()
     # ==================================================
     # PAINEL DE ENGENHARIA
     # ==================================================
