@@ -8,6 +8,8 @@ import time
 import hashlib
 import psycopg2
 import psycopg2.extras
+from zoneinfo import ZoneInfo
+FUSO_BR = ZoneInfo('America/Sao_Paulo')
 
 st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide")
 
@@ -994,7 +996,9 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     </span>
                     <br>
                     <span style='color:#93C5FD;font-size:13px;'>
-                        {datetime.now().strftime('%d/%m/%Y  %H:%M')}
+                        from datetime import timezone
+                    import zoneinfo
+                    {datetime.now(FUSO_BR).strftime('%d/%m/%Y  %H:%M')}
                     </span>
                 </div>
                 <div style='text-align:right;'>
