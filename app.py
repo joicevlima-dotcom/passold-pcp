@@ -561,14 +561,13 @@ if 'autenticado' not in st.session_state:
 if not st.session_state.autenticado:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
+        st.markdown("<div style='text-align:center; padding: 40px 0 10px 0;'>", unsafe_allow_html=True)
+        st.image("assets/LOGO_BAUDENPASSOLD.jpg", width=300)
         st.markdown("""
-        <div style='text-align:center; padding: 40px 0 10px 0;'>
-            <p style='color:#0F172A; font-size:28px; font-weight:800; margin-bottom:4px;'>
-                Passold Sistemas de Fachadas
-            </p>
-            <p style='color:#64748B; font-size:13px; margin-top:4px; letter-spacing:0.05em;'>
-                PCP & Controle Operacional
-            </p>
+        <p style='text-align:center; color:#64748B; font-size:13px;
+                   margin-top:8px; letter-spacing:0.05em;'>
+            PCP & Controle Operacional
+        </p>
         </div>
         """, unsafe_allow_html=True)
         with st.container(border=True):
@@ -585,7 +584,6 @@ if not st.session_state.autenticado:
                 else:
                     st.error("Usuário ou senha inválidos.")
     st.stop()
-
 # ========================================================
 # HEADER
 # ========================================================
