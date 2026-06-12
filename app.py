@@ -13,13 +13,9 @@ FUSO_BR = ZoneInfo('America/Sao_Paulo')
 
 st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide")
 
-# FIX: CSS unificado em um único st.markdown (antes havia dois st.markdown(" abertos sem fechar)
 st.markdown("""
 <style>
-/* IMPORTAR FONTES */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
-/* VARIÁVEIS GLOBAIS DE COR */
 :root {
     --primary-color: #0F172A;
     --primary-light: #334155;
@@ -36,196 +32,46 @@ st.markdown("""
     --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
     --radius: 8px;
 }
-
-/* RESET E FUNDO GERAL */
-.stApp {
-    background-color: var(--bg-body);
-    font-family: 'Inter', sans-serif;
-    color: var(--text-main);
-}
-
-section[data-testid="stSidebar"] {
-    background-color: var(--bg-card);
-    border-right: 1px solid var(--border-color);
-    box-shadow: var(--shadow-sm);
-}
-
-/* TIPOGRAFIA */
-h1, h2, h3, h4, h5, h6 {
-    color: var(--primary-color)!important;
-    font-weight: 700!important;
-    letter-spacing: -0.02em;
-    margin-bottom: 1rem!important;
-}
-
-p, label, div[data-testid="stWidgetLabel"] {
-    color: var(--text-main);
-    font-size: 0.95rem;
-}
-
-/* MÉTRICAS */
-div[data-testid="metric-container"] {
-    background: var(--bg-card)!important;
-    border: 1px solid var(--border-color)!important;
-    border-left: 5px solid var(--primary-color)!important;
-    border-radius: var(--radius)!important;
-    padding: 16px!important;
-    box-shadow: var(--shadow-sm)!important;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-div[data-testid="metric-container"]:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md)!important;
-    border-left-color: var(--accent-color)!important;
-}
-div[data-testid="stMetricValue"] {
-    font-size: 1.8rem!important;
-    font-weight: 700!important;
-    color: var(--primary-color)!important;
-}
-div[data-testid="stMetricLabel"] {
-    color: var(--text-muted)!important;
-    font-weight: 500!important;
-    text-transform: uppercase;
-    font-size: 0.75rem!important;
-    letter-spacing: 0.05em;
-}
-
-/* BOTÕES */
-.stButton > button {
-    background-color: var(--primary-color)!important;
-    color: #FFFFFF!important;
-    font-weight: 600!important;
-    border-radius: 6px!important;
-    border: none!important;
-    padding: 10px 24px!important;
-    font-size: 0.9rem!important;
-    box-shadow: var(--shadow-sm)!important;
-    transition: all 0.2s ease!important;
-}
-.stButton > button p,
-.stButton > button span,
-.stButton > button div {
-    color: #FFFFFF!important;
-}
-.stButton > button:hover {
-    background-color: var(--primary-light)!important;
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md)!important;
-    color: #FFFFFF!important;
-}
-.stButton > button:hover p,
-.stButton > button:hover span {
-    color: #FFFFFF!important;
-}
-/* FIX: garante letra branca em todos os estados do botão, inclusive o "Sair" */
-.stButton > button *, 
-.stButton > button p,
-.stButton > button span {
-    color: white!important;
-}
-.stButton > button[kind="primary"] {
-    background-color: var(--accent-color)!important;
-}
-.stButton > button[kind="primary"]:hover {
-    background-color: #c2410c!important;
-}
-
-/* INPUTS */
-.stTextInput > div > div > input,
-.stSelectbox > div > div > select,
-.stNumberInput > div > div > input {
-    background-color: var(--bg-card)!important;
-    border: 1px solid var(--border-color)!important;
-    border-radius: 6px!important;
-    color: var(--text-main)!important;
-    padding: 10px!important;
-    font-size: 0.9rem!important;
-    box-shadow: none!important;
-}
-.stTextInput > div > div > input:focus,
-.stSelectbox > div > div > select:focus {
-    border-color: var(--primary-color)!important;
-    box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.1)!important;
-}
-
-/* TABELAS */
-div[data-testid="stDataFrame"] {
-    border-radius: var(--radius)!important;
-    border: 1px solid var(--border-color)!important;
-    overflow: hidden;
-}
-thead tr th {
-    background-color: #F1F5F9!important;
-    color: var(--primary-light)!important;
-    font-weight: 600!important;
-    text-transform: uppercase;
-    font-size: 0.75rem!important;
-    letter-spacing: 0.05em;
-    border-bottom: 2px solid var(--border-color)!important;
-}
-
-/* ABAS */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 24px;
-    border-bottom: 1px solid var(--border-color);
-}
-.stTabs [data-baseweb="tab"] {
-    height: 50px;
-    white-space: pre-wrap;
-    background-color: transparent;
-    border-radius: 4px 4px 0px 0px;
-    color: var(--text-muted);
-    font-weight: 500;
-    transition: all 0.2s;
-}
-.stTabs [aria-selected="true"] {
-    background-color: var(--bg-body);
-    color: var(--accent-color);
-    font-weight: 700;
-    border-bottom: 3px solid var(--accent-color);
-}
-
-/* BADGES */
+.stApp { background-color: var(--bg-body); font-family: 'Inter', sans-serif; color: var(--text-main); }
+section[data-testid="stSidebar"] { background-color: var(--bg-card); border-right: 1px solid var(--border-color); box-shadow: var(--shadow-sm); }
+h1, h2, h3, h4, h5, h6 { color: var(--primary-color)!important; font-weight: 700!important; letter-spacing: -0.02em; margin-bottom: 1rem!important; }
+p, label, div[data-testid="stWidgetLabel"] { color: var(--text-main); font-size: 0.95rem; }
+div[data-testid="metric-container"] { background: var(--bg-card)!important; border: 1px solid var(--border-color)!important; border-left: 5px solid var(--primary-color)!important; border-radius: var(--radius)!important; padding: 16px!important; box-shadow: var(--shadow-sm)!important; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+div[data-testid="metric-container"]:hover { transform: translateY(-2px); box-shadow: var(--shadow-md)!important; border-left-color: var(--accent-color)!important; }
+div[data-testid="stMetricValue"] { font-size: 1.8rem!important; font-weight: 700!important; color: var(--primary-color)!important; }
+div[data-testid="stMetricLabel"] { color: var(--text-muted)!important; font-weight: 500!important; text-transform: uppercase; font-size: 0.75rem!important; letter-spacing: 0.05em; }
+.stButton > button { background-color: var(--primary-color)!important; color: #FFFFFF!important; font-weight: 600!important; border-radius: 6px!important; border: none!important; padding: 10px 24px!important; font-size: 0.9rem!important; box-shadow: var(--shadow-sm)!important; transition: all 0.2s ease!important; }
+.stButton > button p, .stButton > button span, .stButton > button div { color: #FFFFFF!important; }
+.stButton > button:hover { background-color: var(--primary-light)!important; transform: translateY(-1px); box-shadow: var(--shadow-md)!important; color: #FFFFFF!important; }
+.stButton > button *, .stButton > button p, .stButton > button span { color: white!important; }
+.stButton > button[kind="primary"] { background-color: var(--accent-color)!important; }
+.stButton > button[kind="primary"]:hover { background-color: #c2410c!important; }
+.stTextInput > div > div > input, .stSelectbox > div > div > select, .stNumberInput > div > div > input { background-color: var(--bg-card)!important; border: 1px solid var(--border-color)!important; border-radius: 6px!important; color: var(--text-main)!important; padding: 10px!important; font-size: 0.9rem!important; box-shadow: none!important; }
+.stTextInput > div > div > input:focus, .stSelectbox > div > div > select:focus { border-color: var(--primary-color)!important; box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.1)!important; }
+div[data-testid="stDataFrame"] { border-radius: var(--radius)!important; border: 1px solid var(--border-color)!important; overflow: hidden; }
+thead tr th { background-color: #F1F5F9!important; color: var(--primary-light)!important; font-weight: 600!important; text-transform: uppercase; font-size: 0.75rem!important; letter-spacing: 0.05em; border-bottom: 2px solid var(--border-color)!important; }
+.stTabs [data-baseweb="tab-list"] { gap: 24px; border-bottom: 1px solid var(--border-color); }
+.stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: transparent; border-radius: 4px 4px 0px 0px; color: var(--text-muted); font-weight: 500; transition: all 0.2s; }
+.stTabs [aria-selected="true"] { background-color: var(--bg-body); color: var(--accent-color); font-weight: 700; border-bottom: 3px solid var(--accent-color); }
 .badge-obra { background:#FFF7ED; color:#C2410C; padding:4px 10px; border-radius:6px; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; }
 .badge-edt  { background:#F1F5F9; color:#334155; padding:4px 10px; border-radius:6px; font-weight:600; font-size:11px; border:1px solid #E2E8F0; }
 .badge-lote { background:#ECFDF5; color:#047857; padding:4px 10px; border-radius:6px; font-weight:700; font-size:11px; }
-
-/* CALENDÁRIO */
-.cal-day-active, .cal-day-today {
-    background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%);
-    border: 1px solid #3B82F6;
-    box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
-}
-
-/* BARRAS DE STATUS */
+.cal-day-active, .cal-day-today { background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%); border: 1px solid #3B82F6; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2); }
 .bar-ok      { border-left: 5px solid var(--success-color); background: #F0FDF4; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
 .bar-warn    { border-left: 5px solid var(--warning-color); background: #FFFBEB; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
 .bar-danger  { border-left: 5px solid var(--danger-color);  background: #FEF2F2; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
 .bar-neutral { border-left: 5px solid var(--text-muted);    background: #F8FAFC; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
-
-/* LOGIN */
-.login-container {
-    background: var(--bg-card);
-    padding: 40px;
-    border-radius: 12px;
-    box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1);
-    border: 1px solid var(--border-color);
-    text-align: center;
-}
-
-/* ESCONDER STREAMLIT */
+.login-container { background: var(--bg-card); padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1); border: 1px solid var(--border-color); text-align: center; }
 #MainMenu { visibility: hidden; }
 footer    { visibility: hidden; }
 header    { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
-
 HOJE_PROJETO = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
 # ========================================================
-# CONEXÃO SUPABASE (via st.secrets)
+# CONEXÃO SUPABASE
 # ========================================================
 def conectar_banco():
     url = st.secrets["supabase"]["url"]
@@ -242,7 +88,6 @@ def hash_senha(senha: str) -> str:
 def inicializar_banco_de_dados():
     conn = conectar_banco()
     cursor = conn.cursor()
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS cronograma_macro (
             id SERIAL PRIMARY KEY,
@@ -262,7 +107,6 @@ def inicializar_banco_de_dados():
             Primeiro_Dia_Producao DATE
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS itens_detalhado (
             id SERIAL PRIMARY KEY,
@@ -283,10 +127,7 @@ def inicializar_banco_de_dados():
             Enviado_Logistica INTEGER DEFAULT 0
         )
     """)
-    cursor.execute("""
-            ALTER TABLE itens_detalhado 
-            ADD COLUMN IF NOT EXISTS Data_Despacho DATE
-        """)
+    cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Data_Despacho DATE")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             id SERIAL PRIMARY KEY,
@@ -296,7 +137,6 @@ def inicializar_banco_de_dados():
             senha TEXT
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS solicitacoes_prazo (
             id SERIAL PRIMARY KEY,
@@ -310,7 +150,6 @@ def inicializar_banco_de_dados():
             criado_em TEXT
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS logistica_envios (
             id SERIAL PRIMARY KEY,
@@ -333,21 +172,19 @@ def inicializar_banco_de_dados():
             Confirmado_Em TEXT
         )
     """)
-
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
         cursor.execute(
             "INSERT INTO usuarios (usuario, nome, setor, senha) VALUES (%s, %s, %s, %s)",
             ('master', 'Joice Master', 'Master', hash_senha('Jv568279.'))
         )
-
     conn.commit()
     conn.close()
 
 inicializar_banco_de_dados()
 
 # ========================================================
-# FUNÇÕES UTILITÁRIAS DE DATAS
+# UTILITÁRIOS DE DATAS
 # ========================================================
 def subtrair_dias_uteis(data_base: datetime, n: int) -> datetime:
     data = data_base
@@ -359,8 +196,7 @@ def subtrair_dias_uteis(data_base: datetime, n: int) -> datetime:
     return data
 
 def calcular_cronograma_reverso(inicio_previsto, dias_logistica: int, dias_uteis_fabricacao: int, dias_antecedencia_eng: int = 3):
-    dt = inicio_previsto if isinstance(inicio_previsto, datetime) \
-         else datetime.combine(inicio_previsto, datetime.min.time())
+    dt = inicio_previsto if isinstance(inicio_previsto, datetime) else datetime.combine(inicio_previsto, datetime.min.time())
     data_limite_despacho  = dt - timedelta(days=int(dias_logistica))
     primeiro_dia_producao = subtrair_dias_uteis(data_limite_despacho, int(dias_uteis_fabricacao))
     prazo_engenharia      = subtrair_dias_uteis(primeiro_dia_producao, int(dias_antecedencia_eng))
@@ -369,15 +205,12 @@ def calcular_cronograma_reverso(inicio_previsto, dias_logistica: int, dias_uteis
 def gerar_lote_unico(data_limite_obra, dias_logistica, dias_uteis_fab,
                      total_cx, total_m2, obra, edt, cod_lote,
                      especificacao, txt_pav, dificuldade):
-    # FIX: normalização de data consistente
     if isinstance(data_limite_obra, datetime):
         dt_limite = data_limite_obra
     else:
         dt_limite = datetime.combine(data_limite_obra, datetime.min.time())
-
     dt_despacho = dt_limite - timedelta(days=int(dias_logistica))
     dt_inicio   = subtrair_dias_uteis(dt_despacho, int(dias_uteis_fab))
-
     return [{
         "Obra_Vinculada":           obra,
         "EDT_Vinculado":            edt,
@@ -388,7 +221,6 @@ def gerar_lote_unico(data_limite_obra, dias_logistica, dias_uteis_fab,
         "M2_Item":                  float(round(total_m2, 2)),
         "Data_Producao_Programada": dt_inicio.strftime('%Y-%m-%d'),
         "Data_Limite_Obra":         dt_limite.strftime('%Y-%m-%d'),
-        # FIX: Data_Despacho agora é salva corretamente
         "Data_Despacho":            dt_despacho.strftime('%Y-%m-%d'),
         "Romaneio_Chapas":          txt_pav,
         "Status_Item":              "Pendente",
@@ -406,8 +238,7 @@ def prazo_valido(valor) -> bool:
         return False
 
 def ultima_semana_producao(dt_inicio, dt_fim):
-    """Retorna o início da última semana de produção (7 dias antes do fim)."""
-    dt_fim_dt   = pd.to_datetime(dt_fim)
+    dt_fim_dt    = pd.to_datetime(dt_fim)
     dt_inicio_dt = pd.to_datetime(dt_inicio)
     inicio_ultima_semana = dt_fim_dt - timedelta(days=6)
     return max(inicio_ultima_semana, dt_inicio_dt)
@@ -419,22 +250,16 @@ def carregar_macro():
     conn = conectar_banco()
     df = pd.read_sql_query("SELECT * FROM cronograma_macro ORDER BY id", conn)
     conn.close()
-    for col in ['inicio_previsto', 'termino_obra', 'prazo_engenharia',
-                'data_limite_despacho', 'primeiro_dia_producao']:
+    for col in ['inicio_previsto', 'termino_obra', 'prazo_engenharia', 'data_limite_despacho', 'primeiro_dia_producao']:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
     df.columns = [c.replace('_', ' ').title().replace(' ', '_') if c != 'id' else c for c in df.columns]
     rename = {
-        'Inicio_Previsto':      'Inicio_Previsto',
-        'Termino_Obra':         'Termino_Obra',
-        'Prazo_Engenharia':     'Prazo_Engenharia',
-        'Data_Limite_Despacho': 'Data_Limite_Despacho',
-        'Primeiro_Dia_Producao':'Primeiro_Dia_Producao',
-        'Edt':                  'EDT',
-        'M2_Total_Tarefa':      'M2_Total_Tarefa',
-        'Status_Engenharia':    'Status_Engenharia',
-        'Tipo_Escopo':          'Tipo_Escopo',
-        'Etapa_Macro':          'Etapa_Macro',
+        'Inicio_Previsto': 'Inicio_Previsto', 'Termino_Obra': 'Termino_Obra',
+        'Prazo_Engenharia': 'Prazo_Engenharia', 'Data_Limite_Despacho': 'Data_Limite_Despacho',
+        'Primeiro_Dia_Producao': 'Primeiro_Dia_Producao', 'Edt': 'EDT',
+        'M2_Total_Tarefa': 'M2_Total_Tarefa', 'Status_Engenharia': 'Status_Engenharia',
+        'Tipo_Escopo': 'Tipo_Escopo', 'Etapa_Macro': 'Etapa_Macro',
     }
     df = df.rename(columns=rename)
     return df
@@ -448,51 +273,32 @@ def carregar_micro():
             df[col] = pd.to_datetime(df[col], errors='coerce')
     df.columns = [c.replace('_', ' ').title().replace(' ', '_') if c != 'id' else c for c in df.columns]
     rename = {
-        'Data_Producao_Programada': 'Data_Producao_Programada',
-        'Data_Limite_Obra':         'Data_Limite_Obra',
-        'Data_Despacho':            'Data_Despacho',
-        'Edt_Vinculado':            'EDT_Vinculado',
-        'Obra_Vinculada':           'Obra_Vinculada',
-        'Cod_Lote':                 'Cod_Lote',
-        'Num_Op':                   'Num_OP',
-        'Tipo_Material':            'Tipo_Material',
-        'Qtd_Caixas':               'Qtd_Caixas',
-        'M2_Item':                  'M2_Item',
-        'Romaneio_Chapas':          'Romaneio_Chapas',
-        'Status_Item':              'Status_Item',
-        'Fase_Produtiva':           'Fase_Produtiva',
-        'Enviado_Logistica':        'Enviado_Logistica',
+        'Data_Producao_Programada': 'Data_Producao_Programada', 'Data_Limite_Obra': 'Data_Limite_Obra',
+        'Data_Despacho': 'Data_Despacho', 'Edt_Vinculado': 'EDT_Vinculado',
+        'Obra_Vinculada': 'Obra_Vinculada', 'Cod_Lote': 'Cod_Lote', 'Num_Op': 'Num_OP',
+        'Tipo_Material': 'Tipo_Material', 'Qtd_Caixas': 'Qtd_Caixas', 'M2_Item': 'M2_Item',
+        'Romaneio_Chapas': 'Romaneio_Chapas', 'Status_Item': 'Status_Item',
+        'Fase_Produtiva': 'Fase_Produtiva', 'Enviado_Logistica': 'Enviado_Logistica',
     }
     df = df.rename(columns=rename)
     return df
 
 def carregar_fila_logistica():
     conn = conectar_banco()
-    df = pd.read_sql_query(
-        "SELECT * FROM logistica_envios ORDER BY data_limite_despacho ASC NULLS LAST", conn)
+    df = pd.read_sql_query("SELECT * FROM logistica_envios ORDER BY data_limite_despacho ASC NULLS LAST", conn)
     conn.close()
     for col in ['data_limite_despacho', 'data_envio_agendado']:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
     df.columns = [c.replace('_', ' ').title().replace(' ', '_') if c != 'id' else c for c in df.columns]
     rename = {
-        'Data_Limite_Despacho': 'Data_Limite_Despacho',
-        'Data_Envio_Agendado':  'Data_Envio_Agendado',
-        'Obra_Vinculada':       'Obra_Vinculada',
-        'Cod_Lote':             'Cod_Lote',
-        'Num_Op':               'Num_OP',
-        'Tipo_Material':        'Tipo_Material',
-        'Qtd_Caixas':           'Qtd_Caixas',
-        'M2_Item':              'M2_Item',
-        'Romaneio_Chapas':      'Romaneio_Chapas',
-        'Status_Logistica':     'Status_Logistica',
-        'Transportadora':       'Transportadora',
-        'Veiculo':              'Veiculo',
-        'Observacoes':          'Observacoes',
-        'Confirmado_Por':       'Confirmado_Por',
-        'Confirmado_Em':        'Confirmado_Em',
-        'Item_Id':              'item_id',
-        'Edt_Vinculado':        'EDT_Vinculado',
+        'Data_Limite_Despacho': 'Data_Limite_Despacho', 'Data_Envio_Agendado': 'Data_Envio_Agendado',
+        'Obra_Vinculada': 'Obra_Vinculada', 'Cod_Lote': 'Cod_Lote', 'Num_Op': 'Num_OP',
+        'Tipo_Material': 'Tipo_Material', 'Qtd_Caixas': 'Qtd_Caixas', 'M2_Item': 'M2_Item',
+        'Romaneio_Chapas': 'Romaneio_Chapas', 'Status_Logistica': 'Status_Logistica',
+        'Transportadora': 'Transportadora', 'Veiculo': 'Veiculo', 'Observacoes': 'Observacoes',
+        'Confirmado_Por': 'Confirmado_Por', 'Confirmado_Em': 'Confirmado_Em',
+        'Item_Id': 'item_id', 'Edt_Vinculado': 'EDT_Vinculado',
     }
     df = df.rename(columns=rename)
     return df
@@ -518,8 +324,7 @@ def salvar_lotes_micro(lotes: list):
         """, (
             l['Obra_Vinculada'], l['EDT_Vinculado'], l['Cod_Lote'], l['Num_OP'],
             l['Tipo_Material'], l['Qtd_Caixas'], l['M2_Item'],
-            l['Data_Producao_Programada'], l['Data_Limite_Obra'],
-            l['Data_Despacho'],  # FIX: agora persiste Data_Despacho
+            l['Data_Producao_Programada'], l['Data_Limite_Obra'], l['Data_Despacho'],
             l['Romaneio_Chapas'], l['Status_Item'], l['Dificuldade'],
             l['Fase_Produtiva'], l['Enviado_Logistica']
         ))
@@ -530,30 +335,22 @@ def deletar_lotes_por_edt_lote(obra, edt, cod_lote):
     conn = conectar_banco()
     cursor = conn.cursor()
     if edt:
-        cursor.execute(
-            "DELETE FROM itens_detalhado WHERE Obra_Vinculada=%s AND EDT_Vinculado=%s AND Cod_Lote=%s",
-            (obra, edt, cod_lote))
+        cursor.execute("DELETE FROM itens_detalhado WHERE Obra_Vinculada=%s AND EDT_Vinculado=%s AND Cod_Lote=%s", (obra, edt, cod_lote))
     else:
-        cursor.execute(
-            "DELETE FROM itens_detalhado WHERE Obra_Vinculada=%s AND Cod_Lote=%s",
-            (obra, cod_lote))
+        cursor.execute("DELETE FROM itens_detalhado WHERE Obra_Vinculada=%s AND Cod_Lote=%s", (obra, cod_lote))
     conn.commit()
     conn.close()
 
 def atualizar_cronograma_macro_datas(edt, prazo_eng, primeiro_prod, despacho):
     conn = conectar_banco()
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT prazo_engenharia, primeiro_dia_producao, data_limite_despacho FROM cronograma_macro WHERE EDT=%s",
-        (edt,))
+    cursor.execute("SELECT prazo_engenharia, primeiro_dia_producao, data_limite_despacho FROM cronograma_macro WHERE EDT=%s", (edt,))
     row = cursor.fetchone()
-
     def to_dt(v):
         try:
             return pd.to_datetime(v) if v else None
         except Exception:
             return None
-
     if row:
         pa, pp, pd_ = to_dt(row[0]), to_dt(row[1]), to_dt(row[2])
         novo_prazo    = min(pa,  pd.to_datetime(prazo_eng))     if pa  else pd.to_datetime(prazo_eng)
@@ -563,26 +360,18 @@ def atualizar_cronograma_macro_datas(edt, prazo_eng, primeiro_prod, despacho):
         novo_prazo    = pd.to_datetime(prazo_eng)
         novo_primeiro = pd.to_datetime(primeiro_prod)
         novo_despacho = pd.to_datetime(despacho)
-
     cursor.execute("""
         UPDATE cronograma_macro
         SET Prazo_Engenharia=%s, Primeiro_Dia_Producao=%s, Data_Limite_Despacho=%s
         WHERE EDT=%s
-    """, (
-        novo_prazo.strftime('%Y-%m-%d'),
-        novo_primeiro.strftime('%Y-%m-%d'),
-        novo_despacho.strftime('%Y-%m-%d'),
-        edt
-    ))
+    """, (novo_prazo.strftime('%Y-%m-%d'), novo_primeiro.strftime('%Y-%m-%d'), novo_despacho.strftime('%Y-%m-%d'), edt))
     conn.commit()
     conn.close()
 
 def atualizar_status_engenharia(edt_id, novo_status):
     conn = conectar_banco()
     cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE cronograma_macro SET Status_Engenharia=%s WHERE id=%s",
-        (novo_status, edt_id))
+    cursor.execute("UPDATE cronograma_macro SET Status_Engenharia=%s WHERE id=%s", (novo_status, edt_id))
     conn.commit()
     conn.close()
 
@@ -590,20 +379,16 @@ def salvar_solicitacao(edt, tarefa, prazo_atual, prazo_sol, justif, criado_por):
     conn = conectar_banco()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO solicitacoes_prazo
-        (edt, tarefa, prazo_atual, prazo_solicitado, justificativa, criado_por, status, criado_em)
+        INSERT INTO solicitacoes_prazo (edt, tarefa, prazo_atual, prazo_solicitado, justificativa, criado_por, status, criado_em)
         VALUES (%s,%s,%s,%s,%s,%s,'Pendente de Aprovacao',%s)
-    """, (edt, tarefa, prazo_atual, prazo_sol, justif, criado_por,
-          datetime.now().strftime('%d/%m/%Y %H:%M')))
+    """, (edt, tarefa, prazo_atual, prazo_sol, justif, criado_por, datetime.now().strftime('%d/%m/%Y %H:%M')))
     conn.commit()
     conn.close()
 
 def atualizar_status_solicitacao(sol_id, novo_status):
     conn = conectar_banco()
     cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE solicitacoes_prazo SET status=%s WHERE id=%s",
-        (novo_status, sol_id))
+    cursor.execute("UPDATE solicitacoes_prazo SET status=%s WHERE id=%s", (novo_status, sol_id))
     conn.commit()
     conn.close()
 
@@ -620,20 +405,11 @@ def enviar_para_logistica(row, limite_despacho):
          Qtd_Caixas, M2_Item, Romaneio_Chapas, Data_Limite_Despacho, Status_Logistica)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'Aguardando Agendamento')
     """, (
-        int(row['id']),
-        row['Obra_Vinculada'],
-        row['EDT_Vinculado'],
-        row['Cod_Lote'],
-        row.get('Num_OP') or '',
-        row['Tipo_Material'],
-        int(row['Qtd_Caixas']),
-        float(row['M2_Item']),
-        row['Romaneio_Chapas'],
-        limite_despacho.strftime('%Y-%m-%d') if prazo_valido(limite_despacho) else None
+        int(row['id']), row['Obra_Vinculada'], row['EDT_Vinculado'], row['Cod_Lote'],
+        row.get('Num_OP') or '', row['Tipo_Material'], int(row['Qtd_Caixas']), float(row['M2_Item']),
+        row['Romaneio_Chapas'], limite_despacho.strftime('%Y-%m-%d') if prazo_valido(limite_despacho) else None
     ))
-    cursor.execute(
-        "UPDATE itens_detalhado SET Enviado_Logistica=1 WHERE id=%s",
-        (int(row['id']),))
+    cursor.execute("UPDATE itens_detalhado SET Enviado_Logistica=1 WHERE id=%s", (int(row['id']),))
     conn.commit()
     conn.close()
 
@@ -642,13 +418,9 @@ def agendar_envio(log_id, data_envio, transportadora, veiculo, obs, usuario):
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE logistica_envios
-        SET Data_Envio_Agendado=%s, Transportadora=%s, Veiculo=%s,
-            Observacoes=%s, Status_Logistica='Envio Agendado'
+        SET Data_Envio_Agendado=%s, Transportadora=%s, Veiculo=%s, Observacoes=%s, Status_Logistica='Envio Agendado'
         WHERE id=%s
-    """, (
-        data_envio.strftime('%Y-%m-%d') if data_envio else None,
-        transportadora, veiculo, obs, log_id
-    ))
+    """, (data_envio.strftime('%Y-%m-%d') if data_envio else None, transportadora, veiculo, obs, log_id))
     conn.commit()
     conn.close()
 
@@ -666,9 +438,7 @@ def confirmar_despacho(log_id, usuario):
 def verificar_login(usuario, senha):
     conn = conectar_banco()
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT nome, setor FROM usuarios WHERE usuario=%s AND senha=%s",
-        (usuario, hash_senha(senha)))
+    cursor.execute("SELECT nome, setor FROM usuarios WHERE usuario=%s AND senha=%s", (usuario, hash_senha(senha)))
     resultado = cursor.fetchone()
     conn.close()
     return resultado
@@ -680,6 +450,47 @@ def resetar_banco_dados_completo():
         cursor.execute(f"DELETE FROM {tabela}")
     conn.commit()
     conn.close()
+
+# ========================================================
+# HELPER — BLOCOS SEMANAIS (reutilizável)
+# ========================================================
+def blocos_semanais(df_input):
+    if df_input.empty:
+        st.info("Nenhum lote encontrado.")
+        return
+    df_input = df_input.copy()
+    df_input['Ano_Semana'] = df_input['Data_Producao_Programada'].dt.isocalendar().year
+    df_input['Num_Semana'] = df_input['Data_Producao_Programada'].dt.isocalendar().week
+
+    def fmt_sem(r):
+        try:
+            s = pd.to_datetime(f"{int(r['Ano_Semana'])}-W{int(r['Num_Semana'])}-1", format="%G-W%V-%u")
+            return f"Semana {int(r['Num_Semana']):02d} ({s.strftime('%d/%m')} – {(s + timedelta(days=6)).strftime('%d/%m/%Y')})"
+        except Exception:
+            return f"Semana {r['Num_Semana']}"
+
+    df_input['Periodo'] = df_input.apply(fmt_sem, axis=1)
+    semanas_unicas = df_input[['Ano_Semana', 'Num_Semana', 'Periodo']].drop_duplicates().sort_values(['Ano_Semana', 'Num_Semana'])
+
+    for _, sem_row in semanas_unicas.iterrows():
+        lotes_sem = df_input[df_input['Periodo'] == sem_row['Periodo']]
+        total_m2  = lotes_sem['M2_Item'].sum()
+        n_lotes   = len(lotes_sem)
+        with st.expander(f"📅 {sem_row['Periodo']}  —  {n_lotes} lote(s)  |  {total_m2:.2f} m²", expanded=False):
+            for _, lrow in lotes_sem.iterrows():
+                dt_ini = pd.to_datetime(lrow['Data_Producao_Programada']).strftime('%d/%m/%Y')
+                dt_fim = pd.to_datetime(lrow['Data_Limite_Obra']).strftime('%d/%m/%Y')
+                st.markdown(
+                    f'<span class="badge-obra">{lrow["Obra_Vinculada"]}</span>&nbsp;'
+                    f'<span class="badge-edt">{lrow["EDT_Vinculado"]}</span>&nbsp;'
+                    f'<span class="badge-lote">{lrow["Cod_Lote"]}</span>',
+                    unsafe_allow_html=True
+                )
+                st.markdown(f"**{lrow['Tipo_Material']}** &nbsp;|&nbsp; `{int(lrow['Qtd_Caixas'])} caixas` — {lrow['M2_Item']:.2f} m²")
+                st.caption(f"Período: {dt_ini} a {dt_fim} &nbsp;|&nbsp; {lrow['Romaneio_Chapas']}")
+                op_txt = lrow['Num_OP'] if lrow.get('Num_OP') else "Aguardando OP"
+                st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {lrow.get('Fase_Produtiva', '—')}")
+                st.markdown("---")
 
 # ========================================================
 # LOGIN
@@ -726,8 +537,8 @@ df_banco_macro = carregar_macro()
 df_banco_micro = carregar_micro()
 
 if not df_banco_macro.empty:
-    obras_lista      = sorted(df_banco_macro['Obra'].unique().tolist())
-    obra_selecionada = st.selectbox("Obra de trabalho:", obras_lista)
+    obras_lista       = sorted(df_banco_macro['Obra'].unique().tolist())
+    obra_selecionada  = st.selectbox("Obra de trabalho:", obras_lista)
     df_macro_filtrado = df_banco_macro[df_banco_macro['Obra'] == obra_selecionada].copy()
 else:
     obra_selecionada  = None
@@ -761,98 +572,38 @@ with st.container():
 
 for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
-
-        # ================================================
-        # PAINEL DA PRODUÇÃO - ACM
-        # ================================================
-    
+    # ==================================================
+    # PAINEL DA PRODUCAO ACM
+    # ==================================================
     if nome_aba == "Painel da Producao - ACM":
         with aba_objeto:
             st.header("Mural de Metas — Producao")
             obras_tv = ["Todas as obras"] + (
-                list(df_banco_micro['Obra_Vinculada'].dropna().unique())
-                if not df_banco_micro.empty else []
+                list(df_banco_micro['Obra_Vinculada'].dropna().unique()) if not df_banco_micro.empty else []
             )
             obra_tv = st.selectbox("Filtrar por obra:", obras_tv, key="sb_obra_tv")
 
-            # ================================================
-            # SEÇÃO 1 — PREVISÃO (todos os lotes fatiados)
-            # ================================================
+            # SEÇÃO 1 — PREVISÃO
             st.markdown("### 📋 Previsão de Entrada em Produção")
             st.caption("Lotes planejados no Vincular Datas — ainda não liberados oficialmente.")
-
             df_prev = df_banco_micro.copy() if not df_banco_micro.empty else pd.DataFrame()
             if obra_tv != "Todas as obras" and not df_prev.empty:
                 df_prev = df_prev[df_prev['Obra_Vinculada'] == obra_tv]
-
             df_prev_pend = df_prev[df_prev['Status_Item'] == 'Pendente'].copy() if not df_prev.empty else pd.DataFrame()
-
             if df_prev_pend.empty:
                 st.info("Nenhuma previsão pendente.")
             else:
-                df_prev_pend['Ano_Semana'] = df_prev_pend['Data_Producao_Programada'].dt.isocalendar().year
-                df_prev_pend['Num_Semana'] = df_prev_pend['Data_Producao_Programada'].dt.isocalendar().week
-
-                def fmt_semana_prev(r):
-                    try:
-                        s = pd.to_datetime(
-                            f"{int(r['Ano_Semana'])}-W{int(r['Num_Semana'])}-1",
-                            format="%G-W%V-%u"
-                        )
-                        return (
-                            f"Semana {int(r['Num_Semana']):02d} "
-                            f"({s.strftime('%d/%m')} – {(s + timedelta(days=6)).strftime('%d/%m/%Y')})"
-                        )
-                    except Exception:
-                        return f"Semana {r['Num_Semana']}"
-
-                df_prev_pend['Periodo'] = df_prev_pend.apply(fmt_semana_prev, axis=1)
-
-                semanas_unicas = (
-                    df_prev_pend[['Ano_Semana', 'Num_Semana', 'Periodo']]
-                    .drop_duplicates()
-                    .sort_values(['Ano_Semana', 'Num_Semana'])
-                )
-
-                for _, sem_row in semanas_unicas.iterrows():
-                    lotes_sem = df_prev_pend[df_prev_pend['Periodo'] == sem_row['Periodo']]
-                    total_cx  = int(lotes_sem['Qtd_Caixas'].sum())
-                    total_m2  = lotes_sem['M2_Item'].sum()
-                    n_lotes   = len(lotes_sem)
-
-                    with st.expander(
-                        f"📅 {sem_row['Periodo']}  —  {n_lotes} lote(s)  |  {total_cx} cx  |  {total_m2:.2f} m²",
-                        expanded=False
-                    ):
-                        for _, lrow in lotes_sem.iterrows():
-                            dt_ini = pd.to_datetime(lrow['Data_Producao_Programada']).strftime('%d/%m/%Y')
-                            dt_fim = pd.to_datetime(lrow['Data_Limite_Obra']).strftime('%d/%m/%Y')
-                            st.markdown(
-                                f'<span class="badge-obra">{lrow["Obra_Vinculada"]}</span>&nbsp;'
-                                f'<span class="badge-edt">{lrow["EDT_Vinculado"]}</span>&nbsp;'
-                                f'<span class="badge-lote">{lrow["Cod_Lote"]}</span>',
-                                unsafe_allow_html=True
-                            )
-                            st.markdown(
-                                f"**{lrow['Tipo_Material']}** &nbsp;|&nbsp; "
-                                f"`{int(lrow['Qtd_Caixas'])} caixas` — {lrow['M2_Item']:.2f} m²"
-                            )
-                            st.caption(f"Período: {dt_ini} a {dt_fim} &nbsp;|&nbsp; {lrow['Romaneio_Chapas']}")
-                            st.markdown("---")
+                blocos_semanais(df_prev_pend)
 
             st.markdown("---")
 
-            # ================================================
-            # SEÇÃO 2 — CALENDÁRIO (só lotes liberados)
-            # ================================================
+            # SEÇÃO 2 — CALENDÁRIO
             st.markdown("### 📆 Calendário de Produção — OPs Liberadas")
             st.caption("Apenas lotes liberados oficialmente na aba 'Liberar OPs da Semana'.")
-
             if not df_banco_micro.empty:
                 df_base = df_banco_micro[df_banco_micro['Status_Item'] == "Liberado para Fabrica"].copy()
                 if obra_tv != "Todas as obras":
                     df_base = df_base[df_base['Obra_Vinculada'] == obra_tv]
-
                 if not df_base.empty:
                     registros_exp = []
                     for _, row in df_base.iterrows():
@@ -884,7 +635,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             st.rerun()
                     with c2:
                         nomes_meses = ["", "Janeiro", "Fevereiro", "Marco", "Abril", "Maio", "Junho",
-                                    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+                                       "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
                         st.markdown(
                             f"<h3 style='text-align:center;color:#1E3A8A;margin:0;'>"
                             f"{nomes_meses[st.session_state.prog_mes]} / {st.session_state.prog_ano}</h3>",
@@ -901,15 +652,12 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     st.markdown("---")
                     cal     = py_calendar.Calendar(firstweekday=6)
                     semanas = cal.monthdatescalendar(st.session_state.prog_ano, st.session_state.prog_mes)
-
-                    cols_h = st.columns(7)
+                    cols_h  = st.columns(7)
                     for i, nome in enumerate(["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"]):
                         cols_h[i].markdown(
-                            f"<div style='text-align:center;font-weight:600;color:#475569;"
-                            f"padding:4px 0;font-size:13px;'>{nome}</div>",
+                            f"<div style='text-align:center;font-weight:600;color:#475569;padding:4px 0;font-size:13px;'>{nome}</div>",
                             unsafe_allow_html=True
                         )
-
                     for semana in semanas:
                         cols = st.columns(7)
                         for i, data_dia in enumerate(semana):
@@ -918,7 +666,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     lotes_dia = df_exp[df_exp['_dia'] == data_dia] if not df_exp.empty else pd.DataFrame()
                                     n_lotes   = lotes_dia['Cod_Lote'].nunique() if not lotes_dia.empty else 0
                                     eh_hoje   = (data_dia == HOJE_PROJETO.date())
-
                                     if n_lotes > 0:
                                         obras_d   = lotes_dia['Obra_Vinculada'].unique()
                                         label_o   = obras_d[0] if len(obras_d) == 1 else f"{len(obras_d)} obras"
@@ -928,8 +675,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     else:
                                         css_class = "cal-day-today" if eh_hoje else "cal-day-empty"
                                         st.markdown(
-                                            f"<div class='{css_class}'>"
-                                            f"<span style='color:#94A3B8;font-size:15px;'>{data_dia.day}</span>"
+                                            f"<div class='{css_class}'><span style='color:#94A3B8;font-size:15px;'>{data_dia.day}</span>"
                                             f"<br><span style='color:#CBD5E1;font-size:10px;'>—</span></div>",
                                             unsafe_allow_html=True
                                         )
@@ -939,15 +685,12 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     st.markdown("---")
                     if "dia_clicado_tv" not in st.session_state:
                         st.session_state.dia_clicado_tv = HOJE_PROJETO.date()
-
-                    dia_sel = st.session_state.dia_clicado_tv
+                    dia_sel   = st.session_state.dia_clicado_tv
                     st.subheader(f"Lotes em producao — {dia_sel.strftime('%d/%m/%Y')}")
-
                     lotes_sel = (
                         df_exp[df_exp['_dia'] == dia_sel].drop_duplicates(subset=['id'])
                         if not df_exp.empty else pd.DataFrame()
                     )
-
                     if lotes_sel.empty:
                         st.info("Clique em um dia com lotes no calendario acima.")
                     else:
@@ -956,21 +699,17 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         kc2.metric("Total caixas", int(lotes_sel['Qtd_Caixas'].sum()))
                         kc3.metric("Total m²", f"{lotes_sel['M2_Item'].sum():.2f}")
                         st.markdown("---")
-
                         for _, row in lotes_sel.iterrows():
                             pode_concluir = bool(row.get('_pode_concluir', False))
                             dt_i = pd.to_datetime(row['Data_Producao_Programada']).strftime('%d/%m/%Y')
                             dt_f = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
-
                             border_color = "#EA580C" if pode_concluir else "#3B82F6"
                             bg_color     = "#FFF7ED" if pode_concluir else "#F8FAFC"
-
                             st.markdown(
                                 f"<div style='border-left:4px solid {border_color};background:{bg_color};"
                                 f"padding:12px 16px;border-radius:6px;margin-bottom:4px;'></div>",
                                 unsafe_allow_html=True
                             )
-
                             with st.container(border=True):
                                 cd, ca = st.columns([4, 1])
                                 with cd:
@@ -980,28 +719,15 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                         f'<span class="badge-lote">{row["Cod_Lote"]}</span>',
                                         unsafe_allow_html=True
                                     )
-                                    st.markdown(
-                                        f"**{row['Tipo_Material']}** &nbsp;|&nbsp; "
-                                        f"`{int(row['Qtd_Caixas'])} caixas` — {row['M2_Item']:.2f} m²"
-                                    )
+                                    st.markdown(f"**{row['Tipo_Material']}** &nbsp;|&nbsp; `{int(row['Qtd_Caixas'])} caixas` — {row['M2_Item']:.2f} m²")
                                     st.caption(f"Periodo: {dt_i} a {dt_f} &nbsp;|&nbsp; {row['Romaneio_Chapas']}")
                                     op_txt = row['Num_OP'] if row.get('Num_OP') else "Aguardando OP"
                                     st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {row.get('Fase_Produtiva', '—')}")
-
                                     if pode_concluir:
-                                        st.markdown(
-                                            "<span style='color:#EA580C;font-size:12px;font-weight:600;'>"
-                                            "Ultima semana de producao — liberado para concluir</span>",
-                                            unsafe_allow_html=True
-                                        )
+                                        st.markdown("<span style='color:#EA580C;font-size:12px;font-weight:600;'>Ultima semana de producao — liberado para concluir</span>", unsafe_allow_html=True)
                                     else:
                                         dias_restantes = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel).days
-                                        st.markdown(
-                                            f"<span style='color:#3B82F6;font-size:12px;'>"
-                                            f"Em producao — {dias_restantes} dias ate o prazo</span>",
-                                            unsafe_allow_html=True
-                                        )
-
+                                        st.markdown(f"<span style='color:#3B82F6;font-size:12px;'>Em producao — {dias_restantes} dias ate o prazo</span>", unsafe_allow_html=True)
                                 with ca:
                                     if pode_concluir:
                                         st.write("")
@@ -1013,66 +739,42 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                                     limite_desp = fr.iloc[0].get('Data_Limite_Despacho')
                                             conn = conectar_banco()
                                             cursor = conn.cursor()
-                                            cursor.execute(
-                                                "UPDATE itens_detalhado SET Status_Item='Concluido' WHERE id=%s",
-                                                (row['id'],))
+                                            cursor.execute("UPDATE itens_detalhado SET Status_Item='Concluido' WHERE id=%s", (row['id'],))
                                             conn.commit()
                                             conn.close()
-                                            enviar_para_logistica(
-                                                row,
-                                                limite_desp if prazo_valido(limite_desp) else pd.NaT
-                                            )
+                                            enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
                                             st.toast(f"{row['Cod_Lote']} concluido — enviado para Logistica!")
                                             time.sleep(0.3)
                                             st.rerun()
                                     else:
                                         st.write("")
-                                        st.markdown(
-                                            "<div style='text-align:center;color:#94A3B8;font-size:12px;padding:8px;'>"
-                                            "Em producao</div>",
-                                            unsafe_allow_html=True
-                                        )
+                                        st.markdown("<div style='text-align:center;color:#94A3B8;font-size:12px;padding:8px;'>Em producao</div>", unsafe_allow_html=True)
                 else:
                     st.info("Nenhuma OP liberada para este filtro ainda.")
             else:
                 st.info("Nenhum lote liberado no sistema ainda.")
-# ==================================================
-# PAINEL TV — ACM
-# ==================================================
+
+    # ==================================================
+    # PAINEL TV — ACM
+    # ==================================================
     elif nome_aba == "Painel TV — ACM":
         with aba_objeto:
-            # Auto-refresh contador regressivo
             if 'tv_last_refresh' not in st.session_state:
                 st.session_state.tv_last_refresh = time.time()
-
-            agora = time.time()
+            agora   = time.time()
             elapsed = agora - st.session_state.tv_last_refresh
-            if elapsed >= 30:
-                st.session_state.tv_last_refresh = time.time()
-                st.rerun()
-
             segundos_restantes = max(0, int(30 - elapsed))
 
-            # Header do painel
             st.markdown(f"""
-            <div style='
-                background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 100%);
-                padding: 18px 28px;
-                border-radius: 12px;
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                margin-bottom: 24px;
-            '>
+            <div style='background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 100%);
+                        padding: 18px 28px; border-radius: 12px; display: flex;
+                        align-items: center; justify-content: space-between; margin-bottom: 24px;'>
                 <div>
                     <span style='color:#FFFFFF;font-size:26px;font-weight:800;letter-spacing:-0.03em;'>
                         Passold — Painel de Produção ACM
-                    </span>
-                    <br>
+                    </span><br>
                     <span style='color:#93C5FD;font-size:13px;'>
-                        from datetime import timezone
-                    import zoneinfo
-                    {datetime.now(FUSO_BR).strftime('%d/%m/%Y  %H:%M')}
+                        {datetime.now(FUSO_BR).strftime('%d/%m/%Y  %H:%M')}
                     </span>
                 </div>
                 <div style='text-align:right;'>
@@ -1083,32 +785,22 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             """, unsafe_allow_html=True)
 
             df_tv = carregar_micro()
-
             if df_tv.empty:
-                st.markdown("""
-                <div style='text-align:center;padding:60px;color:#94A3B8;font-size:20px;'>
-                    Nenhum lote cadastrado no sistema.
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown("<div style='text-align:center;padding:60px;color:#94A3B8;font-size:20px;'>Nenhum lote cadastrado no sistema.</div>", unsafe_allow_html=True)
             else:
-                # Classificação de urgência
                 def urgencia(row):
                     prazo = row.get('Data_Limite_Obra')
                     if not prazo_valido(prazo):
                         return 'sem_prazo'
                     dias = (pd.to_datetime(prazo).normalize() - HOJE_PROJETO).days
-                    if dias < 0:
-                        return 'vencido'
-                    if dias <= 3:
-                        return 'critico'
-                    if dias <= 7:
-                        return 'atencao'
+                    if dias < 0:   return 'vencido'
+                    if dias <= 3:  return 'critico'
+                    if dias <= 7:  return 'atencao'
                     return 'ok'
 
                 df_tv['_urgencia'] = df_tv.apply(urgencia, axis=1)
                 df_tv['_dias_restantes'] = df_tv['Data_Limite_Obra'].apply(
-                    lambda x: (pd.to_datetime(x).normalize() - HOJE_PROJETO).days
-                    if prazo_valido(x) else 9999
+                    lambda x: (pd.to_datetime(x).normalize() - HOJE_PROJETO).days if prazo_valido(x) else 9999
                 )
                 df_tv = df_tv.sort_values('_dias_restantes')
 
@@ -1118,166 +810,80 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     'Concluido':             ('✅', '#15803D', '#F0FDF4'),
                 }
                 URG_CONFIG = {
-                    'vencido':   {'border': '#DC2626', 'bg': '#FEF2F2', 'tag': '🔴 VENCIDO',      'tag_color': '#DC2626'},
-                    'critico':   {'border': '#EA580C', 'bg': '#FFF7ED', 'tag': '🟠 URGENTE',       'tag_color': '#EA580C'},
-                    'atencao':   {'border': '#D97706', 'bg': '#FFFBEB', 'tag': '🟡 ATENÇÃO',       'tag_color': '#D97706'},
-                    'ok':        {'border': '#059669', 'bg': '#F0FDF4', 'tag': '🟢 NO PRAZO',      'tag_color': '#059669'},
-                    'sem_prazo': {'border': '#94A3B8', 'bg': '#F8FAFC', 'tag': '⚪ SEM PRAZO',     'tag_color': '#94A3B8'},
+                    'vencido':   {'border': '#DC2626', 'bg': '#FEF2F2', 'tag': '🔴 VENCIDO',  'tag_color': '#DC2626'},
+                    'critico':   {'border': '#EA580C', 'bg': '#FFF7ED', 'tag': '🟠 URGENTE',  'tag_color': '#EA580C'},
+                    'atencao':   {'border': '#D97706', 'bg': '#FFFBEB', 'tag': '🟡 ATENÇÃO',  'tag_color': '#D97706'},
+                    'ok':        {'border': '#059669', 'bg': '#F0FDF4', 'tag': '🟢 NO PRAZO', 'tag_color': '#059669'},
+                    'sem_prazo': {'border': '#94A3B8', 'bg': '#F8FAFC', 'tag': '⚪ SEM PRAZO','tag_color': '#94A3B8'},
                 }
 
                 urgentes = df_tv[df_tv['_urgencia'].isin(['vencido', 'critico'])]
                 demais   = df_tv[df_tv['_urgencia'].isin(['atencao', 'ok', 'sem_prazo'])]
 
-                # ---- CARDS URGENTES ----
                 if not urgentes.empty:
                     st.markdown(f"""
-                    <div style='background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;
-                                padding:10px 18px;margin-bottom:16px;'>
-                        <span style='color:#DC2626;font-weight:700;font-size:15px;'>
-                            ⚠️ {len(urgentes)} lote(s) crítico(s) ou vencido(s)
-                        </span>
+                    <div style='background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:10px 18px;margin-bottom:16px;'>
+                        <span style='color:#DC2626;font-weight:700;font-size:15px;'>⚠️ {len(urgentes)} lote(s) crítico(s) ou vencido(s)</span>
                     </div>
                     """, unsafe_allow_html=True)
-
                     cols_urg = st.columns(min(len(urgentes), 3))
                     for i, (_, row) in enumerate(urgentes.iterrows()):
                         urg  = row['_urgencia']
                         cfg  = URG_CONFIG[urg]
                         dias = row['_dias_restantes']
-                        dias_txt = (
-                            f"Vencido há {abs(dias)}d" if dias < 0
-                            else f"Faltam {dias} dia(s)"
-                        )
+                        dias_txt  = f"Vencido há {abs(dias)}d" if dias < 0 else f"Faltam {dias} dia(s)"
                         em, ec, _ = STATUS_EMOJI.get(row['Status_Item'], ('❓', '#64748B', '#F8FAFC'))
-                        prazo_fmt = (
-                            pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
-                            if prazo_valido(row['Data_Limite_Obra']) else '—'
-                        )
-                        op_txt = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
-
+                        prazo_fmt = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y') if prazo_valido(row['Data_Limite_Obra']) else '—'
+                        op_txt    = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
                         with cols_urg[i % 3]:
                             st.markdown(f"""
-                            <div style='
-                                border: 2px solid {cfg["border"]};
-                                background: {cfg["bg"]};
-                                border-radius: 10px;
-                                padding: 18px 20px;
-                                margin-bottom: 12px;
-                                box-shadow: 0 4px 12px rgba(0,0,0,0.10);
-                            '>
+                            <div style='border:2px solid {cfg["border"]};background:{cfg["bg"]};border-radius:10px;padding:18px 20px;margin-bottom:12px;box-shadow:0 4px 12px rgba(0,0,0,0.10);'>
                                 <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;'>
-                                    <span style='font-size:11px;font-weight:700;color:{cfg["tag_color"]};
-                                                background:{cfg["bg"]};border:1px solid {cfg["border"]};
-                                                padding:2px 8px;border-radius:4px;'>
-                                        {cfg["tag"]}
-                                    </span>
+                                    <span style='font-size:11px;font-weight:700;color:{cfg["tag_color"]};background:{cfg["bg"]};border:1px solid {cfg["border"]};padding:2px 8px;border-radius:4px;'>{cfg["tag"]}</span>
                                     <span style='font-size:11px;color:#64748B;font-weight:600;'>{dias_txt}</span>
                                 </div>
-                                <div style='font-size:20px;font-weight:800;color:#0F172A;margin-bottom:4px;'>
-                                    {row["Obra_Vinculada"]}
-                                </div>
-                                <div style='font-size:13px;color:#475569;margin-bottom:12px;'>
-                                    {row["Tipo_Material"]} &nbsp;·&nbsp; {row["Romaneio_Chapas"] or "—"}
-                                </div>
+                                <div style='font-size:20px;font-weight:800;color:#0F172A;margin-bottom:4px;'>{row["Obra_Vinculada"]}</div>
+                                <div style='font-size:13px;color:#475569;margin-bottom:12px;'>{row["Tipo_Material"]} &nbsp;·&nbsp; {row["Romaneio_Chapas"] or "—"}</div>
                                 <div style='display:grid;grid-template-columns:1fr 1fr;gap:8px;'>
-                                    <div style='background:white;border-radius:6px;padding:8px 10px;'>
-                                        <div style='font-size:10px;color:#94A3B8;text-transform:uppercase;
-                                                    letter-spacing:0.05em;'>OP</div>
-                                        <div style='font-size:15px;font-weight:700;color:#1E293B;'>{op_txt}</div>
-                                    </div>
-                                    <div style='background:white;border-radius:6px;padding:8px 10px;'>
-                                        <div style='font-size:10px;color:#94A3B8;text-transform:uppercase;
-                                                    letter-spacing:0.05em;'>M²</div>
-                                        <div style='font-size:15px;font-weight:700;color:#1E293B;'>
-                                            {row["M2_Item"]:.2f}
-                                        </div>
-                                    </div>
-                                    <div style='background:white;border-radius:6px;padding:8px 10px;'>
-                                        <div style='font-size:10px;color:#94A3B8;text-transform:uppercase;
-                                                    letter-spacing:0.05em;'>Status</div>
-                                        <div style='font-size:13px;font-weight:700;color:{ec};'>
-                                            {em} {row["Status_Item"]}
-                                        </div>
-                                    </div>
-                                    <div style='background:white;border-radius:6px;padding:8px 10px;'>
-                                        <div style='font-size:10px;color:#94A3B8;text-transform:uppercase;
-                                                    letter-spacing:0.05em;'>Prazo</div>
-                                        <div style='font-size:15px;font-weight:700;color:{cfg["tag_color"]};'>
-                                            {prazo_fmt}
-                                        </div>
-                                    </div>
+                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.05em;'>OP</div><div style='font-size:15px;font-weight:700;color:#1E293B;'>{op_txt}</div></div>
+                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.05em;'>M²</div><div style='font-size:15px;font-weight:700;color:#1E293B;'>{row["M2_Item"]:.2f}</div></div>
+                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.05em;'>Status</div><div style='font-size:13px;font-weight:700;color:{ec};'>{em} {row["Status_Item"]}</div></div>
+                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.05em;'>Prazo</div><div style='font-size:15px;font-weight:700;color:{cfg["tag_color"]};'>{prazo_fmt}</div></div>
                                 </div>
                             </div>
                             """, unsafe_allow_html=True)
 
-                # ---- TABELA DEMAIS LOTES ----
                 if not demais.empty:
                     st.markdown("---")
-                    st.markdown(
-                        "<span style='font-size:15px;font-weight:700;color:#334155;'>📋 Demais lotes em andamento</span>",
-                        unsafe_allow_html=True
-                    )
+                    st.markdown("<span style='font-size:15px;font-weight:700;color:#334155;'>📋 Demais lotes em andamento</span>", unsafe_allow_html=True)
                     st.markdown("<br>", unsafe_allow_html=True)
-
-                    # Cabeçalho
                     hc = st.columns([2, 3, 2, 2, 2])
                     for col_h, label in zip(hc, ["OP", "OBRA / MATERIAL", "M²", "STATUS", "PRAZO"]):
-                        col_h.markdown(
-                            f"<div style='font-size:11px;font-weight:700;color:#94A3B8;"
-                            f"text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>",
-                            unsafe_allow_html=True
-                        )
+                        col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
                     st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
-
                     for _, row in demais.iterrows():
                         urg = row['_urgencia']
                         cfg = URG_CONFIG[urg]
                         em, ec, ebg = STATUS_EMOJI.get(row['Status_Item'], ('❓', '#64748B', '#F8FAFC'))
-                        prazo_fmt = (
-                            pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
-                            if prazo_valido(row['Data_Limite_Obra']) else '—'
-                        )
-                        dias = row['_dias_restantes']
-                        dias_txt = f"+{dias}d" if dias < 9999 else "—"
-                        op_txt = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
-
+                        prazo_fmt = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y') if prazo_valido(row['Data_Limite_Obra']) else '—'
+                        dias      = row['_dias_restantes']
+                        dias_txt  = f"+{dias}d" if dias < 9999 else "—"
+                        op_txt    = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
                         rc = st.columns([2, 3, 2, 2, 2])
-                        rc[0].markdown(
-                            f"<span style='font-size:13px;font-weight:600;color:#1E293B;'>{op_txt}</span>",
-                            unsafe_allow_html=True
-                        )
-                        rc[1].markdown(
-                            f"<span style='font-size:13px;font-weight:700;color:#0F172A;'>{row['Obra_Vinculada']}</span>"
-                            f"<br><span style='font-size:11px;color:#64748B;'>{row['Tipo_Material']}</span>",
-                            unsafe_allow_html=True
-                        )
-                        rc[2].markdown(
-                            f"<span style='font-size:14px;font-weight:700;color:#1E293B;'>{row['M2_Item']:.2f}</span>",
-                            unsafe_allow_html=True
-                        )
-                        rc[3].markdown(
-                            f"<span style='background:{ebg};color:{ec};padding:3px 8px;"
-                            f"border-radius:4px;font-size:12px;font-weight:600;'>{em} {row['Status_Item']}</span>",
-                            unsafe_allow_html=True
-                        )
-                        rc[4].markdown(
-                            f"<span style='font-size:13px;font-weight:700;color:{cfg['tag_color']};'>{prazo_fmt}</span>"
-                            f"<br><span style='font-size:11px;color:#94A3B8;'>{dias_txt}</span>",
-                            unsafe_allow_html=True
-                        )
-                        st.markdown(
-                            "<hr style='margin:4px 0;border-color:#F1F5F9;'>",
-                            unsafe_allow_html=True
-                        )
+                        rc[0].markdown(f"<span style='font-size:13px;font-weight:600;color:#1E293B;'>{op_txt}</span>", unsafe_allow_html=True)
+                        rc[1].markdown(f"<span style='font-size:13px;font-weight:700;color:#0F172A;'>{row['Obra_Vinculada']}</span><br><span style='font-size:11px;color:#64748B;'>{row['Tipo_Material']}</span>", unsafe_allow_html=True)
+                        rc[2].markdown(f"<span style='font-size:14px;font-weight:700;color:#1E293B;'>{row['M2_Item']:.2f}</span>", unsafe_allow_html=True)
+                        rc[3].markdown(f"<span style='background:{ebg};color:{ec};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{em} {row['Status_Item']}</span>", unsafe_allow_html=True)
+                        rc[4].markdown(f"<span style='font-size:13px;font-weight:700;color:{cfg['tag_color']};'>{prazo_fmt}</span><br><span style='font-size:11px;color:#94A3B8;'>{dias_txt}</span>", unsafe_allow_html=True)
+                        st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
 
-            # Barra de progresso do countdown
             progress_val = (30 - segundos_restantes) / 30
             st.markdown("<br>", unsafe_allow_html=True)
             st.progress(progress_val, text=f"Próxima atualização em {segundos_restantes}s")
-          # auto-refresh apenas se esta aba estiver sendo visualizada
-        if segundos_restantes == 0:
-            st.session_state.tv_last_refresh = time.time()
-            st.rerun()
+            if segundos_restantes == 0:
+                st.session_state.tv_last_refresh = time.time()
+                st.rerun()
+
     # ==================================================
     # LIBERAR OPS
     # ==================================================
@@ -1289,19 +895,13 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
                     (df_banco_micro['Status_Item'] == "Pendente")
                 ].copy()
-
                 if not df_pend.empty:
                     df_pend['Selecionar'] = False
-                    cols_exib = [c for c in [
-                        'id', 'Cod_Lote', 'Tipo_Material', 'Qtd_Caixas', 'M2_Item',
-                        'Fase_Produtiva', 'Data_Producao_Programada', 'Romaneio_Chapas', 'Selecionar'
-                    ] if c in df_pend.columns]
-                    df_ed = st.data_editor(
-                        df_pend[cols_exib],
-                        hide_index=True,
-                        use_container_width=True,
-                        disabled=[c for c in cols_exib if c != 'Selecionar']
-                    )
+                    cols_exib = [c for c in ['id', 'Cod_Lote', 'Tipo_Material', 'Qtd_Caixas', 'M2_Item',
+                                             'Fase_Produtiva', 'Data_Producao_Programada', 'Romaneio_Chapas', 'Selecionar']
+                                 if c in df_pend.columns]
+                    df_ed = st.data_editor(df_pend[cols_exib], hide_index=True, use_container_width=True,
+                                           disabled=[c for c in cols_exib if c != 'Selecionar'])
                     ids_sel = df_ed[df_ed['Selecionar'] == True]['id'].tolist()
                     prefixo = st.text_input("Prefixo da OP:", value=f"OP-{datetime.now().strftime('%Y')}-")
                     if st.button("Liberar para producao"):
@@ -1331,7 +931,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     elif nome_aba == "Visao Macro":
         with aba_objeto:
             st.header("Dashboard Executivo")
-            # FIX: garante que df_dir nunca seja ambíguo quando df_banco_micro está vazio
             if obra_selecionada and not df_banco_micro.empty:
                 df_dir = df_banco_micro[df_banco_micro['Obra_Vinculada'] == obra_selecionada].copy()
             else:
@@ -1342,137 +941,67 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Metragem Total", f"{df_dir['M2_Item'].sum():,.2f} m²")
                 c2.metric("Subdivisoes", f"{df_dir['EDT_Vinculado'].nunique()} frentes")
-                c3.metric(
-                    "Prazo de Despacho Mais Distante",
-                    data_max.strftime('%d/%m/%Y') if prazo_valido(data_max) else "N/A"
-                )
+                c3.metric("Prazo de Despacho Mais Distante", data_max.strftime('%d/%m/%Y') if prazo_valido(data_max) else "N/A")
 
                 st.markdown("---")
-st.subheader("Carga Semanal")
+                st.subheader("Carga Semanal")
 
-obras_macro = ["Todas as obras"] + (
-    sorted(df_banco_micro['Obra_Vinculada'].dropna().unique().tolist())
-    if not df_banco_micro.empty else []
-)
-
-def blocos_semanais(df_input, key_prefix):
-    if df_input.empty:
-        st.info("Nenhum lote encontrado.")
-        return
-
-    df_input = df_input.copy()
-    df_input['Ano_Semana'] = df_input['Data_Producao_Programada'].dt.isocalendar().year
-    df_input['Num_Semana'] = df_input['Data_Producao_Programada'].dt.isocalendar().week
-
-    def fmt_sem(r):
-        try:
-            s = pd.to_datetime(
-                f"{int(r['Ano_Semana'])}-W{int(r['Num_Semana'])}-1",
-                format="%G-W%V-%u"
-            )
-            return (
-                f"Semana {int(r['Num_Semana']):02d} "
-                f"({s.strftime('%d/%m')} – {(s + timedelta(days=6)).strftime('%d/%m/%Y')})"
-            )
-        except Exception:
-            return f"Semana {r['Num_Semana']}"
-
-    df_input['Periodo'] = df_input.apply(fmt_sem, axis=1)
-
-    semanas_unicas = (
-        df_input[['Ano_Semana', 'Num_Semana', 'Periodo']]
-        .drop_duplicates()
-        .sort_values(['Ano_Semana', 'Num_Semana'])
-    )
-
-    for _, sem_row in semanas_unicas.iterrows():
-        lotes_sem = df_input[df_input['Periodo'] == sem_row['Periodo']]
-        total_m2  = lotes_sem['M2_Item'].sum()
-        n_lotes   = len(lotes_sem)
-
-        with st.expander(
-            f"📅 {sem_row['Periodo']}  —  {n_lotes} lote(s)  |  {total_m2:.2f} m²",
-            expanded=False
-        ):
-            for _, lrow in lotes_sem.iterrows():
-                dt_ini = pd.to_datetime(lrow['Data_Producao_Programada']).strftime('%d/%m/%Y')
-                dt_fim = pd.to_datetime(lrow['Data_Limite_Obra']).strftime('%d/%m/%Y')
-                st.markdown(
-                    f'<span class="badge-obra">{lrow["Obra_Vinculada"]}</span>&nbsp;'
-                    f'<span class="badge-edt">{lrow["EDT_Vinculado"]}</span>&nbsp;'
-                    f'<span class="badge-lote">{lrow["Cod_Lote"]}</span>',
-                    unsafe_allow_html=True
+                obras_macro = ["Todas as obras"] + (
+                    sorted(df_banco_micro['Obra_Vinculada'].dropna().unique().tolist())
+                    if not df_banco_micro.empty else []
                 )
-                st.markdown(
-                    f"**{lrow['Tipo_Material']}** &nbsp;|&nbsp; "
-                    f"`{int(lrow['Qtd_Caixas'])} caixas` — {lrow['M2_Item']:.2f} m²"
-                )
-                st.caption(f"Período: {dt_ini} a {dt_fim} &nbsp;|&nbsp; {lrow['Romaneio_Chapas']}")
-                op_txt = lrow['Num_OP'] if lrow.get('Num_OP') else "Aguardando OP"
-                st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {lrow.get('Fase_Produtiva', '—')}")
-                st.markdown("---")
 
-                    # ---- BLOCO 1: PREVISÃO ----
+                # BLOCO 1: PREVISÃO
                 st.markdown("#### 📋 Previsão")
                 col_f1, _ = st.columns([2, 3])
                 with col_f1:
-                        filtro_prev = st.selectbox("🔍 Obra:", obras_macro, key="filtro_prev")
-
+                    filtro_prev = st.selectbox("🔍 Obra:", obras_macro, key="filtro_prev")
                 df_prev = df_banco_micro.copy() if not df_banco_micro.empty else pd.DataFrame()
                 if not df_prev.empty:
-                        if filtro_prev != "Todas as obras":
-                            df_prev = df_prev[df_prev['Obra_Vinculada'] == filtro_prev]
-                        df_prev = df_prev[df_prev['Status_Item'] == 'Pendente']
-
-                blocos_semanais(df_prev, "prev")
+                    if filtro_prev != "Todas as obras":
+                        df_prev = df_prev[df_prev['Obra_Vinculada'] == filtro_prev]
+                    df_prev = df_prev[df_prev['Status_Item'] == 'Pendente']
+                blocos_semanais(df_prev)
 
                 st.markdown("---")
 
-                    # ---- BLOCO 2: EM PRODUÇÃO ----
+                # BLOCO 2: EM PRODUÇÃO
                 st.markdown("#### 🔧 Em Produção")
                 col_f2, _ = st.columns([2, 3])
                 with col_f2:
-                        filtro_prod = st.selectbox("🔍 Obra:", obras_macro, key="filtro_prod")
-
+                    filtro_prod = st.selectbox("🔍 Obra:", obras_macro, key="filtro_prod")
                 df_prod = df_banco_micro.copy() if not df_banco_micro.empty else pd.DataFrame()
                 if not df_prod.empty:
-                        if filtro_prod != "Todas as obras":
-                            df_prod = df_prod[df_prod['Obra_Vinculada'] == filtro_prod]
-                        df_prod = df_prod[df_prod['Status_Item'] == 'Liberado para Fabrica']
-
-                blocos_semanais(df_prod, "prod")
+                    if filtro_prod != "Todas as obras":
+                        df_prod = df_prod[df_prod['Obra_Vinculada'] == filtro_prod]
+                    df_prod = df_prod[df_prod['Status_Item'] == 'Liberado para Fabrica']
+                blocos_semanais(df_prod)
 
                 st.markdown("---")
 
-                    # ---- BLOCO 3: CONCLUÍDOS ----
+                # BLOCO 3: CONCLUÍDOS
                 st.markdown("#### ✅ Concluídos")
                 col_f3, _ = st.columns([2, 3])
                 with col_f3:
-                        filtro_conc = st.selectbox("🔍 Obra:", obras_macro, key="filtro_conc")
-
+                    filtro_conc = st.selectbox("🔍 Obra:", obras_macro, key="filtro_conc")
                 df_conc = df_banco_micro.copy() if not df_banco_micro.empty else pd.DataFrame()
                 if not df_conc.empty:
-                        if filtro_conc != "Todas as obras":
-                            df_conc = df_conc[df_conc['Obra_Vinculada'] == filtro_conc]
-                        df_conc = df_conc[df_conc['Status_Item'] == 'Concluido']
+                    if filtro_conc != "Todas as obras":
+                        df_conc = df_conc[df_conc['Obra_Vinculada'] == filtro_conc]
+                    df_conc = df_conc[df_conc['Status_Item'] == 'Concluido']
+                blocos_semanais(df_conc)
 
-                blocos_semanais(df_conc, "conc")
-
+                st.markdown("---")
                 st.subheader("Gantt — Ocupacao da Fabrica")
-                df_gantt = df_dir.groupby(
-                    ['Obra_Vinculada', 'EDT_Vinculado', 'Romaneio_Chapas']
-                ).agg(
+                df_gantt = df_dir.groupby(['Obra_Vinculada', 'EDT_Vinculado', 'Romaneio_Chapas']).agg(
                     Inicio=('Data_Producao_Programada', 'min'),
                     Fim=('Data_Limite_Obra', 'max'),
                     M2=('M2_Item', 'sum')
                 ).reset_index().dropna(subset=['Inicio', 'Fim'])
-
                 if not df_gantt.empty:
                     fig = px.timeline(
-                        df_gantt,
-                        x_start="Inicio", x_end="Fim", y="EDT_Vinculado",
-                        color="Obra_Vinculada",
-                        hover_data=["Romaneio_Chapas", "M2"],
+                        df_gantt, x_start="Inicio", x_end="Fim", y="EDT_Vinculado",
+                        color="Obra_Vinculada", hover_data=["Romaneio_Chapas", "M2"],
                         title="Ocupacao Fabrica vs Prazo Despacho",
                         color_discrete_sequence=["#1E3A8A", "#EA580C", "#0891B2", "#15803D"]
                     )
@@ -1514,25 +1043,18 @@ def blocos_semanais(df_input, key_prefix):
                         txt_pav  = st.text_area("Pavimentos / Destino:", value="Pav 39 ao 43")
                         espec    = st.text_input("Material:", value="ACM BRANCO")
                         dific    = st.selectbox("Complexidade:", [1, 2, 3, 4, 5], index=2)
-
                     with c2:
                         inicio_prev = row_sel['Inicio_Previsto']
                         default_dt  = (
-                            pd.to_datetime(inicio_prev).date()
-                            if prazo_valido(inicio_prev)
+                            pd.to_datetime(inicio_prev).date() if prazo_valido(inicio_prev)
                             else (datetime.now() + timedelta(days=30)).date()
                         )
-                        data_alvo = st.date_input(
-                            "Precisa estar na obra ate:",
-                            value=default_dt,
-                            format="DD/MM/YYYY",
-                            help="Data limite — tudo e calculado retroativamente a partir daqui"
-                        )
-                        dias_log = st.number_input("Dias de transporte ate a obra (corridos):", min_value=1, value=3)
-                        dias_fab = st.number_input("Dias uteis de producao:", min_value=1, value=10)
-                        total_cx = st.number_input("Quantidade de caixas:", min_value=1, value=31)
-                        total_m2 = st.number_input("Metragem (m²):", min_value=0.1, value=70.0)
-
+                        data_alvo = st.date_input("Precisa estar na obra ate:", value=default_dt, format="DD/MM/YYYY",
+                                                  help="Data limite — tudo e calculado retroativamente a partir daqui")
+                        dias_log  = st.number_input("Dias de transporte ate a obra (corridos):", min_value=1, value=3)
+                        dias_fab  = st.number_input("Dias uteis de producao:", min_value=1, value=10)
+                        total_cx  = st.number_input("Quantidade de caixas:", min_value=1, value=31)
+                        total_m2  = st.number_input("Metragem (m²):", min_value=0.1, value=70.0)
                         dt_alvo   = datetime.combine(data_alvo, datetime.min.time())
                         dt_desp   = dt_alvo - timedelta(days=int(dias_log))
                         dt_inicio = subtrair_dias_uteis(dt_desp, int(dias_fab))
@@ -1542,10 +1064,8 @@ def blocos_semanais(df_input, key_prefix):
                             f"Saida da fabrica: **{dt_desp.strftime('%d/%m/%Y')}**\n\n"
                             f"Chegada na obra: **{data_alvo.strftime('%d/%m/%Y')}**"
                         )
-
                     if "Liberados" not in str(row_sel.get('Status_Engenharia', '')):
                         st.warning(f"Atencao — Engenharia: `{row_sel.get('Status_Engenharia', '—')}`")
-
                     if st.form_submit_button("Gerar Lote"):
                         if not cod_lote.strip():
                             st.error("Digite o nome do lote.")
@@ -1554,8 +1074,7 @@ def blocos_semanais(df_input, key_prefix):
                             lote = gerar_lote_unico(
                                 data_alvo, int(dias_log), int(dias_fab),
                                 int(total_cx), float(total_m2),
-                                obra_selecionada, edt_puro, cod_lote.strip(),
-                                espec, txt_pav, dific
+                                obra_selecionada, edt_puro, cod_lote.strip(), espec, txt_pav, dific
                             )
                             salvar_lotes_micro(lote)
                             prazo_eng = subtrair_dias_uteis(dt_inicio, 3)
@@ -1572,12 +1091,8 @@ def blocos_semanais(df_input, key_prefix):
                         df_obra['Data_Producao_Programada'] = df_obra['Data_Producao_Programada'].dt.strftime('%Y-%m-%d')
                         df_obra['Data_Limite_Obra']         = df_obra['Data_Limite_Obra'].dt.strftime('%Y-%m-%d')
                         df_str  = df_obra.copy()
-                        df_edit = st.data_editor(
-                            df_str, key="editor_lotes", hide_index=True,
-                            use_container_width=True,
-                            disabled=["id", "Obra_Vinculada", "Num_OP"]
-                        )
-                        # FIX: comparação segura linha a linha
+                        df_edit = st.data_editor(df_str, key="editor_lotes", hide_index=True, use_container_width=True,
+                                                 disabled=["id", "Obra_Vinculada", "Num_OP"])
                         alteradas = []
                         for i in df_edit.index:
                             try:
@@ -1585,7 +1100,6 @@ def blocos_semanais(df_input, key_prefix):
                                     alteradas.append(df_edit.loc[i])
                             except Exception:
                                 pass
-
                         if alteradas:
                             conn = conectar_banco()
                             cursor = conn.cursor()
@@ -1608,7 +1122,6 @@ def blocos_semanais(df_input, key_prefix):
                             st.toast("Salvo!")
                             time.sleep(0.3)
                             st.rerun()
-
                         st.markdown("#### Remover Lote")
                         lote_del = st.selectbox("Lote para excluir:", df_obra['Cod_Lote'].unique().tolist())
                         if st.button(f"Excluir {lote_del}"):
@@ -1626,9 +1139,7 @@ def blocos_semanais(df_input, key_prefix):
         with aba_objeto:
             st.header("Cadastrar Nova Obra")
             for k, v in [
-                ('mem_obra', ''),
-                ('mem_frente', ''),
-                ('mem_tarefa', ''),
+                ('mem_obra', ''), ('mem_frente', ''), ('mem_tarefa', ''),
                 ('mem_dt_ini', datetime.now().date()),
                 ('mem_dt_fim', (datetime.now() + timedelta(days=90)).date())
             ]:
@@ -1651,7 +1162,6 @@ def blocos_semanais(df_input, key_prefix):
                     dt_ini = st.date_input("Inicio da Instalacao:", value=st.session_state.mem_dt_ini, format="DD/MM/YYYY")
                 with cd2:
                     dt_fim = st.date_input("Prazo Maximo Obra:", value=st.session_state.mem_dt_fim, format="DD/MM/YYYY")
-
                 if st.form_submit_button("Registrar Frente"):
                     if not all([nome_obra.strip(), edt_cod.strip(), tarefa.strip(), subdiv.strip()]):
                         st.error("Preencha todos os campos.")
@@ -1669,12 +1179,8 @@ def blocos_semanais(df_input, key_prefix):
                                 (Obra, EDT, Tipo_Escopo, Etapa_Macro, Subdivisao, Tarefa,
                                  M2_Total_Tarefa, Inicio_Previsto, Termino_Obra, Status, Status_Engenharia)
                                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente','Aguardando Medicao In Loco')
-                            """, (
-                                nome_obra, edt_cod, escopo, frente, subdiv, tarefa,
-                                float(m2_tot),
-                                dt_ini.strftime('%Y-%m-%d'),
-                                dt_fim.strftime('%Y-%m-%d')
-                            ))
+                            """, (nome_obra, edt_cod, escopo, frente, subdiv, tarefa,
+                                  float(m2_tot), dt_ini.strftime('%Y-%m-%d'), dt_fim.strftime('%Y-%m-%d')))
                             conn.commit()
                             st.toast("Frente registrada!")
                             time.sleep(0.4)
@@ -1691,10 +1197,8 @@ def blocos_semanais(df_input, key_prefix):
                 for col in ['Inicio_Previsto', 'Termino_Obra']:
                     if col in df_show.columns:
                         df_show[col] = pd.to_datetime(df_show[col], errors='coerce').dt.strftime('%d/%m/%Y')
-                cols_s = [c for c in [
-                    'Obra', 'EDT', 'Subdivisao', 'Tarefa', 'M2_Total_Tarefa',
-                    'Inicio_Previsto', 'Termino_Obra', 'Status_Engenharia'
-                ] if c in df_show.columns]
+                cols_s = [c for c in ['Obra', 'EDT', 'Subdivisao', 'Tarefa', 'M2_Total_Tarefa',
+                                      'Inicio_Previsto', 'Termino_Obra', 'Status_Engenharia'] if c in df_show.columns]
                 st.dataframe(df_show[cols_s], hide_index=True, use_container_width=True)
 
                 st.markdown("#### Excluir Frente")
@@ -1705,7 +1209,7 @@ def blocos_semanais(df_input, key_prefix):
                 ] if not df_banco_macro.empty else []
                 if opcoes_del:
                     frente_del = st.selectbox("Frente para excluir:", opcoes_del, key="sel_del_frente")
-                    edt_del = frente_del.split(" — ")[0].strip()
+                    edt_del    = frente_del.split(" — ")[0].strip()
                     if st.button(f"Excluir frente {edt_del}", key="btn_del_frente"):
                         conn = conectar_banco()
                         cursor = conn.cursor()
@@ -1715,6 +1219,7 @@ def blocos_semanais(df_input, key_prefix):
                         st.toast(f"Frente {edt_del} removida!")
                         time.sleep(0.5)
                         st.rerun()
+
     # ==================================================
     # PAINEL DE ENGENHARIA
     # ==================================================
@@ -1722,7 +1227,6 @@ def blocos_semanais(df_input, key_prefix):
         with aba_objeto:
             st.header("Painel Tecnico da Engenharia")
             st.caption(f"Hoje: {HOJE_PROJETO.strftime('%d/%m/%Y')} | Obra: **{obra_selecionada or 'Nenhuma'}**")
-
             df_eng = carregar_macro()
             if obra_selecionada:
                 df_eng = df_eng[df_eng['Obra'] == obra_selecionada]
@@ -1730,11 +1234,8 @@ def blocos_semanais(df_input, key_prefix):
                 df_eng = pd.DataFrame()
 
             ESTADOS = [
-                "Aguardando Medicao In Loco",
-                "Medicao Realizada — Em Projetos",
-                "Projetos em Revisao Interna",
-                "Projetos Liberados para o PCP",
-                "Arquivado / Concluido"
+                "Aguardando Medicao In Loco", "Medicao Realizada — Em Projetos",
+                "Projetos em Revisao Interna", "Projetos Liberados para o PCP", "Arquivado / Concluido"
             ]
             STATUS_CORES = {
                 "Aguardando Medicao In Loco":      "#EF4444",
@@ -1744,8 +1245,6 @@ def blocos_semanais(df_input, key_prefix):
                 "Arquivado / Concluido":           "#94A3B8",
             }
 
-            # FIX: renomeada variável de st_txt para situacao_txt para evitar
-            # colisão com o módulo st (streamlit)
             def classificar(dias_rest, status_tec):
                 if status_tec == "Projetos Liberados para o PCP":
                     return "concluido", "Liberado para o PCP", None
@@ -1762,30 +1261,16 @@ def blocos_semanais(df_input, key_prefix):
                 for _, row in df_eng.iterrows():
                     prazo_raw = row.get('Prazo_Engenharia')
                     prazo_eng = prazo_raw if prazo_valido(prazo_raw) else None
-                    dias_rest = (
-                        (pd.to_datetime(prazo_eng) - HOJE_PROJETO).days
-                        if prazo_eng is not None else None
-                    )
-                    sk, situacao_txt, dias_num = classificar(
-                        dias_rest, row.get('Status_Engenharia', ESTADOS[0])
-                    )
+                    dias_rest = (pd.to_datetime(prazo_eng) - HOJE_PROJETO).days if prazo_eng is not None else None
+                    sk, situacao_txt, dias_num = classificar(dias_rest, row.get('Status_Engenharia', ESTADOS[0]))
                     frentes.append({
-                        "id":             row['id'],
-                        "edt":            row['EDT'],
-                        "tarefa":         row['Tarefa'],
-                        "subdivisao":     row.get('Subdivisao', ''),
-                        "tipo_escopo":    row.get('Tipo_Escopo', ''),
-                        "inicio_previsto":row.get('Inicio_Previsto'),
-                        "despacho":       row.get('Data_Limite_Despacho'),
-                        "primeiro_prod":  row.get('Primeiro_Dia_Producao'),
-                        "termino_obra":   row.get('Termino_Obra'),
-                        "m2":             row.get('M2_Total_Tarefa', 0.0),
-                        "prazo_eng":      prazo_eng,
-                        "dias_restantes": dias_rest,
-                        "situacao_key":   sk,
-                        "situacao_txt":   situacao_txt,
-                        "dias_num":       dias_num,
-                        "status_tecnico": row.get('Status_Engenharia', ESTADOS[0]),
+                        "id": row['id'], "edt": row['EDT'], "tarefa": row['Tarefa'],
+                        "subdivisao": row.get('Subdivisao', ''), "tipo_escopo": row.get('Tipo_Escopo', ''),
+                        "inicio_previsto": row.get('Inicio_Previsto'), "despacho": row.get('Data_Limite_Despacho'),
+                        "primeiro_prod": row.get('Primeiro_Dia_Producao'), "termino_obra": row.get('Termino_Obra'),
+                        "m2": row.get('M2_Total_Tarefa', 0.0), "prazo_eng": prazo_eng,
+                        "dias_restantes": dias_rest, "situacao_key": sk, "situacao_txt": situacao_txt,
+                        "dias_num": dias_num, "status_tecnico": row.get('Status_Engenharia', ESTADOS[0]),
                     })
 
             criticas = [f for f in frentes if f['situacao_key'] in ('critico', 'vencido')]
@@ -1803,40 +1288,22 @@ def blocos_semanais(df_input, key_prefix):
                                 cm1, cm2 = st.columns(2)
                                 with cm1:
                                     st.write(f"EDT: `{fr['edt']}`")
-                                    ini = (
-                                        pd.to_datetime(fr['inicio_previsto']).strftime('%d/%m/%Y')
-                                        if prazo_valido(fr['inicio_previsto']) else "—"
-                                    )
+                                    ini = pd.to_datetime(fr['inicio_previsto']).strftime('%d/%m/%Y') if prazo_valido(fr['inicio_previsto']) else "—"
                                     st.write(f"Inicio instalacao: {ini}")
-                                    pp = (
-                                        pd.to_datetime(fr['primeiro_prod']).strftime('%d/%m/%Y')
-                                        if prazo_valido(fr['primeiro_prod']) else "—"
-                                    )
+                                    pp = pd.to_datetime(fr['primeiro_prod']).strftime('%d/%m/%Y') if prazo_valido(fr['primeiro_prod']) else "—"
                                     st.write(f"1º dia producao: {pp}")
                                 with cm2:
-                                    pe = (
-                                        pd.to_datetime(fr['prazo_eng']).strftime('%d/%m/%Y')
-                                        if fr['prazo_eng'] else "—"
-                                    )
+                                    pe = pd.to_datetime(fr['prazo_eng']).strftime('%d/%m/%Y') if fr['prazo_eng'] else "—"
                                     st.write(f"Prazo engenharia: `{pe}`")
-                                    dp = (
-                                        pd.to_datetime(fr['despacho']).strftime('%d/%m/%Y')
-                                        if prazo_valido(fr['despacho']) else "—"
-                                    )
+                                    dp = pd.to_datetime(fr['despacho']).strftime('%d/%m/%Y') if prazo_valido(fr['despacho']) else "—"
                                     st.write(f"Despacho: {dp}")
                                 cor_status = STATUS_CORES.get(fr['status_tecnico'], "#94A3B8")
-                                st.markdown(
-                                    f"<span style='background:{cor_status}20;color:{cor_status};"
-                                    f"padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>"
-                                    f"{fr['status_tecnico']}</span>",
-                                    unsafe_allow_html=True
-                                )
+                                st.markdown(f"<span style='background:{cor_status}20;color:{cor_status};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{fr['status_tecnico']}</span>", unsafe_allow_html=True)
                             with cc:
                                 if fr['situacao_key'] == 'vencido':
                                     st.error(f"VENCIDO\n\n**{fr['dias_num']} dias**")
                                 else:
                                     st.warning(f"FALTAM\n\n**{fr['dias_num']} dias**")
-
                             st.markdown("---")
                             ca1, ca2 = st.columns(2)
                             with ca1:
@@ -1867,7 +1334,6 @@ def blocos_semanais(df_input, key_prefix):
                         exibir = [f for f in exibir if f['situacao_key'] in ('critico', 'vencido')]
                     elif filt_sit == "Liberadas":
                         exibir = [f for f in exibir if f['situacao_key'] == 'concluido']
-
                     st.markdown(f"**{len(exibir)} frente(s)**")
                     st.markdown("---")
                     for fr in exibir:
@@ -1878,46 +1344,27 @@ def blocos_semanais(df_input, key_prefix):
                                 st.markdown(f"**{fr['tarefa']}**{sub}")
                                 st.caption(f"EDT: {fr['edt']} | {fr['tipo_escopo']} | {fr['m2']:,.2f} m²")
                                 cor_status = STATUS_CORES.get(fr['status_tecnico'], "#94A3B8")
-                                st.markdown(
-                                    f"<span style='background:{cor_status}20;color:{cor_status};"
-                                    f"padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600;'>"
-                                    f"{fr['status_tecnico']}</span>",
-                                    unsafe_allow_html=True
-                                )
+                                st.markdown(f"<span style='background:{cor_status}20;color:{cor_status};padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{fr['status_tecnico']}</span>", unsafe_allow_html=True)
                             with cd:
-                                ini = (
-                                    pd.to_datetime(fr['inicio_previsto']).strftime('%d/%m/%Y')
-                                    if prazo_valido(fr['inicio_previsto']) else "—"
-                                )
+                                ini = pd.to_datetime(fr['inicio_previsto']).strftime('%d/%m/%Y') if prazo_valido(fr['inicio_previsto']) else "—"
                                 st.caption("Inicio instalacao")
                                 st.write(ini)
                                 pe = pd.to_datetime(fr['prazo_eng']).strftime('%d/%m/%Y') if fr['prazo_eng'] else "—"
                                 st.caption("Prazo PCP")
                                 st.write(f"`{pe}`")
-                                dp = (
-                                    pd.to_datetime(fr['despacho']).strftime('%d/%m/%Y')
-                                    if prazo_valido(fr['despacho']) else "—"
-                                )
+                                dp = pd.to_datetime(fr['despacho']).strftime('%d/%m/%Y') if prazo_valido(fr['despacho']) else "—"
                                 st.caption("Despacho")
                                 st.write(dp)
                             with ca:
                                 sk = fr['situacao_key']
-                                if sk == 'vencido':
-                                    st.error(fr['situacao_txt'])
-                                elif sk == 'critico':
-                                    st.warning(fr['situacao_txt'])
-                                elif sk in ('concluido', 'ok'):
-                                    st.success(fr['situacao_txt'])
-                                else:
-                                    st.info(fr['situacao_txt'])
-
+                                if sk == 'vencido':      st.error(fr['situacao_txt'])
+                                elif sk == 'critico':    st.warning(fr['situacao_txt'])
+                                elif sk in ('concluido', 'ok'): st.success(fr['situacao_txt'])
+                                else:                    st.info(fr['situacao_txt'])
                             cs, cb = st.columns([4, 1])
                             with cs:
                                 idx = ESTADOS.index(fr['status_tecnico']) if fr['status_tecnico'] in ESTADOS else 0
-                                ns  = st.selectbox(
-                                    "", ESTADOS, index=idx,
-                                    key=f"as_{fr['id']}", label_visibility="collapsed"
-                                )
+                                ns  = st.selectbox("", ESTADOS, index=idx, key=f"as_{fr['id']}", label_visibility="collapsed")
                             with cb:
                                 if st.button("Salvar", key=f"ab_{fr['id']}", use_container_width=True):
                                     atualizar_status_engenharia(fr['id'], ns)
@@ -1927,10 +1374,7 @@ def blocos_semanais(df_input, key_prefix):
 
             df_sols = carregar_solicitacoes()
             n_pend  = len(df_sols[df_sols['status'] == 'Pendente de Aprovacao']) if not df_sols.empty else 0
-            with st.expander(
-                f"Solicitacoes de Prazo{f' — {n_pend} pendente(s)' if n_pend else ''}",
-                expanded=False
-            ):
+            with st.expander(f"Solicitacoes de Prazo{f' — {n_pend} pendente(s)' if n_pend else ''}", expanded=False):
                 nao_lib = [f for f in frentes if f['situacao_key'] != 'concluido']
                 if setor in ["Engenharia", "Master"] and nao_lib:
                     st.markdown("#### Nova Solicitacao")
@@ -1939,32 +1383,19 @@ def blocos_semanais(df_input, key_prefix):
                         opts = [f"{f['edt']} — {f['tarefa']}" for f in nao_lib]
                         sel  = st.selectbox("Frente:", opts, key="sol_fr")
                         fobj = nao_lib[opts.index(sel)]
-                        pat  = (
-                            pd.to_datetime(fobj['prazo_eng']).strftime('%d/%m/%Y')
-                            if fobj['prazo_eng'] else "Nao definido"
-                        )
+                        pat  = pd.to_datetime(fobj['prazo_eng']).strftime('%d/%m/%Y') if fobj['prazo_eng'] else "Nao definido"
                         st.info(f"Prazo atual: **{pat}**")
                     with cs2:
-                        nps = st.date_input(
-                            "Novo prazo:", format="DD/MM/YYYY", key="sol_np",
-                            value=(
-                                (pd.to_datetime(fobj['prazo_eng']) + timedelta(days=7)).date()
-                                if fobj['prazo_eng'] else HOJE_PROJETO.date()
-                            )
-                        )
+                        nps = st.date_input("Novo prazo:", format="DD/MM/YYYY", key="sol_np",
+                                            value=((pd.to_datetime(fobj['prazo_eng']) + timedelta(days=7)).date() if fobj['prazo_eng'] else HOJE_PROJETO.date()))
                         jus = st.text_area("Justificativa:", key="sol_jus")
                     if st.button("Enviar solicitacao", key="sol_env"):
                         if not jus.strip():
                             st.error("Informe a justificativa.")
                         else:
-                            salvar_solicitacao(
-                                fobj['edt'], fobj['tarefa'], pat,
-                                nps.strftime('%d/%m/%Y'), jus.strip(),
-                                st.session_state.usuario_nome
-                            )
+                            salvar_solicitacao(fobj['edt'], fobj['tarefa'], pat, nps.strftime('%d/%m/%Y'), jus.strip(), st.session_state.usuario_nome)
                             st.success("Enviado!")
                             st.rerun()
-
                 st.markdown("---")
                 if setor == "Master" and not df_sols.empty:
                     pend = df_sols[df_sols['status'] == 'Pendente de Aprovacao']
@@ -1988,51 +1419,31 @@ def blocos_semanais(df_input, key_prefix):
                                         if st.button("Rejeitar", key=f"rj_{sol['id']}", use_container_width=True):
                                             atualizar_status_solicitacao(sol['id'], "Rejeitado")
                                             st.rerun()
-
                 if not df_sols.empty:
                     hist = df_sols[df_sols['status'] != 'Pendente de Aprovacao']
                     if not hist.empty:
                         st.markdown("#### Historico")
                         for _, sol in hist.iterrows():
-                            st.caption(
-                                f"{sol['status']} | **{sol['tarefa']}** | "
-                                f"{sol['prazo_solicitado']} | {sol['criado_por']}"
-                            )
+                            st.caption(f"{sol['status']} | **{sol['tarefa']}** | {sol['prazo_solicitado']} | {sol['criado_por']}")
 
             with st.expander("Carga da Fabrica por Semana", expanded=False):
-                df_fab = (
-                    df_banco_micro[df_banco_micro['Status_Item'] == "Liberado para Fabrica"].copy()
-                    if not df_banco_micro.empty else pd.DataFrame()
-                )
+                df_fab = (df_banco_micro[df_banco_micro['Status_Item'] == "Liberado para Fabrica"].copy()
+                          if not df_banco_micro.empty else pd.DataFrame())
                 if not df_fab.empty:
                     df_fab['Ano_Semana'] = df_fab['Data_Producao_Programada'].dt.isocalendar().year
                     df_fab['Num_Semana'] = df_fab['Data_Producao_Programada'].dt.isocalendar().week
-
                     def fmt_s(r):
                         try:
-                            s = pd.to_datetime(
-                                f"{int(r['Ano_Semana'])}-W{int(r['Num_Semana'])}-1",
-                                format="%G-W%V-%u"
-                            )
-                            return (
-                                f"Semana {int(r['Num_Semana']):02d} "
-                                f"({s.strftime('%d/%m')} – {(s + timedelta(days=6)).strftime('%d/%m')})"
-                            )
+                            s = pd.to_datetime(f"{int(r['Ano_Semana'])}-W{int(r['Num_Semana'])}-1", format="%G-W%V-%u")
+                            return f"Semana {int(r['Num_Semana']):02d} ({s.strftime('%d/%m')} – {(s + timedelta(days=6)).strftime('%d/%m')})"
                         except Exception:
                             return f"Semana {r['Num_Semana']}"
-
                     df_fab['Periodo'] = df_fab.apply(fmt_s, axis=1)
-                    res_fab = df_fab.groupby(
-                        ['Ano_Semana', 'Num_Semana', 'Periodo', 'Obra_Vinculada']
-                    ).agg(
-                        Caixas=('Qtd_Caixas', 'sum'),
-                        M2=('M2_Item', 'sum')
+                    res_fab = df_fab.groupby(['Ano_Semana', 'Num_Semana', 'Periodo', 'Obra_Vinculada']).agg(
+                        Caixas=('Qtd_Caixas', 'sum'), M2=('M2_Item', 'sum')
                     ).reset_index().sort_values(['Ano_Semana', 'Num_Semana'])
                     res_fab.columns = ['Ano', 'Sem', 'Periodo', 'Obra', 'Caixas (cx)', 'Metragem (m²)']
-                    st.dataframe(
-                        res_fab[['Periodo', 'Obra', 'Caixas (cx)', 'Metragem (m²)']],
-                        hide_index=True, use_container_width=True
-                    )
+                    st.dataframe(res_fab[['Periodo', 'Obra', 'Caixas (cx)', 'Metragem (m²)']], hide_index=True, use_container_width=True)
                 else:
                     st.success("Fabrica livre!")
 
@@ -2053,8 +1464,7 @@ def blocos_semanais(df_input, key_prefix):
                 n_atrasado = (
                     len(df_ativos[df_ativos['Data_Limite_Despacho'].apply(
                         lambda x: prazo_valido(x) and pd.to_datetime(x) < HOJE_PROJETO
-                    )])
-                    if not df_ativos.empty else 0
+                    )]) if not df_ativos.empty else 0
                 )
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Aguardando Agendamento", n_aguard)
@@ -2073,35 +1483,22 @@ def blocos_semanais(df_input, key_prefix):
                 if df_log.empty or df_log[df_log['Status_Logistica'] == 'Aguardando Agendamento'].empty:
                     st.success("Todos os lotes ja agendados!")
                 else:
-                    df_ag = (
-                        df_log[df_log['Status_Logistica'] == 'Aguardando Agendamento']
-                        .copy()
-                        .sort_values('Data_Limite_Despacho', na_position='last')
-                    )
+                    df_ag = df_log[df_log['Status_Logistica'] == 'Aguardando Agendamento'].copy().sort_values('Data_Limite_Despacho', na_position='last')
                     for _, row in df_ag.iterrows():
                         prazo_d = row['Data_Limite_Despacho']
                         if prazo_valido(prazo_d):
                             dias_r = (pd.to_datetime(prazo_d) - HOJE_PROJETO).days
-                            if dias_r < 0:
-                                css_bar = "bar-danger"; tag = f"ATRASADO {abs(dias_r)}d"
-                            elif dias_r <= 3:
-                                css_bar = "bar-warn";   tag = f"URGENTE — {dias_r}d restantes"
-                            else:
-                                css_bar = "bar-ok";     tag = f"{dias_r} dias restantes"
+                            if dias_r < 0:   css_bar = "bar-danger"; tag = f"ATRASADO {abs(dias_r)}d"
+                            elif dias_r <= 3: css_bar = "bar-warn";  tag = f"URGENTE — {dias_r}d restantes"
+                            else:             css_bar = "bar-ok";    tag = f"{dias_r} dias restantes"
                         else:
                             css_bar = "bar-neutral"; tag = "Sem prazo definido"
 
                         st.markdown(f"<div class='{css_bar}'>", unsafe_allow_html=True)
                         ci, cp, ca = st.columns([5, 3, 2])
                         with ci:
-                            st.markdown(
-                                f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;'
-                                f'<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>',
-                                unsafe_allow_html=True
-                            )
-                            st.markdown(
-                                f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} cx` — {row['M2_Item']:.2f} m²"
-                            )
+                            st.markdown(f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>', unsafe_allow_html=True)
+                            st.markdown(f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} cx` — {row['M2_Item']:.2f} m²")
                             st.caption(f"Pavimentos: {row['Romaneio_Chapas']} | OP: {row.get('Num_OP') or 'S/OP'}")
                         with cp:
                             ptxt = pd.to_datetime(prazo_d).strftime('%d/%m/%Y') if prazo_valido(prazo_d) else "—"
@@ -2118,34 +1515,16 @@ def blocos_semanais(df_input, key_prefix):
                                 st.markdown(f"#### Agendar — Lote `{row['Cod_Lote']}` | {row['Obra_Vinculada']}")
                                 fa1, fa2 = st.columns(2)
                                 with fa1:
-                                    dt_env = st.date_input(
-                                        "Data envio:", format="DD/MM/YYYY",
-                                        key=f"dt_env_{row['id']}",
-                                        value=(
-                                            pd.to_datetime(prazo_d).date()
-                                            if prazo_valido(prazo_d) else HOJE_PROJETO.date()
-                                        )
-                                    )
-                                    transp = st.selectbox(
-                                        "Transporte:",
-                                        ["Frota Propria (Passold)", "Transportadora Terceira", "Retirada pelo Cliente"],
-                                        key=f"tr_{row['id']}"
-                                    )
+                                    dt_env = st.date_input("Data envio:", format="DD/MM/YYYY", key=f"dt_env_{row['id']}",
+                                                           value=(pd.to_datetime(prazo_d).date() if prazo_valido(prazo_d) else HOJE_PROJETO.date()))
+                                    transp = st.selectbox("Transporte:", ["Frota Propria (Passold)", "Transportadora Terceira", "Retirada pelo Cliente"], key=f"tr_{row['id']}")
                                 with fa2:
                                     veic = st.text_input("Veiculo / Placa:", key=f"ve_{row['id']}")
                                     obs  = st.text_area("Observacoes:", key=f"ob_{row['id']}", height=80)
                                 cb1, cb2 = st.columns(2)
                                 with cb1:
-                                    if st.button(
-                                        "Confirmar agendamento",
-                                        key=f"conf_{row['id']}",
-                                        use_container_width=True,
-                                        type="primary"
-                                    ):
-                                        agendar_envio(
-                                            row['id'], dt_env, transp, veic, obs,
-                                            st.session_state.usuario_nome
-                                        )
+                                    if st.button("Confirmar agendamento", key=f"conf_{row['id']}", use_container_width=True, type="primary"):
+                                        agendar_envio(row['id'], dt_env, transp, veic, obs, st.session_state.usuario_nome)
                                         st.session_state[f"ag_open_{row['id']}"] = False
                                         st.toast(f"Agendado para {dt_env.strftime('%d/%m/%Y')}!")
                                         time.sleep(0.3)
@@ -2159,30 +1538,17 @@ def blocos_semanais(df_input, key_prefix):
                 if df_log.empty or df_log[df_log['Status_Logistica'] == 'Envio Agendado'].empty:
                     st.info("Nenhum envio agendado.")
                 else:
-                    df_agend = (
-                        df_log[df_log['Status_Logistica'] == 'Envio Agendado']
-                        .copy()
-                        .sort_values('Data_Envio_Agendado', na_position='last')
-                    )
+                    df_agend = df_log[df_log['Status_Logistica'] == 'Envio Agendado'].copy().sort_values('Data_Envio_Agendado', na_position='last')
                     for _, row in df_agend.iterrows():
                         pd_d = row['Data_Limite_Despacho']
                         de_d = row['Data_Envio_Agendado']
-                        no_prazo = (
-                            (pd.to_datetime(de_d) <= pd.to_datetime(pd_d))
-                            if prazo_valido(pd_d) and prazo_valido(de_d) else True
-                        )
-                        css_bar = "bar-ok" if no_prazo else "bar-danger"
+                        no_prazo = (pd.to_datetime(de_d) <= pd.to_datetime(pd_d)) if prazo_valido(pd_d) and prazo_valido(de_d) else True
+                        css_bar  = "bar-ok" if no_prazo else "bar-danger"
                         st.markdown(f"<div class='{css_bar}'>", unsafe_allow_html=True)
                         ci2, cp2, ca2 = st.columns([5, 3, 2])
                         with ci2:
-                            st.markdown(
-                                f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;'
-                                f'<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>',
-                                unsafe_allow_html=True
-                            )
-                            st.markdown(
-                                f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} cx` — {row['M2_Item']:.2f} m²"
-                            )
+                            st.markdown(f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>', unsafe_allow_html=True)
+                            st.markdown(f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} cx` — {row['M2_Item']:.2f} m²")
                             st.caption(f"{row.get('Transportadora', '—')} | {row.get('Veiculo', '—')}")
                             if row.get('Observacoes'):
                                 st.caption(f"Obs: {row['Observacoes']}")
@@ -2197,12 +1563,7 @@ def blocos_semanais(df_input, key_prefix):
                                 st.error("Fora do prazo!")
                         with ca2:
                             st.write("")
-                            if st.button(
-                                "Confirmar Despacho",
-                                key=f"des_{row['id']}",
-                                use_container_width=True,
-                                type="primary"
-                            ):
+                            if st.button("Confirmar Despacho", key=f"des_{row['id']}", use_container_width=True, type="primary"):
                                 confirmar_despacho(row['id'], st.session_state.usuario_nome)
                                 st.toast("Despachado!")
                                 time.sleep(0.3)
@@ -2210,10 +1571,7 @@ def blocos_semanais(df_input, key_prefix):
                             if st.button("Reagendar", key=f"rag_{row['id']}", use_container_width=True):
                                 conn = conectar_banco()
                                 cursor = conn.cursor()
-                                cursor.execute(
-                                    "UPDATE logistica_envios SET Status_Logistica='Aguardando Agendamento' WHERE id=%s",
-                                    (row['id'],)
-                                )
+                                cursor.execute("UPDATE logistica_envios SET Status_Logistica='Aguardando Agendamento' WHERE id=%s", (row['id'],))
                                 conn.commit()
                                 conn.close()
                                 st.rerun()
@@ -2225,26 +1583,15 @@ def blocos_semanais(df_input, key_prefix):
                 else:
                     df_hist = df_log[df_log['Status_Logistica'] == 'Despachado'].copy()
                     for col in ['Data_Limite_Despacho', 'Data_Envio_Agendado']:
-                        df_hist[col] = df_hist[col].apply(
-                            lambda x: pd.to_datetime(x).strftime('%d/%m/%Y') if prazo_valido(x) else "—"
-                        )
-                    cols_h = [c for c in [
-                        'Obra_Vinculada', 'Cod_Lote', 'Tipo_Material', 'Qtd_Caixas', 'M2_Item',
-                        'Transportadora', 'Veiculo', 'Data_Envio_Agendado', 'Data_Limite_Despacho',
-                        'Confirmado_Por', 'Confirmado_Em'
-                    ] if c in df_hist.columns]
+                        df_hist[col] = df_hist[col].apply(lambda x: pd.to_datetime(x).strftime('%d/%m/%Y') if prazo_valido(x) else "—")
+                    cols_h = [c for c in ['Obra_Vinculada', 'Cod_Lote', 'Tipo_Material', 'Qtd_Caixas', 'M2_Item',
+                                          'Transportadora', 'Veiculo', 'Data_Envio_Agendado', 'Data_Limite_Despacho',
+                                          'Confirmado_Por', 'Confirmado_Em'] if c in df_hist.columns]
                     st.dataframe(df_hist[cols_h], hide_index=True, use_container_width=True)
-
                     df_pont = df_log[df_log['Status_Logistica'] == 'Despachado'].copy()
-                    df_pont = df_pont[
-                        df_pont['Data_Limite_Despacho'].apply(prazo_valido) &
-                        df_pont['Data_Envio_Agendado'].apply(prazo_valido)
-                    ]
+                    df_pont = df_pont[df_pont['Data_Limite_Despacho'].apply(prazo_valido) & df_pont['Data_Envio_Agendado'].apply(prazo_valido)]
                     if not df_pont.empty:
-                        ok = (
-                            pd.to_datetime(df_pont['Data_Envio_Agendado']) <=
-                            pd.to_datetime(df_pont['Data_Limite_Despacho'])
-                        ).sum()
+                        ok = (pd.to_datetime(df_pont['Data_Envio_Agendado']) <= pd.to_datetime(df_pont['Data_Limite_Despacho'])).sum()
                         st.metric("Pontualidade nos despachos", f"{ok / len(df_pont) * 100:.0f}%")
 
     # ==================================================
@@ -2266,10 +1613,7 @@ def blocos_semanais(df_input, key_prefix):
                             conn = conectar_banco()
                             cursor = conn.cursor()
                             try:
-                                cursor.execute(
-                                    "INSERT INTO usuarios (usuario, nome, setor, senha) VALUES (%s,%s,%s,%s)",
-                                    (nu, nn, ns, hash_senha(np))
-                                )
+                                cursor.execute("INSERT INTO usuarios (usuario, nome, setor, senha) VALUES (%s,%s,%s,%s)", (nu, nn, ns, hash_senha(np)))
                                 conn.commit()
                                 st.success(f"{nn} criado!")
                                 time.sleep(0.5)
