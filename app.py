@@ -760,12 +760,13 @@ with st.container():
     abas_objetos = st.tabs(abas_disponiveis)
 
 for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
+
+
+        # ================================================
+        # PAINEL DA PRODUÇÃO - ACM
+        # ================================================
     
-    # ==================================================
-    # PAINEL DA PRODUCAO ACM
-    # ==================================================
     if nome_aba == "Painel da Producao - ACM":
-        # FIX: import calendar movido para o topo do arquivo
         with aba_objeto:
             st.header("Mural de Metas — Producao")
             obras_tv = ["Todas as obras"] + (
@@ -773,6 +774,79 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 if not df_banco_micro.empty else []
             )
             obra_tv = st.selectbox("Filtrar por obra:", obras_tv, key="sb_obra_tv")
+
+            # ================================================
+            # SEÇÃO 1 — PREVISÃO (todos os lotes fatiados)
+            # ================================================
+            st.markdown("### 📋 Previsão de Entrada em Produção")
+            st.caption("Lotes planejados no Vincular Datas — ainda não liberados oficialmente.")
+
+            df_prev = df_banco_micro.copy() if not df_banco_micro.empty else pd.DataFrame()
+            if obra_tv != "Todas as obras" and not df_prev.empty:
+                df_prev = df_prev[df_prev['Obra_Vinculada'] == obra_tv]
+
+            df_prev_pend = df_prev[df_prev['Status_Item'] == 'Pendente'].copy() if not df_prev.empty else pd.DataFrame()
+
+            if df_prev_pend.empty:
+                st.info("Nenhuma previsão pendente.")
+            else:
+                df_prev_pend['Ano_Semana'] = df_prev_pend['Data_Producao_Programada'].dt.isocalendar().year
+                df_prev_pend['Num_Semana'] = df_prev_pend['Data_Producao_Programada'].dt.isocalendar().week
+
+                def fmt_semana_prev(r):
+                    try:
+                        s = pd.to_datetime(
+                            f"{int(r['Ano_Semana'])}-W{int(r['Num_Semana'])}-1",
+                            format="%G-W%V-%u"
+                        )
+                        return (
+                            f"Semana {int(r['Num_Semana']):02d} "
+                            f"({s.strftime('%d/%m')} – {(s + timedelta(days=6)).strftime('%d/%m/%Y')})"
+                        )
+                    except Exception:
+                        return f"Semana {r['Num_Semana']}"
+
+                df_prev_pend['Periodo'] = df_prev_pend.apply(fmt_semana_prev, axis=1)
+
+                semanas_unicas = (
+                    df_prev_pend[['Ano_Semana', 'Num_Semana', 'Periodo']]
+                    .drop_duplicates()
+                    .sort_values(['Ano_Semana', 'Num_Semana'])
+                )
+
+                for _, sem_row in semanas_unicas.iterrows():
+                    lotes_sem = df_prev_pend[df_prev_pend['Periodo'] == sem_row['Periodo']]
+                    total_cx  = int(lotes_sem['Qtd_Caixas'].sum())
+                    total_m2  = lotes_sem['M2_Item'].sum()
+                    n_lotes   = len(lotes_sem)
+
+                    with st.expander(
+                        f"📅 {sem_row['Periodo']}  —  {n_lotes} lote(s)  |  {total_cx} cx  |  {total_m2:.2f} m²",
+                        expanded=False
+                    ):
+                        for _, lrow in lotes_sem.iterrows():
+                            dt_ini = pd.to_datetime(lrow['Data_Producao_Programada']).strftime('%d/%m/%Y')
+                            dt_fim = pd.to_datetime(lrow['Data_Limite_Obra']).strftime('%d/%m/%Y')
+                            st.markdown(
+                                f'<span class="badge-obra">{lrow["Obra_Vinculada"]}</span>&nbsp;'
+                                f'<span class="badge-edt">{lrow["EDT_Vinculado"]}</span>&nbsp;'
+                                f'<span class="badge-lote">{lrow["Cod_Lote"]}</span>',
+                                unsafe_allow_html=True
+                            )
+                            st.markdown(
+                                f"**{lrow['Tipo_Material']}** &nbsp;|&nbsp; "
+                                f"`{int(lrow['Qtd_Caixas'])} caixas` — {lrow['M2_Item']:.2f} m²"
+                            )
+                            st.caption(f"Período: {dt_ini} a {dt_fim} &nbsp;|&nbsp; {lrow['Romaneio_Chapas']}")
+                            st.markdown("---")
+
+            st.markdown("---")
+
+            # ================================================
+            # SEÇÃO 2 — CALENDÁRIO (só lotes liberados)
+            # ================================================
+            st.markdown("### 📆 Calendário de Produção — OPs Liberadas")
+            st.caption("Apenas lotes liberados oficialmente na aba 'Liberar OPs da Semana'.")
 
             if not df_banco_micro.empty:
                 df_base = df_banco_micro[df_banco_micro['Status_Item'] == "Liberado para Fabrica"].copy()
@@ -810,7 +884,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             st.rerun()
                     with c2:
                         nomes_meses = ["", "Janeiro", "Fevereiro", "Marco", "Abril", "Maio", "Junho",
-                                       "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+                                    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
                         st.markdown(
                             f"<h3 style='text-align:center;color:#1E3A8A;margin:0;'>"
                             f"{nomes_meses[st.session_state.prog_mes]} / {st.session_state.prog_ano}</h3>",
@@ -959,7 +1033,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                             unsafe_allow_html=True
                                         )
                 else:
-                    st.success("Sem lotes liberados para este filtro.")
+                    st.info("Nenhuma OP liberada para este filtro ainda.")
             else:
                 st.info("Nenhum lote liberado no sistema ainda.")
 # ==================================================
