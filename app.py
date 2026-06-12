@@ -1196,9 +1196,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             progress_val = (30 - segundos_restantes) / 30
             st.markdown("<br>", unsafe_allow_html=True)
             st.progress(progress_val, text=f"Próxima atualização em {segundos_restantes}s")
-            time.sleep(1)
+          # auto-refresh apenas se esta aba estiver sendo visualizada
+        if segundos_restantes == 0:
+            st.session_state.tv_last_refresh = time.time()
             st.rerun()
-
     # ==================================================
     # LIBERAR OPS
     # ==================================================
