@@ -737,7 +737,7 @@ else:
 setor = st.session_state.usuario_setor
 abas_disponiveis = []
 if setor in ["Master", "Producao", "Diretoria", "Engenharia"]:
-    abas_disponiveis.append("Painel da Producao")
+    abas_disponiveis.append("Painel da Producao - ACM")
 if setor in ["Master"]:
     abas_disponiveis.append("Liberar OPs da Semana")
 if setor in ["Master", "Diretoria"]:
@@ -758,9 +758,9 @@ with st.container():
 for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
     # ==================================================
-    # PAINEL DA PRODUCAO (TV)
+    # PAINEL DA PRODUCAO ACM
     # ==================================================
-    if nome_aba == "Painel da Producao":
+    if nome_aba == "Painel da Producao - ACM":
         # FIX: import calendar movido para o topo do arquivo
         with aba_objeto:
             st.header("Mural de Metas — Producao")
