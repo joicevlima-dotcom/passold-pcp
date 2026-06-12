@@ -1348,55 +1348,115 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 )
 
                 st.markdown("---")
-                st.subheader("Carga Semanal")
-                df_lib = df_dir[df_dir['Status_Item'].isin(["Liberado para Fabrica", "Producao", "Concluido"])].copy()
-                if not df_lib.empty:
-                    df_lib['Ano_Semana'] = df_lib['Data_Producao_Programada'].dt.isocalendar().year
-                    df_lib['Num_Semana'] = df_lib['Data_Producao_Programada'].dt.isocalendar().week
+st.subheader("Carga Semanal")
 
-                    def fmt_sem(r):
-                        try:
-                            s = pd.to_datetime(
-                                f"{int(r['Ano_Semana'])}-W{int(r['Num_Semana'])}-1",
-                                format="%G-W%V-%u"
-                            )
-                            return (
-                                f"Semana {int(r['Num_Semana']):02d} "
-                                f"({s.strftime('%d/%m')} – {(s + timedelta(days=6)).strftime('%d/%m/%Y')})"
-                            )
-                        except Exception:
-                            return f"Semana {r['Num_Semana']}"
+obras_macro = ["Todas as obras"] + (
+    sorted(df_banco_micro['Obra_Vinculada'].dropna().unique().tolist())
+    if not df_banco_micro.empty else []
+)
 
-                    df_lib['Periodo'] = df_lib.apply(fmt_sem, axis=1)
-                    res = df_lib.groupby(
-                        ['Ano_Semana', 'Num_Semana', 'Periodo', 'Obra_Vinculada']
-                    ).agg(
-                        Lotes=('id', 'count'),
-                        Caixas=('Qtd_Caixas', 'sum'),
-                        M2=('M2_Item', 'sum'),
-                        Pendentes=('Status_Item',  lambda x: (x == 'Pendente').sum()),
-                        Liberados=('Status_Item',  lambda x: (x == 'Liberado para Fabrica').sum()),
-                        Concluidos=('Status_Item', lambda x: (x == 'Concluido').sum()),
-                    ).reset_index().sort_values(['Ano_Semana', 'Num_Semana'])
-                    res.columns = ['Ano', 'Sem', 'Periodo', 'Obra', 'Lotes', 'Caixas', 'Volume (m²)', 'Pendentes', 'Liberados', 'Concluídos']
+def blocos_semanais(df_input, key_prefix):
+    if df_input.empty:
+        st.info("Nenhum lote encontrado.")
+        return
 
-                    def colorir_linha(row):
-                        if row['Concluídos'] == row['Lotes']:
-                            cor = 'background-color:#F0FDF4;color:#15803D'   # verde — tudo concluído
-                        elif row['Liberados'] > 0:
-                            cor = 'background-color:#EFF6FF;color:#1D4ED8'   # azul — tem liberado
-                        else:
-                            cor = 'background-color:#FFFBEB;color:#92400E'   # amarelo — só pendente
-                        return [cor] * len(row)
+    df_input = df_input.copy()
+    df_input['Ano_Semana'] = df_input['Data_Producao_Programada'].dt.isocalendar().year
+    df_input['Num_Semana'] = df_input['Data_Producao_Programada'].dt.isocalendar().week
 
-                    st.dataframe(
-                        res[['Periodo', 'Obra', 'Lotes', 'Caixas', 'Volume (m²)', 'Pendentes', 'Liberados', 'Concluídos']]
-                        .style.apply(colorir_linha, axis=1),
-                        hide_index=True,
-                        use_container_width=True
-                    )
-                else:
-                    st.warning("Nenhuma OP liberada ainda.")
+    def fmt_sem(r):
+        try:
+            s = pd.to_datetime(
+                f"{int(r['Ano_Semana'])}-W{int(r['Num_Semana'])}-1",
+                format="%G-W%V-%u"
+            )
+            return (
+                f"Semana {int(r['Num_Semana']):02d} "
+                f"({s.strftime('%d/%m')} – {(s + timedelta(days=6)).strftime('%d/%m/%Y')})"
+            )
+        except Exception:
+            return f"Semana {r['Num_Semana']}"
+
+    df_input['Periodo'] = df_input.apply(fmt_sem, axis=1)
+
+    semanas_unicas = (
+        df_input[['Ano_Semana', 'Num_Semana', 'Periodo']]
+        .drop_duplicates()
+        .sort_values(['Ano_Semana', 'Num_Semana'])
+    )
+
+    for _, sem_row in semanas_unicas.iterrows():
+        lotes_sem = df_input[df_input['Periodo'] == sem_row['Periodo']]
+        total_m2  = lotes_sem['M2_Item'].sum()
+        n_lotes   = len(lotes_sem)
+
+        with st.expander(
+            f"📅 {sem_row['Periodo']}  —  {n_lotes} lote(s)  |  {total_m2:.2f} m²",
+            expanded=False
+        ):
+            for _, lrow in lotes_sem.iterrows():
+                dt_ini = pd.to_datetime(lrow['Data_Producao_Programada']).strftime('%d/%m/%Y')
+                dt_fim = pd.to_datetime(lrow['Data_Limite_Obra']).strftime('%d/%m/%Y')
+                st.markdown(
+                    f'<span class="badge-obra">{lrow["Obra_Vinculada"]}</span>&nbsp;'
+                    f'<span class="badge-edt">{lrow["EDT_Vinculado"]}</span>&nbsp;'
+                    f'<span class="badge-lote">{lrow["Cod_Lote"]}</span>',
+                    unsafe_allow_html=True
+                )
+                st.markdown(
+                    f"**{lrow['Tipo_Material']}** &nbsp;|&nbsp; "
+                    f"`{int(lrow['Qtd_Caixas'])} caixas` — {lrow['M2_Item']:.2f} m²"
+                )
+                st.caption(f"Período: {dt_ini} a {dt_fim} &nbsp;|&nbsp; {lrow['Romaneio_Chapas']}")
+                op_txt = lrow['Num_OP'] if lrow.get('Num_OP') else "Aguardando OP"
+                st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {lrow.get('Fase_Produtiva', '—')}")
+                st.markdown("---")
+
+                    # ---- BLOCO 1: PREVISÃO ----
+                st.markdown("#### 📋 Previsão")
+                col_f1, _ = st.columns([2, 3])
+                with col_f1:
+                        filtro_prev = st.selectbox("🔍 Obra:", obras_macro, key="filtro_prev")
+
+                df_prev = df_banco_micro.copy() if not df_banco_micro.empty else pd.DataFrame()
+                if not df_prev.empty:
+                        if filtro_prev != "Todas as obras":
+                            df_prev = df_prev[df_prev['Obra_Vinculada'] == filtro_prev]
+                        df_prev = df_prev[df_prev['Status_Item'] == 'Pendente']
+
+                blocos_semanais(df_prev, "prev")
+
+                st.markdown("---")
+
+                    # ---- BLOCO 2: EM PRODUÇÃO ----
+                st.markdown("#### 🔧 Em Produção")
+                col_f2, _ = st.columns([2, 3])
+                with col_f2:
+                        filtro_prod = st.selectbox("🔍 Obra:", obras_macro, key="filtro_prod")
+
+                df_prod = df_banco_micro.copy() if not df_banco_micro.empty else pd.DataFrame()
+                if not df_prod.empty:
+                        if filtro_prod != "Todas as obras":
+                            df_prod = df_prod[df_prod['Obra_Vinculada'] == filtro_prod]
+                        df_prod = df_prod[df_prod['Status_Item'] == 'Liberado para Fabrica']
+
+                blocos_semanais(df_prod, "prod")
+
+                st.markdown("---")
+
+                    # ---- BLOCO 3: CONCLUÍDOS ----
+                st.markdown("#### ✅ Concluídos")
+                col_f3, _ = st.columns([2, 3])
+                with col_f3:
+                        filtro_conc = st.selectbox("🔍 Obra:", obras_macro, key="filtro_conc")
+
+                df_conc = df_banco_micro.copy() if not df_banco_micro.empty else pd.DataFrame()
+                if not df_conc.empty:
+                        if filtro_conc != "Todas as obras":
+                            df_conc = df_conc[df_conc['Obra_Vinculada'] == filtro_conc]
+                        df_conc = df_conc[df_conc['Status_Item'] == 'Concluido']
+
+                blocos_semanais(df_conc, "conc")
 
                 st.subheader("Gantt — Ocupacao da Fabrica")
                 df_gantt = df_dir.groupby(
