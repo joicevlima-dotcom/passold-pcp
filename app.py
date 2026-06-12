@@ -563,7 +563,7 @@ if not st.session_state.autenticado:
     with col2:
         ci1, ci2, ci3 = st.columns([1, 2, 1])
         with ci2:
-            st.image("assets/LOGO_BAUDENPASSOLD.jpg", use_container_width=True)
+            st.image("assets/LOGO_BAUDENPASSOLD.png", use_container_width=True)
         st.markdown("""
         <p style='text-align:center; color:#64748B; font-size:13px;
                     margin-top:8px; letter-spacing:0.05em;'>
