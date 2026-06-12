@@ -558,12 +558,25 @@ if 'autenticado' not in st.session_state:
     st.session_state.usuario_nome  = ""
     st.session_state.usuario_setor = ""
 
-if not st.session_state.autenticado:
-    st.markdown("<h1 style='text-align:center;color:#1E3A8A;'>Passold Sistemas</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center;color:#6B7280;margin-bottom:30px;font-size:15px;'>PCP & Controle Operacional</p>", unsafe_allow_html=True)
-    with st.container():
-        st.markdown('<div class="login-container">', unsafe_allow_html=True)
-        st.subheader("Acesso ao Sistema")
+    if not st.session_state.autenticado:
+        st.markdown("<h1 style='text-align:center;color:#1E3A8A;'>Passold Sistemas</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align:center;color:#6B7280;margin-bottom:30px;font-size:15px;'>PCP & Controle Operacional</p>", unsafe_allow_html=True)
+        with st.container():
+            st.markdown('<div class="login-container">', unsafe_allow_html=True)
+            st.subheader("Acesso ao Sistema")
+            user_input = st.text_input("Usuário:")
+            pass_input = st.text_input("Senha:", type="password")
+            if st.button("Entrar"):
+                dados = verificar_login(user_input.strip(), pass_input)
+                if dados:
+                    st.session_state.autenticado   = True
+                    st.session_state.usuario_nome  = dados[0]
+                    st.session_state.usuario_setor = dados[1]
+                    st.rerun()
+                else:
+                    st.error("Usuário ou senha inválidos.")
+            st.markdown('</div>', unsafe_allow_html=True)
+        st.stop()
         user_input = st.text_input("Usuário:")
         pass_input = st.text_input("Senha:", type="password")
         if st.button("Entrar"):
