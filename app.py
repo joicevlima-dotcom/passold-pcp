@@ -738,6 +738,8 @@ setor = st.session_state.usuario_setor
 abas_disponiveis = []
 if setor in ["Master", "Producao", "Diretoria", "Engenharia"]:
     abas_disponiveis.append("Painel da Producao - ACM")
+if setor in ["Master", "Producao", "Diretoria"]:
+    abas_disponiveis.append("Painel TV — ACM")
 if setor in ["Master"]:
     abas_disponiveis.append("Liberar OPs da Semana")
 if setor in ["Master", "Diretoria"]:
@@ -756,6 +758,245 @@ with st.container():
     abas_objetos = st.tabs(abas_disponiveis)
 
 for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
+
+    # ==================================================
+# PAINEL TV — ACM
+# ==================================================
+elif nome_aba == "Painel TV — ACM":
+    with aba_objeto:
+        # Auto-refresh contador regressivo
+        if 'tv_last_refresh' not in st.session_state:
+            st.session_state.tv_last_refresh = time.time()
+
+        agora = time.time()
+        elapsed = agora - st.session_state.tv_last_refresh
+        if elapsed >= 30:
+            st.session_state.tv_last_refresh = time.time()
+            st.rerun()
+
+        segundos_restantes = max(0, int(30 - elapsed))
+
+        # Header do painel
+        st.markdown(f"""
+        <div style='
+            background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 100%);
+            padding: 18px 28px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        '>
+            <div>
+                <span style='color:#FFFFFF;font-size:26px;font-weight:800;letter-spacing:-0.03em;'>
+                    Passold — Painel de Produção ACM
+                </span>
+                <br>
+                <span style='color:#93C5FD;font-size:13px;'>
+                    {datetime.now().strftime('%d/%m/%Y  %H:%M')}
+                </span>
+            </div>
+            <div style='text-align:right;'>
+                <span style='color:#94A3B8;font-size:12px;'>Atualiza em</span><br>
+                <span style='color:#FCD34D;font-size:22px;font-weight:700;'>{segundos_restantes}s</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        df_tv = carregar_micro()
+
+        if df_tv.empty:
+            st.markdown("""
+            <div style='text-align:center;padding:60px;color:#94A3B8;font-size:20px;'>
+                Nenhum lote cadastrado no sistema.
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            # Classificação de urgência
+            def urgencia(row):
+                prazo = row.get('Data_Limite_Obra')
+                if not prazo_valido(prazo):
+                    return 'sem_prazo'
+                dias = (pd.to_datetime(prazo).normalize() - HOJE_PROJETO).days
+                if dias < 0:
+                    return 'vencido'
+                if dias <= 3:
+                    return 'critico'
+                if dias <= 7:
+                    return 'atencao'
+                return 'ok'
+
+            df_tv['_urgencia'] = df_tv.apply(urgencia, axis=1)
+            df_tv['_dias_restantes'] = df_tv['Data_Limite_Obra'].apply(
+                lambda x: (pd.to_datetime(x).normalize() - HOJE_PROJETO).days
+                if prazo_valido(x) else 9999
+            )
+            df_tv = df_tv.sort_values('_dias_restantes')
+
+            STATUS_EMOJI = {
+                'Pendente':              ('⏳', '#64748B', '#F1F5F9'),
+                'Liberado para Fabrica': ('🔧', '#1D4ED8', '#EFF6FF'),
+                'Concluido':             ('✅', '#15803D', '#F0FDF4'),
+            }
+            URG_CONFIG = {
+                'vencido':   {'border': '#DC2626', 'bg': '#FEF2F2', 'tag': '🔴 VENCIDO',      'tag_color': '#DC2626'},
+                'critico':   {'border': '#EA580C', 'bg': '#FFF7ED', 'tag': '🟠 URGENTE',       'tag_color': '#EA580C'},
+                'atencao':   {'border': '#D97706', 'bg': '#FFFBEB', 'tag': '🟡 ATENÇÃO',       'tag_color': '#D97706'},
+                'ok':        {'border': '#059669', 'bg': '#F0FDF4', 'tag': '🟢 NO PRAZO',      'tag_color': '#059669'},
+                'sem_prazo': {'border': '#94A3B8', 'bg': '#F8FAFC', 'tag': '⚪ SEM PRAZO',     'tag_color': '#94A3B8'},
+            }
+
+            urgentes = df_tv[df_tv['_urgencia'].isin(['vencido', 'critico'])]
+            demais   = df_tv[df_tv['_urgencia'].isin(['atencao', 'ok', 'sem_prazo'])]
+
+            # ---- CARDS URGENTES ----
+            if not urgentes.empty:
+                st.markdown(f"""
+                <div style='background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;
+                            padding:10px 18px;margin-bottom:16px;'>
+                    <span style='color:#DC2626;font-weight:700;font-size:15px;'>
+                        ⚠️ {len(urgentes)} lote(s) crítico(s) ou vencido(s)
+                    </span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                cols_urg = st.columns(min(len(urgentes), 3))
+                for i, (_, row) in enumerate(urgentes.iterrows()):
+                    urg  = row['_urgencia']
+                    cfg  = URG_CONFIG[urg]
+                    dias = row['_dias_restantes']
+                    dias_txt = (
+                        f"Vencido há {abs(dias)}d" if dias < 0
+                        else f"Faltam {dias} dia(s)"
+                    )
+                    em, ec, _ = STATUS_EMOJI.get(row['Status_Item'], ('❓', '#64748B', '#F8FAFC'))
+                    prazo_fmt = (
+                        pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
+                        if prazo_valido(row['Data_Limite_Obra']) else '—'
+                    )
+                    op_txt = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
+
+                    with cols_urg[i % 3]:
+                        st.markdown(f"""
+                        <div style='
+                            border: 2px solid {cfg["border"]};
+                            background: {cfg["bg"]};
+                            border-radius: 10px;
+                            padding: 18px 20px;
+                            margin-bottom: 12px;
+                            box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+                        '>
+                            <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;'>
+                                <span style='font-size:11px;font-weight:700;color:{cfg["tag_color"]};
+                                             background:{cfg["bg"]};border:1px solid {cfg["border"]};
+                                             padding:2px 8px;border-radius:4px;'>
+                                    {cfg["tag"]}
+                                </span>
+                                <span style='font-size:11px;color:#64748B;font-weight:600;'>{dias_txt}</span>
+                            </div>
+                            <div style='font-size:20px;font-weight:800;color:#0F172A;margin-bottom:4px;'>
+                                {row["Obra_Vinculada"]}
+                            </div>
+                            <div style='font-size:13px;color:#475569;margin-bottom:12px;'>
+                                {row["Tipo_Material"]} &nbsp;·&nbsp; {row["Romaneio_Chapas"] or "—"}
+                            </div>
+                            <div style='display:grid;grid-template-columns:1fr 1fr;gap:8px;'>
+                                <div style='background:white;border-radius:6px;padding:8px 10px;'>
+                                    <div style='font-size:10px;color:#94A3B8;text-transform:uppercase;
+                                                letter-spacing:0.05em;'>OP</div>
+                                    <div style='font-size:15px;font-weight:700;color:#1E293B;'>{op_txt}</div>
+                                </div>
+                                <div style='background:white;border-radius:6px;padding:8px 10px;'>
+                                    <div style='font-size:10px;color:#94A3B8;text-transform:uppercase;
+                                                letter-spacing:0.05em;'>M²</div>
+                                    <div style='font-size:15px;font-weight:700;color:#1E293B;'>
+                                        {row["M2_Item"]:.2f}
+                                    </div>
+                                </div>
+                                <div style='background:white;border-radius:6px;padding:8px 10px;'>
+                                    <div style='font-size:10px;color:#94A3B8;text-transform:uppercase;
+                                                letter-spacing:0.05em;'>Status</div>
+                                    <div style='font-size:13px;font-weight:700;color:{ec};'>
+                                        {em} {row["Status_Item"]}
+                                    </div>
+                                </div>
+                                <div style='background:white;border-radius:6px;padding:8px 10px;'>
+                                    <div style='font-size:10px;color:#94A3B8;text-transform:uppercase;
+                                                letter-spacing:0.05em;'>Prazo</div>
+                                    <div style='font-size:15px;font-weight:700;color:{cfg["tag_color"]};'>
+                                        {prazo_fmt}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+            # ---- TABELA DEMAIS LOTES ----
+            if not demais.empty:
+                st.markdown("---")
+                st.markdown(
+                    "<span style='font-size:15px;font-weight:700;color:#334155;'>📋 Demais lotes em andamento</span>",
+                    unsafe_allow_html=True
+                )
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # Cabeçalho
+                hc = st.columns([2, 3, 2, 2, 2])
+                for col_h, label in zip(hc, ["OP", "OBRA / MATERIAL", "M²", "STATUS", "PRAZO"]):
+                    col_h.markdown(
+                        f"<div style='font-size:11px;font-weight:700;color:#94A3B8;"
+                        f"text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>",
+                        unsafe_allow_html=True
+                    )
+                st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
+
+                for _, row in demais.iterrows():
+                    urg = row['_urgencia']
+                    cfg = URG_CONFIG[urg]
+                    em, ec, ebg = STATUS_EMOJI.get(row['Status_Item'], ('❓', '#64748B', '#F8FAFC'))
+                    prazo_fmt = (
+                        pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
+                        if prazo_valido(row['Data_Limite_Obra']) else '—'
+                    )
+                    dias = row['_dias_restantes']
+                    dias_txt = f"+{dias}d" if dias < 9999 else "—"
+                    op_txt = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
+
+                    rc = st.columns([2, 3, 2, 2, 2])
+                    rc[0].markdown(
+                        f"<span style='font-size:13px;font-weight:600;color:#1E293B;'>{op_txt}</span>",
+                        unsafe_allow_html=True
+                    )
+                    rc[1].markdown(
+                        f"<span style='font-size:13px;font-weight:700;color:#0F172A;'>{row['Obra_Vinculada']}</span>"
+                        f"<br><span style='font-size:11px;color:#64748B;'>{row['Tipo_Material']}</span>",
+                        unsafe_allow_html=True
+                    )
+                    rc[2].markdown(
+                        f"<span style='font-size:14px;font-weight:700;color:#1E293B;'>{row['M2_Item']:.2f}</span>",
+                        unsafe_allow_html=True
+                    )
+                    rc[3].markdown(
+                        f"<span style='background:{ebg};color:{ec};padding:3px 8px;"
+                        f"border-radius:4px;font-size:12px;font-weight:600;'>{em} {row['Status_Item']}</span>",
+                        unsafe_allow_html=True
+                    )
+                    rc[4].markdown(
+                        f"<span style='font-size:13px;font-weight:700;color:{cfg['tag_color']};'>{prazo_fmt}</span>"
+                        f"<br><span style='font-size:11px;color:#94A3B8;'>{dias_txt}</span>",
+                        unsafe_allow_html=True
+                    )
+                    st.markdown(
+                        "<hr style='margin:4px 0;border-color:#F1F5F9;'>",
+                        unsafe_allow_html=True
+                    )
+
+        # Barra de progresso do countdown
+        progress_val = (30 - segundos_restantes) / 30
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.progress(progress_val, text=f"Próxima atualização em {segundos_restantes}s")
+        time.sleep(1)
+        st.rerun()
 
     # ==================================================
     # PAINEL DA PRODUCAO ACM
