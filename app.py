@@ -630,6 +630,8 @@ if setor in ["Master", "Logistica"]:
     abas_disponiveis.append("Logistica")
 if setor in ["Master", "Almoxarifado"]:
     abas_disponiveis.append("Almoxarifado")
+if setor in ["Master", "Medicao"]:
+    abas_disponiveis.append("Sistema de Medicao")
 if setor in ["Master"]:
     abas_disponiveis.append("Configuracoes")
 
@@ -1831,6 +1833,536 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             st.error(f"⚠️ Itens em falta: {', '.join(itens_falt)}")
                         elif n_conf == n_total:
                             st.success("✅ Todos os componentes conferidos e disponíveis!")
+    
+    # ==================================================
+    # SISTEMA DE MEDICAO
+    # ==================================================
+    elif nome_aba == "Sistema de Medicao":
+        with aba_objeto:
+            st.components.v1.html("""
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .tab-active { border-color: #1e40af; color: #1e40af; font-weight: 700; background-color: #f8fafc; }
+        @media print { .no-print { display: none !important; } body { background-color: #fff; } }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 font-sans">
+    <header class="bg-white border-b border-slate-200 shadow-sm">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-4">
+                <span class="text-lg font-black text-slate-900 tracking-tight">Passold Sistemas de Fachadas</span>
+                <div class="h-8 w-px bg-slate-200 hidden sm:block"></div>
+                <span class="text-xs font-bold uppercase tracking-wider text-slate-400 hidden sm:block">Sistema de Medição</span>
+            </div>
+            <p class="text-xs text-slate-500 font-medium">Gestão de Saldos & Escopos Físicos</p>
+        </div>
+    </header>
+
+    <nav class="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-xs">
+        <div class="max-w-7xl mx-auto px-4 flex overflow-x-auto space-x-1 sm:space-x-4">
+            <button onclick="mudarAba('aba-cadastro')" id="btn-cadastro" class="py-3.5 px-4 border-b-2 border-transparent text-xs sm:text-sm font-semibold transition-all cursor-pointer text-slate-600 hover:text-slate-900 tab-active whitespace-nowrap">1. Cadastrar Obra Base</button>
+            <button onclick="mudarAba('aba-servicos')" id="btn-servicos" class="py-3.5 px-4 border-b-2 border-transparent text-xs sm:text-sm font-semibold transition-all cursor-pointer text-slate-600 hover:text-slate-900 whitespace-nowrap">2. Parâmetros de Serviços & Etapas</button>
+            <button onclick="mudarAba('aba-medicao')" id="btn-medicao" class="py-3.5 px-4 border-b-2 border-transparent text-xs sm:text-sm font-semibold transition-all cursor-pointer text-slate-600 hover:text-slate-900 whitespace-nowrap">3. Relatório de Saldos e Medições</button>
+            <button onclick="mudarAba('aba-relatorios')" id="btn-relatorios" class="py-3.5 px-4 border-b-2 border-transparent text-xs sm:text-sm font-bold transition-all cursor-pointer text-blue-600 hover:text-blue-800 whitespace-nowrap">📊 4. Dashboards & Comparativos</button>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto p-4 md:p-8">
+        <section id="aba-cadastro" class="space-y-6">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <div class="border-l-4 border-blue-800 pl-3 mb-6">
+                    <h2 class="text-lg font-bold text-slate-900">Cadastrar Nova Obra (Teto Geral)</h2>
+                    <p class="text-xs text-slate-500">Defina os limites orçamentários base do contrato</p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1.5">Nome da Obra / Contrato</label>
+                        <input type="text" id="cad-nome-obra" placeholder="Ex: Residencial Bella Vista" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-600 focus:bg-white outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1.5">Valor m² Teto da Obra (R$/m²)</label>
+                        <input type="number" id="cad-valor-m2" placeholder="Ex: 500.00" step="any" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-600 focus:bg-white outline-none font-bold">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1.5">Metragem Geral da Obra (m²)</label>
+                        <input type="number" id="cad-metragem-geral" placeholder="Ex: 1500.00" step="any" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-600 focus:bg-white outline-none">
+                    </div>
+                </div>
+                <div class="flex justify-end border-t border-slate-100 pt-4">
+                    <button onclick="salvarObraBase()" class="bg-blue-800 hover:bg-blue-900 text-white font-bold px-6 py-2.5 rounded-lg text-xs uppercase tracking-wider shadow-sm transition cursor-pointer">Salvar Obra</button>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <h3 class="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Obras Cadastradas</h3>
+                <div id="grid-obras" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+            </div>
+        </section>
+
+        <section id="aba-servicos" class="space-y-6 hidden">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-6">
+                    <div class="flex flex-col md:flex-row md:items-center gap-6">
+                        <div class="border-l-4 border-blue-800 pl-3">
+                            <h2 class="text-lg font-bold text-slate-900">Configurar Preços e Subdivisões por Serviço</h2>
+                            <p class="text-xs text-slate-500 mt-0.5" id="info-teto-obra-ativa"></p>
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="text-xs font-bold text-slate-400 uppercase mb-1">Período de Referência</label>
+                            <input type="month" id="mes-servicos-referencia" class="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs outline-none focus:ring-2 focus:ring-blue-600 font-bold text-slate-700">
+                        </div>
+                    </div>
+                    <div class="w-full lg:w-72">
+                        <label class="block text-xs font-bold text-slate-400 uppercase mb-1">Selecione a Obra Alvo</label>
+                        <select id="select-obra-servicos" onchange="selecionarObraServicos()" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-600">
+                            <option value="">-- Escolha uma Obra --</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="aviso-selecao-servicos" class="text-center py-12 text-slate-400 border border-dashed border-slate-200 rounded-xl bg-slate-50/50 text-sm">Selecione uma obra acima para liberar a planilha de engenharia e custos locais.</div>
+                <div id="container-lista-servicos" class="space-y-6"></div>
+                <div class="flex justify-between items-center pt-4 border-t border-slate-100 mt-6">
+                    <button id="btn-novo-servico" onclick="criarCardServicoDOM()" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold uppercase tracking-wider px-4 py-2.5 rounded-lg shadow-sm cursor-pointer hidden transition-all">+ Adicionar Novo Serviço</button>
+                    <button id="btn-salvar-servicos" onclick="salvarServicosObra()" class="bg-blue-700 hover:bg-blue-800 text-white font-bold px-6 py-2.5 rounded-lg text-xs uppercase tracking-wider shadow-md transition cursor-pointer hidden">Salvar Lançamentos</button>
+                </div>
+            </div>
+        </section>
+
+        <section id="aba-medicao" class="space-y-6 hidden">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 border-b border-slate-200 pb-6 mb-6 items-end">
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Selecione o Contrato</label>
+                        <select id="select-obra-medicao" onchange="configurarFiltrosMesesMedicao(); carregarPlanilhaMedicao();" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-600">
+                            <option value="">-- Escolha uma Obra --</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Mês de Referência Histórico</label>
+                        <select id="select-mes-medicao-historico" onchange="carregarPlanilhaMedicao()" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-600">
+                            <option value="">-- Selecione uma Obra Primeiro --</option>
+                        </select>
+                    </div>
+                    <div class="flex justify-end no-print">
+                        <button onclick="window.print()" class="w-full bg-blue-800 hover:bg-blue-900 text-white font-bold uppercase tracking-wider p-2.5 rounded-lg text-xs shadow-sm cursor-pointer transition">🖨️ Imprimir Medição Atual</button>
+                    </div>
+                </div>
+                <div id="painel-calculos" class="hidden space-y-6">
+                    <div class="overflow-x-auto rounded-lg border border-slate-200">
+                        <table class="w-full text-left border-collapse overflow-hidden">
+                            <thead>
+                                <tr class="bg-blue-900 text-white text-xs uppercase tracking-wider font-bold">
+                                    <th class="p-3 border-r border-blue-800 w-1/4">Serviço</th>
+                                    <th class="p-3 border-r border-blue-800 w-1/4">Subdivisão / Etapa</th>
+                                    <th class="p-3 text-right border-r border-blue-800 w-32 bg-blue-950/40">Metragem (m²)</th>
+                                    <th class="p-3 text-right border-r border-blue-800 w-32 text-blue-100">Preço m²</th>
+                                    <th class="p-3 text-right bg-slate-900 w-44">Subtotal Orçado</th>
+                                </tr>
+                            </thead>
+                            <tbody id="corpo-tabela-medicao" class="text-sm divide-y divide-slate-200"></tbody>
+                        </table>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-5 rounded-xl border border-slate-200">
+                        <div>
+                            <span class="block text-xs font-bold text-slate-400 uppercase tracking-wider">TOTAL CONTRATADO</span>
+                            <span id="tot-meta-reais" class="text-xl font-black text-slate-900">R$ 0,00</span>
+                        </div>
+                        <div class="border-t md:border-t-0 md:border-l border-slate-200 md:pl-6">
+                            <span class="block text-xs font-bold text-blue-600 uppercase tracking-wider">MEDIÇÃO DO MÊS SELECIONADO</span>
+                            <span id="tot-medido-reais" class="text-xl font-black text-blue-800">R$ 0,00</span>
+                        </div>
+                    </div>
+                    <div class="pt-16 grid grid-cols-2 gap-12 text-center text-xs text-slate-600 mt-12 border-t border-dashed border-slate-200">
+                        <div>
+                            <div class="w-full border-t border-slate-300 mx-auto max-w-xs mb-1.5"></div>
+                            <p class="font-bold text-slate-800">Responsável Técnico / Engenharia</p>
+                            <p class="text-[10px] text-slate-400 uppercase tracking-wider">Passold Sistemas de Fachada</p>
+                        </div>
+                        <div>
+                            <div class="w-full border-t border-slate-300 mx-auto max-w-xs mb-1.5"></div>
+                            <p class="font-bold text-slate-800">Fiscalização / Aprovação do Cliente</p>
+                            <p class="text-[10px] text-slate-400">Data: ____/____/_______</p>
+                        </div>
+                    </div>
+                </div>
+                <div id="aviso-selecao" class="text-center py-12 text-slate-400 text-sm">Selecione um Contrato e um Mês correspondente para abrir a folha operacional consolidada.</div>
+            </div>
+        </section>
+
+        <section id="aba-relatorios" class="space-y-6 hidden">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 border-b border-slate-200 pb-6 mb-6 items-end">
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Selecione o Contrato</label>
+                        <select id="select-obra-relatorios" onchange="configurarFiltrosPeriodo(); configurarFiltroServicosDashboard(); gerarDashboardsEComparativosGlobal();" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-600">
+                            <option value="">-- Escolha uma Obra --</option>
+                        </select>
+                    </div>
+                    <div class="no-print">
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Filtrar por Serviço</label>
+                        <select id="select-servico-dashboard" onchange="gerarDashboardsEComparativosGlobal();" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-600">
+                            <option value="">Todos os Serviços</option>
+                        </select>
+                    </div>
+                    <div class="no-print">
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Mês Inicial</label>
+                        <select id="select-mes-inicial" onchange="gerarDashboardsEComparativosGlobal();" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-600">
+                            <option value="">-- Selecione a Obra --</option>
+                        </select>
+                    </div>
+                    <div class="no-print">
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Mês Final</label>
+                        <select id="select-mes-final" onchange="gerarDashboardsEComparativosGlobal();" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-600">
+                            <option value="">-- Selecione a Obra --</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="painel-vazio-relatorios" class="text-center py-12 text-slate-400 text-sm">Selecione um contrato com históricos salvos para renderizar a evolução e matrizes gráficas.</div>
+                <div id="dashboard-visual" class="hidden grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div class="bg-slate-50 p-4 border border-slate-200 rounded-xl">
+                        <h4 class="text-xs font-bold text-slate-700 uppercase tracking-wider mb-4 text-center">Evolução Cronológica de Medições</h4>
+                        <div class="h-64 flex items-center justify-center"><canvas id="chartEvolucao"></canvas></div>
+                    </div>
+                    <div class="bg-slate-50 p-4 border border-slate-200 rounded-xl">
+                        <h4 id="titulo-grafico-distribuicao" class="text-xs font-bold text-slate-700 uppercase tracking-wider mb-4 text-center">Distribuição Física Financeira (%)</h4>
+                        <div class="h-64 flex items-center justify-center"><canvas id="chartDistribuicao"></canvas></div>
+                    </div>
+                </div>
+                <div id="painel-tabela-comparativa" class="hidden space-y-6">
+                    <h3 class="text-sm font-bold uppercase tracking-wider text-slate-900 border-l-4 border-blue-800 pl-2">Painel de Evolução Cronológica das Medições</h3>
+                    <div class="overflow-x-auto rounded-lg border border-slate-200">
+                        <table id="tabela-evolucao-global" class="w-full text-left border-collapse">
+                            <thead id="head-tabela-comparativa" class="bg-slate-800 text-white text-xs uppercase tracking-wider font-semibold"></thead>
+                            <tbody id="corpo-tabela-comparativa" class="text-sm divide-y divide-slate-200 bg-white"></tbody>
+                            <tfoot id="foot-tabela-comparativa" class="bg-slate-100 text-slate-900 font-bold border-t-2 border-slate-300 text-right"></tfoot>
+                        </table>
+                    </div>
+                    <div class="bg-slate-900 text-white p-5 rounded-xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                        <div class="space-y-1">
+                            <span class="block text-xs font-bold text-slate-400 uppercase tracking-wider">Dedução de Saldo Global</span>
+                            <div class="text-xs md:text-sm text-slate-300 flex flex-wrap gap-2 items-center">
+                                <span>Contrato Base: <strong id="calc-txt-contrato" class="text-white font-bold">R$ 0,00</strong></span>
+                                <span class="text-slate-600 font-bold">−</span>
+                                <span>Medido no Período: <strong id="calc-txt-medicoes" class="text-blue-400 font-bold">R$ 0,00</strong></span>
+                            </div>
+                        </div>
+                        <div class="bg-slate-800 px-6 py-3 rounded-lg border border-slate-700/60 flex flex-col items-start md:items-end min-w-[240px]">
+                            <span class="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">Saldo Remanescente Total</span>
+                            <span id="calc-txt-saldo-restante" class="text-xl md:text-2xl font-black text-cyan-400 tracking-tight">R$ 0,00</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        let OBRAS = JSON.parse(localStorage.getItem('passold_medicao_v1')) || [];
+        let chartLineInstance = null;
+        let chartPieInstance = null;
+
+        function mudarAba(idAba) {
+            ['aba-cadastro','aba-servicos','aba-medicao','aba-relatorios'].forEach(id => document.getElementById(id).classList.add('hidden'));
+            ['btn-cadastro','btn-servicos','btn-medicao','btn-relatorios'].forEach(id => document.getElementById(id).classList.remove('tab-active'));
+            document.getElementById(idAba).classList.remove('hidden');
+            const btnMap = {'aba-cadastro':'btn-cadastro','aba-servicos':'btn-servicos','aba-medicao':'btn-medicao','aba-relatorios':'btn-relatorios'};
+            document.getElementById(btnMap[idAba]).classList.add('tab-active');
+            if(idAba==='aba-cadastro') renderizarCardsObras();
+            if(idAba==='aba-servicos'){atualizarSelectObras('select-obra-servicos');selecionarObraServicos();}
+            if(idAba==='aba-medicao'){atualizarSelectObras('select-obra-medicao');configuterFiltrosMesesMedicaoPadrao();}
+            if(idAba==='aba-relatorios'){atualizarSelectObras('select-obra-relatorios');configurarFiltrosPeriodo();configurarFiltroServicosDashboard();gerarDashboardsEComparativosGlobal();}
+        }
+
+        function salvarObraBase() {
+            const nome = document.getElementById('cad-nome-obra').value.trim();
+            const valorM2Geral = parseFloat(document.getElementById('cad-valor-m2').value)||0;
+            const metragemGeral = parseFloat(document.getElementById('cad-metragem-geral').value)||0;
+            if(!nome||valorM2Geral<=0||metragemGeral<=0) return alert("Preencha todas as especificações da obra.");
+            OBRAS.push({id:'obra_'+Date.now(),nome,valorM2Global:valorM2Geral,metragemGeral,servicos:[],historicoMedicoes:{}});
+            salvarDados();
+            document.getElementById('cad-nome-obra').value='';
+            document.getElementById('cad-valor-m2').value='';
+            document.getElementById('cad-metragem-geral').value='';
+            renderizarCardsObras();
+        }
+
+        function renderizarCardsObras() {
+            const container = document.getElementById('grid-obras');
+            container.innerHTML='';
+            if(OBRAS.length===0){container.innerHTML='<p class="text-sm text-slate-400 col-span-3">Nenhum contrato arquivado.</p>';return;}
+            OBRAS.forEach(obra=>{
+                const total=obra.valorM2Global*obra.metragemGeral;
+                const card=document.createElement('div');
+                card.className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between shadow-xs";
+                card.innerHTML=`<div><h4 class="font-bold text-slate-900 text-base mb-2 border-b border-slate-100 pb-1">${obra.nome}</h4><div class="text-xs text-slate-600 space-y-1.5"><div class="flex justify-between"><span>Metragem Geral:</span><strong>${obra.metragemGeral.toFixed(2)} m²</strong></div><div class="flex justify-between"><span>Valor Limite m²:</span><strong>R$ ${obra.valorM2Global.toFixed(2)}</strong></div><div class="flex justify-between border-t border-slate-100 pt-1.5 font-bold text-blue-800 text-xs uppercase"><span>TOTAL CONTRATADO:</span><span>${total.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</span></div></div></div><div class="mt-4 flex justify-end border-t border-slate-50 pt-2"><button onclick="excluirObra('${obra.id}')" class="text-[11px] font-bold uppercase tracking-wider text-red-500 hover:text-red-700 cursor-pointer">✕ Excluir</button></div>`;
+                container.appendChild(card);
+            });
+        }
+
+        function excluirObra(id){if(confirm("Deseja deletar permanentemente esta obra?")){OBRAS=OBRAS.filter(o=>o.id!==id);salvarDados();renderizarCardsObras();}}
+        function atualizarSelectObras(selectId){const s=document.getElementById(selectId);const a=s.value;s.innerHTML='<option value="">-- Escolha uma Obra --</option>';OBRAS.forEach(o=>{s.innerHTML+=`<option value="${o.id}">${o.nome}</option>`;});s.value=a;}
+
+        function selecionarObraServicos(){
+            const idObra=document.getElementById('select-obra-servicos').value;
+            const container=document.getElementById('container-lista-servicos');
+            const infoTeto=document.getElementById('info-teto-obra-ativa');
+            container.innerHTML='';infoTeto.innerText='';
+            if(!idObra){document.getElementById('btn-novo-servico').classList.add('hidden');document.getElementById('btn-salvar-servicos').classList.add('hidden');document.getElementById('aviso-selecao-servicos').classList.remove('hidden');return;}
+            document.getElementById('btn-novo-servico').classList.remove('hidden');document.getElementById('btn-salvar-servicos').classList.remove('hidden');document.getElementById('aviso-selecao-servicos').classList.add('hidden');
+            const obra=OBRAS.find(o=>o.id===idObra);
+            infoTeto.innerHTML=`Teto Obra Base: <strong class="text-blue-800">R$ ${obra.valorM2Global.toFixed(2)}</strong>`;
+            if(obra.servicos&&obra.servicos.length>0){obra.servicos.forEach(srv=>criarCardServicoDOM(srv));}else{criarCardServicoDOM();}
+            recalcularTudoServicosTab();
+        }
+
+        function criarCardServicoDOM(dadosSrv=null){
+            const container=document.getElementById('container-lista-servicos');
+            const srvDiv=document.createElement('div');
+            srvDiv.className="bg-slate-50/70 p-5 rounded-xl border border-slate-200 space-y-4 card-servico-item";
+            srvDiv.dataset.srvId=dadosSrv?dadosSrv.id:'srv_'+Math.random().toString(36).substr(2,5);
+            srvDiv.innerHTML=`<div class="grid grid-cols-1 md:grid-cols-3 gap-4 border-b border-slate-200 pb-4 items-end"><div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Nome do Serviço</label><input type="text" value="${dadosSrv?dadosSrv.nome:''}" placeholder="Ex: Pintura" class="w-full bg-white border border-slate-200 rounded-lg p-2 text-sm font-semibold text-slate-800 input-nome-servico outline-none focus:ring-2 focus:ring-blue-600"></div><div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Valor m² Próprio do Serviço (R$)</label><input type="number" value="${dadosSrv?dadosSrv.valorM2Servico:''}" oninput="recalcularTudoServicosTab()" class="w-full bg-white border border-slate-200 rounded-lg p-2 text-sm font-bold text-blue-900 input-val-m2-servico outline-none focus:ring-2 focus:ring-blue-600"></div><div class="flex justify-end"><button onclick="this.closest('.card-servico-item').remove();recalcularTudoServicosTab();" class="text-red-500 hover:text-red-700 text-xs font-bold uppercase tracking-wide cursor-pointer mb-2">✕ Remover Serviço</button></div></div><div><div class="overflow-x-auto rounded-lg border border-slate-200"><table class="w-full text-left border-collapse text-sm bg-white"><thead><tr class="bg-slate-200/60 text-xs text-slate-600 uppercase border-b border-slate-300 font-bold"><th class="p-2">Nome da Subdivisão</th><th class="p-2 w-32 text-right">Metragem (m²)</th><th class="p-2 w-28 text-right">% da Subdivisão</th><th class="p-2 w-32 text-right text-blue-800">R$/m² Local</th><th class="p-2 w-36 text-right text-slate-900">Subtotal Orçado</th><th class="p-2 w-12 text-center">Ação</th></tr></thead><tbody class="container-subdivisoes divide-y divide-slate-200"></tbody></table></div><button onclick="adicionarLinhaSubdivisaoDOM(this.closest('.card-servico-item').querySelector('.container-subdivisoes'))" class="mt-3 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold uppercase tracking-wider px-3 py-1.5 border border-slate-300 rounded shadow-xs cursor-pointer">+ Adicionar Linha de Subdivisão</button></div>`;
+            container.appendChild(srvDiv);
+            const tbody=srvDiv.querySelector('.container-subdivisoes');
+            if(dadosSrv&&dadosSrv.subdivisoes){dadosSrv.subdivisoes.forEach(sub=>adicionarLinhaSubdivisaoDOM(tbody,sub));}else{adicionarLinhaSubdivisaoDOM(tbody);}
+        }
+
+        function adicionarLinhaSubdivisaoDOM(tbody,dadosSub=null){
+            const tr=document.createElement('tr');
+            tr.className="linha-subdivisao-item";
+            tr.dataset.subId=dadosSub?dadosSub.id:'sub_'+Math.random().toString(36).substr(2,5);
+            tr.innerHTML=`<td class="p-2"><input type="text" value="${dadosSub?dadosSub.nome:''}" class="w-full bg-white border border-slate-200 rounded p-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-600 input-sub-nome"></td><td class="p-2"><input type="number" value="${dadosSub?dadosSub.m2:''}" oninput="recalcularTudoServicosTab()" class="w-full bg-white border border-slate-200 rounded p-1.5 text-xs text-right input-sub-m2 focus:ring-1 focus:ring-blue-600"></td><td class="p-2"><input type="number" value="${dadosSub?dadosSub.percentual:''}" oninput="recalcularTudoServicosTab()" class="w-full bg-white border border-slate-200 rounded p-1.5 text-xs text-right input-sub-pct focus:ring-1 focus:ring-blue-600"></td><td class="p-2 text-right text-blue-800 font-bold text-xs pr-3 span-sub-val-m2">R$ 0,00</td><td class="p-2 text-right text-slate-900 font-black text-xs pr-3 span-sub-total">R$ 0,00</td><td class="p-2 text-center"><button onclick="this.closest('tr').remove();recalcularTudoServicosTab();" class="text-red-500 font-black text-lg hover:text-red-700">&times;</button></td>`;
+            tbody.appendChild(tr);
+            recalcularTudoServicosTab();
+        }
+
+        function recalcularTudoServicosTab(){
+            const idObra=document.getElementById('select-obra-servicos').value;
+            if(!idObra)return;
+            const obra=OBRAS.find(o=>o.id===idObra);
+            const valM2TetoObra=obra.valorM2Global;
+            document.querySelectorAll('.card-servico-item').forEach(card=>{
+                const inputValM2Servico=card.querySelector('.input-val-m2-servico');
+                let valM2Servico=parseFloat(inputValM2Servico.value)||0;
+                if(valM2Servico>valM2TetoObra){inputValM2Servico.classList.add('border-red-500','bg-red-50','text-red-700');valM2Servico=valM2TetoObra;}
+                else{inputValM2Servico.classList.remove('border-red-500','bg-red-50','text-red-700');}
+                card.querySelectorAll('.linha-subdivisao-item').forEach(tr=>{
+                    const m2=parseFloat(tr.querySelector('.input-sub-m2').value)||0;
+                    const pct=parseFloat(tr.querySelector('.input-sub-pct').value)||0;
+                    const valM2CalcSub=valM2Servico*(pct/100);
+                    const totalCalcSub=m2*valM2CalcSub;
+                    tr.querySelector('.span-sub-val-m2').innerText=valM2CalcSub.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+                    tr.querySelector('.span-sub-total').innerText=totalCalcSub.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+                });
+            });
+        }
+
+        function salvarServicosObra(){
+            const idObra=document.getElementById('select-obra-servicos').value;
+            const periodoReferencia=document.getElementById('mes-servicos-referencia').value;
+            if(!idObra||!periodoReferencia)return alert("Selecione a Obra Alvo e preencha o Período de Referência.");
+            const idxObra=OBRAS.findIndex(o=>o.id===idObra);
+            let novosServicos=[];let valido=true;let totalMedidoCalculadoSrv=0;
+            document.querySelectorAll('.card-servico-item').forEach(card=>{
+                const nomeServico=card.querySelector('.input-nome-servico').value.trim();
+                const valorM2Servico=parseFloat(card.querySelector('.input-val-m2-servico').value)||0;
+                if(!nomeServico||valorM2Servico<=0)valido=false;
+                let subdivisoes=[];
+                card.querySelectorAll('.linha-subdivisao-item').forEach(lin=>{
+                    const subM2=parseFloat(lin.querySelector('.input-sub-m2').value)||0;
+                    const subPct=parseFloat(lin.querySelector('.input-sub-pct').value)||0;
+                    subdivisoes.push({id:lin.dataset.subId,nome:lin.querySelector('.input-sub-nome').value.trim(),m2:subM2,percentual:subPct});
+                    totalMedidoCalculadoSrv+=(subM2*(valorM2Servico*(subPct/100)));
+                });
+                novosServicos.push({id:card.dataset.srvId,nome:nomeServico,valorM2Servico,subdivisoes});
+            });
+            if(!valido)return alert("Verifique as informações dos serviços e valores.");
+            OBRAS[idxObra].servicos=novosServicos;
+            if(!OBRAS[idxObra].historicoMedicoes)OBRAS[idxObra].historicoMedicoes={};
+            OBRAS[idxObra].historicoMedicoes[periodoReferencia]={totalMedidoMesa:totalMedidoCalculadoSrv,snapshotServicos:JSON.parse(JSON.stringify(novosServicos))};
+            salvarDados();
+            alert(`Medição do mês (${periodoReferencia.split('-')[1]}/${periodoReferencia.split('-')[0]}) salva com sucesso!`);
+            document.getElementById('select-obra-medicao').value=idObra;
+            configurarFiltrosMesesMedicao(periodoReferencia);
+            mudarAba('aba-medicao');
+        }
+
+        function configuterFiltrosMesesMedicaoPadrao(){configurarFiltrosMesesMedicao();carregarPlanilhaMedicao();}
+
+        function configurarFiltrosMesesMedicao(mesSelecionarForcado=null){
+            const idObra=document.getElementById('select-obra-medicao').value;
+            const selectMes=document.getElementById('select-mes-medicao-historico');
+            const valorAtual=selectMes.value;
+            selectMes.innerHTML='';
+            if(!idObra){selectMes.innerHTML='<option value="">-- Selecione uma Obra Primeiro --</option>';return;}
+            const obra=OBRAS.find(o=>o.id===idObra);
+            if(obra.historicoMedicoes&&Object.keys(obra.historicoMedicoes).length>0){
+                const mesesSorted=Object.keys(obra.historicoMedicoes).sort();
+                mesesSorted.forEach(m=>{const[ano,mes]=m.split('-');selectMes.innerHTML+=`<option value="${m}">${mes}/${ano}</option>`;});
+                if(mesSelecionarForcado&&mesesSorted.includes(mesSelecionarForcado)){selectMes.value=mesSelecionarForcado;}
+                else if(mesesSorted.includes(valorAtual)){selectMes.value=valorAtual;}
+                else{selectMes.value=mesesSorted[mesesSorted.length-1];}
+            }else{selectMes.innerHTML='<option value="">Sem históricos salvos nesta obra</option>';}
+        }
+
+        function carregarPlanilhaMedicao(){
+            const idObra=document.getElementById('select-obra-medicao').value;
+            const mesSelecionado=document.getElementById('select-mes-medicao-historico').value;
+            if(!idObra||!mesSelecionado){document.getElementById('painel-calculos').classList.add('hidden');document.getElementById('aviso-selecao').classList.remove('hidden');return;}
+            document.getElementById('painel-calculos').classList.remove('hidden');document.getElementById('aviso-selecao').classList.add('hidden');
+            const obra=OBRAS.find(o=>o.id===idObra);
+            const corpo=document.getElementById('corpo-tabela-medicao');corpo.innerHTML='';
+            const totalContratado=(obra.valorM2Global||0)*(obra.metragemGeral||0);
+            const historicoDoMes=obra.historicoMedicoes[mesSelecionado];
+            const listaServicosExibir=historicoDoMes?historicoDoMes.snapshotServicos:[];
+            let medicaoDoMesAcumulada=historicoDoMes?historicoDoMes.totalMedidoMesa:0;
+            if(listaServicosExibir.length===0){corpo.innerHTML='<tr><td colspan="5" class="p-4 text-center text-slate-400">Nenhum registro encontrado.</td></tr>';document.getElementById('tot-meta-reais').innerText=totalContratado.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});document.getElementById('tot-medido-reais').innerText="R$ 0,00";return;}
+            listaServicosExibir.forEach(servico=>{
+                const qtdSubdivisoes=servico.subdivisoes.length;
+                servico.subdivisoes.forEach((sub,index)=>{
+                    const precoM2Sub=servico.valorM2Servico*(sub.percentual/100);
+                    const subtotalOrcadoSubdivisao=sub.m2*precoM2Sub;
+                    const tr=document.createElement('tr');
+                    tr.className="bg-white border-b border-slate-200";
+                    let tdServicoHtml=index===0?`<td rowspan="${qtdSubdivisoes}" class="p-3 border-r border-slate-200 align-middle font-bold text-slate-900 bg-white">${servico.nome}</td>`:'';
+                    tr.innerHTML=`${tdServicoHtml}<td class="p-3 border-r border-slate-200 text-slate-700"><span class="block text-xs font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded w-max">${sub.nome} (${sub.percentual}%)</span></td><td class="p-3 text-right font-bold text-slate-700 bg-slate-50/50 border-r border-slate-200">${sub.m2.toFixed(2)} m²</td><td class="p-3 text-right border-r border-slate-200 text-slate-500 font-medium">R$ ${precoM2Sub.toFixed(2)}</td><td class="p-3 text-right font-bold text-slate-950">${subtotalOrcadoSubdivisao.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</td>`;
+                    corpo.appendChild(tr);
+                });
+            });
+            document.getElementById('tot-meta-reais').innerText=totalContratado.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+            document.getElementById('tot-medido-reais').innerText=medicaoDoMesAcumulada.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+        }
+
+        function configurarFiltrosPeriodo(){
+            const idObra=document.getElementById('select-obra-relatorios').value;
+            const sI=document.getElementById('select-mes-inicial');const sF=document.getElementById('select-mes-final');
+            sI.innerHTML='';sF.innerHTML='';
+            if(!idObra){sI.innerHTML='<option value="">-- Selecione a Obra --</option>';sF.innerHTML='<option value="">-- Selecione a Obra --</option>';return;}
+            const obra=OBRAS.find(o=>o.id===idObra);
+            const meses=Object.keys(obra.historicoMedicoes||{}).sort();
+            if(meses.length===0){sI.innerHTML='<option value="">Sem históricos</option>';sF.innerHTML='<option value="">Sem históricos</option>';return;}
+            meses.forEach(m=>{const[ano,mes]=m.split('-');sI.innerHTML+=`<option value="${m}">${mes}/${ano}</option>`;sF.innerHTML+=`<option value="${m}">${mes}/${ano}</option>`;});
+            sI.value=meses[0];sF.value=meses[meses.length-1];
+        }
+
+        function configurarFiltroServicosDashboard(){
+            const idObra=document.getElementById('select-obra-relatorios').value;
+            const s=document.getElementById('select-servico-dashboard');
+            s.innerHTML='<option value="">Todos os Serviços</option>';
+            if(!idObra)return;
+            const obra=OBRAS.find(o=>o.id===idObra);
+            if(obra&&obra.servicos)obra.servicos.forEach(sv=>{s.innerHTML+=`<option value="${sv.nome}">${sv.nome}</option>`;});
+        }
+
+        function gerarDashboardsEComparativosGlobal(){
+            const idObra=document.getElementById('select-obra-relatorios').value;
+            const servicoFiltrado=document.getElementById('select-servico-dashboard').value;
+            const painelVazio=document.getElementById('painel-vazio-relatorios');
+            const dashVisual=document.getElementById('dashboard-visual');
+            const painelTabela=document.getElementById('painel-tabela-comparativa');
+            if(!idObra){painelVazio.classList.remove('hidden');dashVisual.classList.add('hidden');painelTabela.classList.add('hidden');return;}
+            const obra=OBRAS.find(o=>o.id===idObra);
+            const todosMeses=Object.keys(obra.historicoMedicoes||{}).sort();
+            if(todosMeses.length===0){painelVazio.innerHTML="Esta obra ainda não possui históricos de medições gravados.";painelVazio.classList.remove('hidden');dashVisual.classList.add('hidden');painelTabela.classList.add('hidden');return;}
+            const mesInicial=document.getElementById('select-mes-inicial').value;
+            const mesFinal=document.getElementById('select-mes-final').value;
+            let mesesDisponiveis=todosMeses.filter(m=>m>=mesInicial&&m<=mesFinal);
+            if(mesesDisponiveis.length===0){painelVazio.innerHTML="Nenhum registro encontrado para o intervalo selecionado.";painelVazio.classList.remove('hidden');dashVisual.classList.add('hidden');painelTabela.classList.add('hidden');return;}
+            painelVazio.classList.add('hidden');dashVisual.classList.remove('hidden');painelTabela.classList.remove('hidden');
+            const thead=document.getElementById('head-tabela-comparativa');
+            let headerHtml=`<tr><th class="p-3 border-r border-slate-600">Serviço</th><th class="p-3 border-r border-slate-600">Subdivisão</th>`;
+            mesesDisponiveis.forEach(m=>{const[ano,mes]=m.split('-');headerHtml+=`<th class="p-3 text-right border-r border-slate-600 bg-blue-900/90">${mes}/${ano}</th>`;});
+            headerHtml+=`<th class="p-3 text-right bg-emerald-900 text-white">Acumulado Período</th></tr>`;
+            thead.innerHTML=headerHtml;
+            let chavesUnicas=new Set();let mapeamentoLinhas={};
+            obra.servicos.forEach(s=>{
+                if(servicoFiltrado&&s.nome!==servicoFiltrado)return;
+                s.subdivisoes.forEach(sub=>{const chave=`${s.nome}|||${sub.nome}`;chavesUnicas.add(chave);mapeamentoLinhas[chave]={servicoNome:s.nome,subdivisaoNome:sub.nome,valoresMensais:{}};});
+            });
+            mesesDisponiveis.forEach(m=>{
+                const snapshot=obra.historicoMedicoes[m].snapshotServicos||[];
+                snapshot.forEach(s=>{
+                    if(servicoFiltrado&&s.nome!==servicoFiltrado)return;
+                    s.subdivisoes.forEach(sub=>{
+                        const chave=`${s.nome}|||${sub.nome}`;
+                        chavesUnicas.add(chave);
+                        const precoM2Sub=s.valorM2Servico*(sub.percentual/100);
+                        const valorMedidoNoMes=sub.m2*precoM2Sub;
+                        if(!mapeamentoLinhas[chave])mapeamentoLinhas[chave]={servicoNome:s.nome,subdivisaoNome:sub.nome,valoresMensais:{}};
+                        mapeamentoLinhas[chave].valoresMensais[m]=valorMedidoNoMes;
+                    });
+                });
+            });
+            const corpo=document.getElementById('corpo-tabela-comparativa');corpo.innerHTML='';
+            const chavesOrdenadas=Array.from(chavesUnicas).sort();
+            let contagemServicos={};chavesOrdenadas.forEach(ch=>{const sNome=mapeamentoLinhas[ch].servicoNome;contagemServicos[sNome]=(contagemServicos[sNome]||0)+1;});
+            let servicosRenderizados={};let totaisColunasMensais={};mesesDisponiveis.forEach(m=>totaisColunasMensais[m]=0);let totalGeralAcumulado=0;
+            chavesOrdenadas.forEach(chave=>{
+                const item=mapeamentoLinhas[chave];
+                const tr=document.createElement('tr');tr.className="bg-white hover:bg-slate-50 border-b border-slate-100";
+                let tdServicoHtml='';
+                if(!servicosRenderizados[item.servicoNome]){const totalLinhas=contagemServicos[item.servicoNome];tdServicoHtml=`<td rowspan="${totalLinhas}" class="p-3 border-r border-slate-200 align-middle font-bold text-slate-900 bg-white">${item.servicoNome}</td>`;servicosRenderizados[item.servicoNome]=true;}
+                let acumuladoLinha=0;let colunasMesesHtml='';
+                mesesDisponiveis.forEach(m=>{const valMes=item.valoresMensais[m]||0;acumuladoLinha+=valMes;totaisColunasMensais[m]+=valMes;colunasMesesHtml+=`<td class="p-3 text-right border-r border-slate-200 font-semibold text-slate-600">${valMes>0?valMes.toLocaleString('pt-BR',{style:'currency',currency:'BRL'}):'−'}</td>`;});
+                totalGeralAcumulado+=acumuladoLinha;
+                tr.innerHTML=`${tdServicoHtml}<td class="p-3 font-medium border-r border-slate-200 text-slate-700">${item.subdivisaoNome}</td>${colunasMesesHtml}<td class="p-3 text-right font-bold bg-emerald-50 text-emerald-800">${acumuladoLinha.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</td>`;
+                corpo.appendChild(tr);
+            });
+            const tfoot=document.getElementById('foot-tabela-comparativa');
+            let footHtml=`<tr class="bg-slate-200 font-black text-slate-950"><td colspan="2" class="p-3 border-r border-slate-300 uppercase tracking-wider text-left text-xs">Totalização do Período:</td>`;
+            mesesDisponiveis.forEach(m=>{footHtml+=`<td class="p-3 border-r border-slate-300 text-right text-blue-950 bg-blue-100/60">${totaisColunasMensais[m].toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</td>`;});
+            footHtml+=`<td class="p-3 text-right bg-emerald-200 text-emerald-950">${totalGeralAcumulado.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</td></tr>`;
+            tfoot.innerHTML=footHtml;
+            const totalContratadoGlobal=obra.valorM2Global*obra.metragemGeral;
+            let totalMedidoAcumuladoTudo=0;
+            Object.keys(obra.historicoMedicoes).forEach(mesKey=>{let snapshot=obra.historicoMedicoes[mesKey].snapshotServicos||[];snapshot.forEach(s=>{s.subdivisoes.forEach(sub=>{totalMedidoAcumuladoTudo+=sub.m2*(s.valorM2Servico*(sub.percentual/100));});});});
+            document.getElementById('calc-txt-contrato').innerText=totalContratadoGlobal.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+            document.getElementById('calc-txt-medicoes').innerText=totalGeralAcumulado.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+            document.getElementById('calc-txt-saldo-restante').innerText=(totalContratadoGlobal-totalMedidoAcumuladoTudo).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+            renderizarGraficosObra(obra,mesesDisponiveis,servicoFiltrado);
+        }
+
+        function renderizarGraficosObra(obra,mesesFiltrados,servicoFiltrado=""){
+            const valoresHistorico=mesesFiltrados.map(m=>{
+                if(!servicoFiltrado)return obra.historicoMedicoes[m].totalMedidoMesa;
+                let totalMesSrv=0;
+                const snapshot=obra.historicoMedicoes[m].snapshotServicos||[];
+                snapshot.forEach(s=>{if(s.nome===servicoFiltrado){s.subdivisoes.forEach(sub=>{totalMesSrv+=sub.m2*(s.valorM2Servico*(sub.percentual/100));});}});
+                return totalMesSrv;
+            });
+            const labelsMesesFormatados=mesesFiltrados.map(m=>`${m.split('-')[1]}/${m.split('-')[0]}`);
+            if(chartLineInstance)chartLineInstance.destroy();
+            const ctxLine=document.getElementById('chartEvolucao').getContext('2d');
+            chartLineInstance=new Chart(ctxLine,{type:'line',data:{labels:labelsMesesFormatados,datasets:[{label:servicoFiltrado?`${servicoFiltrado} (R$)`:'Produção do Mês (R$)',data:valoresHistorico,borderColor:'#1e3a8a',backgroundColor:'rgba(30,58,138,0.08)',borderWidth:3,fill:true,tension:0.25}]},options:{responsive:true,maintainAspectRatio:false}});
+            let servicosLabels=[];let servicosValores=[];
+            const tituloGrafico=document.getElementById('titulo-grafico-distribuicao');
+            if(!servicoFiltrado){
+                tituloGrafico.innerText="Distribuição Física Financeira por Serviço (%)";
+                obra.servicos.forEach(s=>{
+                    servicosLabels.push(s.nome);let totalAcumuladoServico=0;
+                    mesesFiltrados.forEach(m=>{if(obra.historicoMedicoes[m]&&obra.historicoMedicoes[m].snapshotServicos){const srvM=obra.historicoMedicoes[m].snapshotServicos.find(srv=>srv.nome===s.nome||srv.id===s.id);if(srvM){srvM.subdivisoes.forEach(subM=>{const precoM2Sub=srvM.valorM2Servico*(subM.percentual/100);totalAcumuladoServico+=subM.m2*precoM2Sub;});}}});
+                    servicosValores.push(totalAcumuladoServico);
+                });
+            }else{
+                tituloGrafico.innerText=`Distribuição por Etapas: ${servicoFiltrado} (%)`;
+                const srvBase=obra.servicos.find(s=>s.nome===servicoFiltrado);
+                if(srvBase){srvBase.subdivisoes.forEach(sub=>{servicosLabels.push(sub.nome);let totalAcumuladoSub=0;mesesFiltrados.forEach(m=>{if(obra.historicoMedicoes[m]&&obra.historicoMedicoes[m].snapshotServicos){const srvM=obra.historicoMedicoes[m].snapshotServicos.find(srv=>srv.nome===servicoFiltrado);if(srvM){const subM=srvM.subdivisoes.find(sb=>sb.nome===sub.nome);if(subM){totalAcumuladoSub+=subM.m2*(srvM.valorM2Servico*(subM.percentual/100));}}}});servicosValores.push(totalAcumuladoSub);});}
+            }
+            if(chartPieInstance)chartPieInstance.destroy();
+            const ctxPie=document.getElementById('chartDistribuicao').getContext('2d');
+            chartPieInstance=new Chart(ctxPie,{type:'doughnut',data:{labels:servicosLabels,datasets:[{data:servicosValores,backgroundColor:['#1e293b','#1e3a8a','#0284c7','#0d9488','#b45309','#475569','#312e81']}]},options:{responsive:true,maintainAspectRatio:false}});
+        }
+
+        function salvarDados(){localStorage.setItem('passold_medicao_v1',JSON.stringify(OBRAS));}
+        window.onload=function(){renderizarCardsObras();};
+    </script>
+</body>
+</html>
+            """, height=900, scrolling=True)
 
     # ==================================================
     # CONFIGURACOES
@@ -1842,7 +2374,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 with st.form("form_user"):
                     nu = st.text_input("Login:").lower().strip()
                     nn = st.text_input("Nome:")
-                    ns = st.selectbox("Setor:", ["Producao", "Engenharia", "Diretoria", "Logistica", "Almoxarifado", "Master"])
+                    ns = st.selectbox("Setor:", ["Producao", "Engenharia", "Diretoria", "Logistica", "Almoxarifado", "Medicao", "Master"])                   
                     np = st.text_input("Senha:", type="password")
                     if st.form_submit_button("Salvar"):
                         if not all([nu, nn, np]):
