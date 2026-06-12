@@ -1300,12 +1300,26 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         Lotes=('id', 'count'),
                         Caixas=('Qtd_Caixas', 'sum'),
                         M2=('M2_Item', 'sum'),
-                        Evolucao=('Status_Item', lambda x: f"{(x == 'Concluido').sum() / len(x) * 100:.0f}% concluido")
+                        Pendentes=('Status_Item',  lambda x: (x == 'Pendente').sum()),
+                        Liberados=('Status_Item',  lambda x: (x == 'Liberado para Fabrica').sum()),
+                        Concluidos=('Status_Item', lambda x: (x == 'Concluido').sum()),
                     ).reset_index().sort_values(['Ano_Semana', 'Num_Semana'])
-                    res.columns = ['Ano', 'Sem', 'Periodo', 'Obra', 'Lotes', 'Caixas', 'Volume (m²)', 'Evolucao']
+                    res.columns = ['Ano', 'Sem', 'Periodo', 'Obra', 'Lotes', 'Caixas', 'Volume (m²)', 'Pendentes', 'Liberados', 'Concluídos']
+
+                    def colorir_linha(row):
+                        if row['Concluídos'] == row['Lotes']:
+                            cor = 'background-color:#F0FDF4;color:#15803D'   # verde — tudo concluído
+                        elif row['Liberados'] > 0:
+                            cor = 'background-color:#EFF6FF;color:#1D4ED8'   # azul — tem liberado
+                        else:
+                            cor = 'background-color:#FFFBEB;color:#92400E'   # amarelo — só pendente
+                        return [cor] * len(row)
+
                     st.dataframe(
-                        res[['Periodo', 'Obra', 'Lotes', 'Caixas', 'Volume (m²)', 'Evolucao']],
-                        hide_index=True, use_container_width=True
+                        res[['Periodo', 'Obra', 'Lotes', 'Caixas', 'Volume (m²)', 'Pendentes', 'Liberados', 'Concluídos']]
+                        .style.apply(colorir_linha, axis=1),
+                        hide_index=True,
+                        use_container_width=True
                     )
                 else:
                     st.warning("Nenhuma OP liberada ainda.")
