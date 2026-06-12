@@ -589,7 +589,7 @@ if not st.session_state.autenticado:
 # ========================================================
 ch1, ch2 = st.columns([4, 1])
 with ch1:
-    st.title("Passold — PCP Inteligente")
+    st.title("Passold Sistemas de Fachadas - Gestão Industrial")
     st.caption(f"Usuário: **{st.session_state.usuario_nome}** | Setor: `{st.session_state.usuario_setor}`")
 with ch2:
     st.write("")
