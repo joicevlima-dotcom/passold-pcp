@@ -172,6 +172,23 @@ def inicializar_banco_de_dados():
             Confirmado_Em TEXT
         )
     """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS componentes_op (
+            id SERIAL PRIMARY KEY,
+            item_id INTEGER,
+            Obra_Vinculada TEXT,
+            Cod_Lote TEXT,
+            Num_OP TEXT,
+            Nome_Componente TEXT,
+            Quantidade REAL,
+            Unidade TEXT,
+            Status_Item TEXT DEFAULT 'Aguardando Conferencia',
+            Observacao TEXT,
+            Conferido_Por TEXT,
+            Conferido_Em TEXT
+        )
+    """)
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
         cursor.execute(
@@ -451,6 +468,47 @@ def resetar_banco_dados_completo():
     conn.commit()
     conn.close()
 
+def salvar_componentes(item_id, obra, cod_lote, num_op, componentes: list):
+    conn = conectar_banco()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM componentes_op WHERE item_id=%s", (item_id,))
+    for c in componentes:
+        cursor.execute("""
+            INSERT INTO componentes_op
+            (item_id, Obra_Vinculada, Cod_Lote, Num_OP, Nome_Componente, Quantidade, Unidade,
+             Status_Item, Observacao)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,'Aguardando Conferencia',NULL)
+        """, (item_id, obra, cod_lote, num_op, c['nome'], c['qtd'], c['unidade']))
+    conn.commit()
+    conn.close()
+
+def carregar_componentes_op(item_id):
+    conn = conectar_banco()
+    df = pd.read_sql_query("SELECT * FROM componentes_op WHERE item_id=%s ORDER BY id", conn, params=(item_id,))
+    conn.close()
+    return df
+
+def carregar_todas_ops_com_componentes():
+    conn = conectar_banco()
+    df = pd.read_sql_query("""
+        SELECT DISTINCT item_id, Obra_Vinculada, Cod_Lote, Num_OP
+        FROM componentes_op
+        ORDER BY Obra_Vinculada, Cod_Lote
+    """, conn)
+    conn.close()
+    return df
+
+def atualizar_componente(comp_id, status, obs, usuario):
+    conn = conectar_banco()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE componentes_op
+        SET Status_Item=%s, Observacao=%s, Conferido_Por=%s, Conferido_Em=%s
+        WHERE id=%s
+    """, (status, obs, usuario, datetime.now().strftime('%d/%m/%Y %H:%M'), comp_id))
+    conn.commit()
+    conn.close()
+
 # ========================================================
 # HELPER — BLOCOS SEMANAIS (reutilizável)
 # ========================================================
@@ -564,6 +622,8 @@ if setor in ["Master", "Engenharia"]:
     abas_disponiveis.append("Painel de Engenharia")
 if setor in ["Master", "Logistica"]:
     abas_disponiveis.append("Logistica")
+if setor in ["Master", "Almoxarifado"]:
+    abas_disponiveis.append("Almoxarifado")
 if setor in ["Master"]:
     abas_disponiveis.append("Configuracoes")
 
@@ -884,7 +944,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 st.session_state.tv_last_refresh = time.time()
                 st.rerun()
 
-    # ==================================================
+# ==================================================
     # LIBERAR OPS
     # ==================================================
     elif nome_aba == "Liberar OPs da Semana":
@@ -922,6 +982,67 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             st.warning("Selecione pelo menos um item.")
                 else:
                     st.success("Todos os lotes ja foram liberados.")
+
+                # ------------------------------------------------
+                # INSERIR COMPONENTES POR OP
+                # ------------------------------------------------
+                st.markdown("---")
+                st.markdown("### 📦 Inserir Componentes por OP")
+                st.caption("Selecione uma OP já liberada e insira a lista de componentes para o almoxarifado.")
+
+                df_lib_ops = df_banco_micro[
+                    (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
+                    (df_banco_micro['Status_Item'] == "Liberado para Fabrica")
+                ].copy() if not df_banco_micro.empty else pd.DataFrame()
+
+                if not df_lib_ops.empty:
+                    opcoes_ops = [
+                        f"{row['Num_OP']} — {row['Cod_Lote']} | {row['Tipo_Material']}"
+                        for _, row in df_lib_ops.iterrows()
+                        if row.get('Num_OP')
+                    ]
+                    if opcoes_ops:
+                        op_sel = st.selectbox("OP:", opcoes_ops, key="sel_op_comp")
+                        row_op = df_lib_ops[df_lib_ops['Num_OP'] == op_sel.split(" — ")[0].strip()].iloc[0]
+
+                        comp_existentes = carregar_componentes_op(int(row_op['id']))
+                        if not comp_existentes.empty:
+                            st.success(f"✅ {len(comp_existentes)} componente(s) já cadastrado(s) para esta OP.")
+
+                        with st.expander("➕ Adicionar / Substituir lista de componentes", expanded=comp_existentes.empty):
+                            st.caption("⚠️ Salvar substitui a lista anterior desta OP.")
+                            num_itens = st.number_input("Quantos componentes?", min_value=1, max_value=30, value=3, key="num_comp")
+                            componentes_input = []
+                            for idx in range(int(num_itens)):
+                                c1, c2, c3 = st.columns([4, 2, 2])
+                                with c1:
+                                    nome = st.text_input(f"Componente {idx+1}:", key=f"comp_nome_{idx}")
+                                with c2:
+                                    qtd = st.number_input(f"Qtd {idx+1}:", min_value=0.0, value=1.0, key=f"comp_qtd_{idx}")
+                                with c3:
+                                    und = st.selectbox(f"Un {idx+1}:", ["un", "kg", "m", "m²", "cx", "pç", "rolo"], key=f"comp_und_{idx}")
+                                if nome.strip():
+                                    componentes_input.append({"nome": nome.strip(), "qtd": qtd, "unidade": und})
+
+                            if st.button("💾 Salvar lista de componentes", key="btn_salvar_comp"):
+                                if not componentes_input:
+                                    st.error("Preencha pelo menos um componente.")
+                                else:
+                                    salvar_componentes(
+                                        int(row_op['id']),
+                                        row_op['Obra_Vinculada'],
+                                        row_op['Cod_Lote'],
+                                        row_op['Num_OP'],
+                                        componentes_input
+                                    )
+                                    st.toast(f"Lista salva para {row_op['Num_OP']}!")
+                                    time.sleep(0.3)
+                                    st.rerun()
+                    else:
+                        st.info("Nenhuma OP com número gerado ainda. Libere as OPs primeiro.")
+                else:
+                    st.info("Nenhuma OP liberada para esta obra ainda.")
+
             else:
                 st.info("Nenhum lote pendente encontrado.")
 
@@ -1593,6 +1714,117 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     if not df_pont.empty:
                         ok = (pd.to_datetime(df_pont['Data_Envio_Agendado']) <= pd.to_datetime(df_pont['Data_Limite_Despacho'])).sum()
                         st.metric("Pontualidade nos despachos", f"{ok / len(df_pont) * 100:.0f}%")
+    # ==================================================
+    # ALMOXARIFADO
+    # ==================================================
+    elif nome_aba == "Almoxarifado":
+        with aba_objeto:
+            st.header("Almoxarifado — Conferência de Componentes")
+            st.caption(f"Hoje: {HOJE_PROJETO.strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
+
+            df_ops_comp = carregar_todas_ops_com_componentes()
+
+            if df_ops_comp.empty:
+                st.info("Nenhuma OP com lista de componentes cadastrada ainda.")
+            else:
+                # métricas rápidas
+                todos_comps = pd.read_sql_query(
+                    "SELECT * FROM componentes_op ORDER BY item_id, id",
+                    conectar_banco()
+                )
+                n_aguard  = len(todos_comps[todos_comps['status_item'] == 'Aguardando Conferencia'])
+                n_ok      = len(todos_comps[todos_comps['status_item'] == 'Disponivel'])
+                n_falta   = len(todos_comps[todos_comps['status_item'] == 'Indisponivel'])
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("⏳ Aguardando", n_aguard)
+                c2.metric("✅ Disponíveis", n_ok)
+                c3.metric("❌ Indisponíveis", n_falta)
+                st.markdown("---")
+
+                # agrupa por OP
+                for _, op_row in df_ops_comp.iterrows():
+                    df_comp = carregar_componentes_op(int(op_row['item_id']))
+                    if df_comp.empty:
+                        continue
+
+                    n_total   = len(df_comp)
+                    n_conf    = len(df_comp[df_comp['status_item'] != 'Aguardando Conferencia'])
+                    n_indisp  = len(df_comp[df_comp['status_item'] == 'Indisponivel'])
+
+                    if n_indisp > 0:
+                        css_bar = "bar-danger"
+                        icone   = "❌"
+                    elif n_conf == n_total:
+                        css_bar = "bar-ok"
+                        icone   = "✅"
+                    else:
+                        css_bar = "bar-warn"
+                        icone   = "⏳"
+
+                    with st.expander(
+                        f"{icone} OP: {op_row['num_op']} — {op_row['cod_lote']} | {op_row['obra_vinculada']}  "
+                        f"({n_conf}/{n_total} conferidos{f' — {n_indisp} FALTANDO' if n_indisp > 0 else ''})",
+                        expanded=(n_indisp > 0 or n_conf < n_total)
+                    ):
+                        # cabeçalho
+                        hc = st.columns([4, 2, 2, 3, 2])
+                        for col_h, label in zip(hc, ["COMPONENTE", "QTD", "UN", "STATUS", "AÇÃO"]):
+                            col_h.markdown(
+                                f"<div style='font-size:11px;font-weight:700;color:#94A3B8;"
+                                f"text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>",
+                                unsafe_allow_html=True
+                            )
+                        st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
+
+                        for _, comp in df_comp.iterrows():
+                            st_item = comp['status_item']
+                            if st_item == 'Disponivel':
+                                cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
+                            elif st_item == 'Indisponivel':
+                                cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
+                            else:
+                                cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
+
+                            rc = st.columns([4, 2, 2, 3, 2])
+                            rc[0].markdown(f"**{comp['nome_componente']}**")
+                            rc[1].markdown(f"`{comp['quantidade']}`")
+                            rc[2].markdown(f"{comp['unidade']}")
+                            rc[3].markdown(
+                                f"<span style='background:{bg};color:{cor};padding:3px 8px;"
+                                f"border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {st_item}</span>",
+                                unsafe_allow_html=True
+                            )
+                            with rc[4]:
+                                acao = st.selectbox(
+                                    "", ["Aguardando Conferencia", "Disponivel", "Indisponivel"],
+                                    index=["Aguardando Conferencia", "Disponivel", "Indisponivel"].index(st_item),
+                                    key=f"alm_st_{comp['id']}",
+                                    label_visibility="collapsed"
+                                )
+                                if acao != st_item:
+                                    atualizar_componente(comp['id'], acao, comp.get('observacao') or '', st.session_state.usuario_nome)
+                                    st.rerun()
+
+                            # campo de observação livre por item
+                            obs_atual = comp.get('observacao') or ''
+                            obs_nova  = st.text_input(
+                                f"Obs — {comp['nome_componente']}:",
+                                value=obs_atual,
+                                key=f"alm_obs_{comp['id']}",
+                                placeholder="Ex: em falta, previsão 20/06..."
+                            )
+                            if obs_nova != obs_atual:
+                                atualizar_componente(comp['id'], st_item, obs_nova, st.session_state.usuario_nome)
+
+                            st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
+
+                        # resumo da OP
+                        if n_indisp > 0:
+                            itens_falt = df_comp[df_comp['status_item'] == 'Indisponivel']['nome_componente'].tolist()
+                            st.error(f"⚠️ Itens em falta: {', '.join(itens_falt)}")
+                        elif n_conf == n_total:
+                            st.success("✅ Todos os componentes conferidos e disponíveis!")
 
     # ==================================================
     # CONFIGURACOES
@@ -1604,7 +1836,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 with st.form("form_user"):
                     nu = st.text_input("Login:").lower().strip()
                     nn = st.text_input("Nome:")
-                    ns = st.selectbox("Setor:", ["Producao", "Engenharia", "Diretoria", "Logistica", "Master"])
+                    ns = st.selectbox("Setor:", ["Producao", "Engenharia", "Diretoria", "Logistica", "Almoxarifado", "Master"])
                     np = st.text_input("Senha:", type="password")
                     if st.form_submit_button("Salvar"):
                         if not all([nu, nn, np]):
