@@ -561,14 +561,14 @@ if 'autenticado' not in st.session_state:
 if not st.session_state.autenticado:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("<div style='text-align:center; padding: 40px 0 10px 0;'>", unsafe_allow_html=True)
-        st.image("assets/LOGO_BAUDENPASSOLD.jpg", width=300)
+        ci1, ci2, ci3 = st.columns([1, 2, 1])
+        with ci2:
+            st.image("assets/LOGO_BAUDENPASSOLD.jpg", use_container_width=True)
         st.markdown("""
         <p style='text-align:center; color:#64748B; font-size:13px;
-                   margin-top:8px; letter-spacing:0.05em;'>
-            PCP & Controle Operacional
+                    margin-top:8px; letter-spacing:0.05em;'>
+        PCP & Controle Operacional
         </p>
-        </div>
         """, unsafe_allow_html=True)
         with st.container(border=True):
             st.markdown("<p style='text-align:center;font-size:16px;font-weight:600;color:#0F172A;margin-bottom:8px;'>Acesso ao Sistema</p>", unsafe_allow_html=True)
