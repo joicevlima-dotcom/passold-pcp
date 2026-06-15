@@ -1383,30 +1383,139 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 with ca:
                                     if pode_concluir:
                                         st.write("")
+                                        status_atual = row.get('Status_Item', '')
+                                        if status_atual == 'Parcialmente Concluido':
+                                            st.markdown("<span style='color:#D97706;font-size:11px;font-weight:700;'>🟠 ENVIO PARCIAL</span>", unsafe_allow_html=True)
                                         if st.button("Pronto", key=f"baixa_{row['id']}", type="primary", use_container_width=True):
-                                            limite_desp = None
-                                            if not df_banco_macro.empty:
-                                                fr = df_banco_macro[df_banco_macro['EDT'] == row['EDT_Vinculado']]
-                                                if not fr.empty:
-                                                    limite_desp = fr.iloc[0].get('Data_Limite_Despacho')
-                                            conn = conectar_banco()
-                                            try:
-                                                cursor = conn.cursor()
-                                                cursor.execute(
-                                                    "UPDATE itens_detalhado SET Status_Item='Concluido' WHERE id=%s",
-                                                    (row['id'],)
+                                            st.session_state[f"modal_pronto_{row['id']}"] = True
+                                        # Modal de envio parcial/total
+                                        if st.session_state.get(f"modal_pronto_{row['id']}", False):
+                                            with st.container(border=True):
+                                                st.markdown(f"#### Lote `{row['Cod_Lote']}` — Tipo de Envio")
+                                                tipo_envio = st.radio(
+                                                    "Este envio é:",
+                                                    ["Envio Total", "Envio Parcial"],
+                                                    key=f"tipo_envio_{row['id']}",
+                                                    horizontal=True
                                                 )
-                                                conn.commit()
-                                                _limpar_cache_geral()
-                                            except Exception as e:
-                                                conn.rollback()
-                                                st.error(f"Erro: {e}")
-                                            finally:
-                                                liberar_conexao(conn)
-                                            enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
-                                            st.toast(f"{row['Cod_Lote']} concluido!")
-                                            time.sleep(0.3)
-                                            st.rerun()
+                                                limite_desp = None
+                                                if not df_banco_macro.empty:
+                                                    fr = df_banco_macro[df_banco_macro['EDT'] == row['EDT_Vinculado']]
+                                                    if not fr.empty:
+                                                        limite_desp = fr.iloc[0].get('Data_Limite_Despacho')
+
+                                                if tipo_envio == "Envio Total":
+                                                    bt1, bt2 = st.columns(2)
+                                                    with bt1:
+                                                        if st.button("✅ Confirmar Total", key=f"conf_total_{row['id']}", type="primary", use_container_width=True):
+                                                            conn = conectar_banco()
+                                                            try:
+                                                                cursor = conn.cursor()
+                                                                cursor.execute(
+                                                                    "UPDATE itens_detalhado SET Status_Item='Concluido' WHERE id=%s",
+                                                                    (row['id'],)
+                                                                )
+                                                                conn.commit()
+                                                                _limpar_cache_geral()
+                                                            except Exception as e:
+                                                                conn.rollback()
+                                                                st.error(f"Erro: {e}")
+                                                            finally:
+                                                                liberar_conexao(conn)
+                                                            enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
+                                                            st.session_state[f"modal_pronto_{row['id']}"] = False
+                                                            st.toast(f"{row['Cod_Lote']} concluido!")
+                                                            time.sleep(0.3)
+                                                            st.rerun()
+                                                    with bt2:
+                                                        if st.button("Cancelar", key=f"cancel_total_{row['id']}", use_container_width=True):
+                                                            st.session_state[f"modal_pronto_{row['id']}"] = False
+                                                            st.rerun()
+
+                                                else:
+                                                    # Envio Parcial — lista as peças
+                                                    df_pecas_parc = carregar_pecas_lote(int(row['id']))
+                                                    if df_pecas_parc.empty:
+                                                        st.warning("Nenhuma peça lançada para este lote. Lance as peças na aba 'Liberar OPs da Semana' primeiro.")
+                                                        if st.button("Cancelar", key=f"cancel_parc_{row['id']}", use_container_width=True):
+                                                            st.session_state[f"modal_pronto_{row['id']}"] = False
+                                                            st.rerun()
+                                                    else:
+                                                        st.caption("Informe quantas unidades de cada peça estão prontas para envio agora:")
+                                                        pecas_envio = []
+                                                        for _, peca in df_pecas_parc.iterrows():
+                                                            saldo_peca = int(peca.get('saldo', 0))
+                                                            if saldo_peca <= 0:
+                                                                st.caption(f"~~{peca['codigo']}~~ — já enviado totalmente")
+                                                                continue
+                                                            pp1, pp2, pp3 = st.columns([3, 2, 2])
+                                                            with pp1:
+                                                                st.markdown(f"**{peca['codigo']}**")
+                                                                st.caption(f"{peca.get('localizacao','—')} | {peca.get('medida','—')}")
+                                                            with pp2:
+                                                                st.caption(f"Saldo: {saldo_peca}")
+                                                            with pp3:
+                                                                qtd_enviar = st.number_input(
+                                                                    "Enviar agora:",
+                                                                    min_value=0,
+                                                                    max_value=saldo_peca,
+                                                                    value=saldo_peca,
+                                                                    key=f"parc_{row['id']}_{peca['id']}"
+                                                                )
+                                                            if qtd_enviar > 0:
+                                                                pecas_envio.append({
+                                                                    "peca_id": int(peca['id']),
+                                                                    "codigo": peca['codigo'],
+                                                                    "qtd_enviar": qtd_enviar,
+                                                                    "saldo_atual": saldo_peca
+                                                                })
+
+                                                        bp1, bp2 = st.columns(2)
+                                                        with bp1:
+                                                            if st.button("🟠 Confirmar Envio Parcial", key=f"conf_parc_{row['id']}", type="primary", use_container_width=True):
+                                                                if not pecas_envio:
+                                                                    st.error("Selecione pelo menos uma peça.")
+                                                                else:
+                                                                    conn = conectar_banco()
+                                                                    try:
+                                                                        cursor = conn.cursor()
+                                                                        todas_zeradas = True
+                                                                        for pe in pecas_envio:
+                                                                            novo_enviado = pe['qtd_enviar']
+                                                                            novo_saldo   = pe['saldo_atual'] - pe['qtd_enviar']
+                                                                            if novo_saldo > 0:
+                                                                                todas_zeradas = False
+                                                                            cursor.execute("""
+                                                                                UPDATE op_pecas
+                                                                                SET qtd_enviada = qtd_enviada + %s,
+                                                                                    saldo = saldo - %s
+                                                                                WHERE id=%s
+                                                                            """, (novo_enviado, novo_enviado, pe['peca_id']))
+                                                                        # Status do lote
+                                                                        novo_status = 'Concluido' if todas_zeradas else 'Parcialmente Concluido'
+                                                                        cursor.execute(
+                                                                            "UPDATE itens_detalhado SET Status_Item=%s WHERE id=%s",
+                                                                            (novo_status, int(row['id']))
+                                                                        )
+                                                                        conn.commit()
+                                                                        _limpar_cache_geral()
+                                                                        carregar_pecas_lote.clear()
+                                                                    except Exception as e:
+                                                                        conn.rollback()
+                                                                        st.error(f"Erro: {e}")
+                                                                    finally:
+                                                                        liberar_conexao(conn)
+                                                                    # Envia para logística com as peças parciais
+                                                                    enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
+                                                                    st.session_state[f"modal_pronto_{row['id']}"] = False
+                                                                    emoji_toast = "✅" if todas_zeradas else "🟠"
+                                                                    st.toast(f"{emoji_toast} {row['Cod_Lote']} — {'Concluido!' if todas_zeradas else 'Envio parcial registrado!'}")
+                                                                    time.sleep(0.3)
+                                                                    st.rerun()
+                                                        with bp2:
+                                                            if st.button("Cancelar", key=f"cancel_parc2_{row['id']}", use_container_width=True):
+                                                                st.session_state[f"modal_pronto_{row['id']}"] = False
+                                                                st.rerun()
                                     else:
                                         st.markdown("<div style='text-align:center;color:#94A3B8;font-size:12px;padding:8px;'>Em producao</div>", unsafe_allow_html=True)
                 else:
@@ -1464,9 +1573,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 df_tv = df_tv.sort_values('_dias_restantes')
 
                 STATUS_EMOJI = {
-                    'Pendente':              ('⏳', '#64748B', '#F1F5F9'),
-                    'Liberado para Fabrica': ('🔧', '#1D4ED8', '#EFF6FF'),
-                    'Concluido':             ('✅', '#15803D', '#F0FDF4'),
+                    'Pendente':                ('⏳', '#64748B', '#F1F5F9'),
+                    'Liberado para Fabrica':   ('🔧', '#1D4ED8', '#EFF6FF'),
+                    'Parcialmente Concluido':  ('🟠', '#D97706', '#FFFBEB'),
+                    'Concluido':               ('✅', '#15803D', '#F0FDF4'),
                 }
                 URG_CONFIG = {
                     'vencido':   {'border': '#DC2626', 'bg': '#FEF2F2', 'tag': '🔴 VENCIDO',  'tag_color': '#DC2626'},
