@@ -266,6 +266,7 @@ def inicializar_banco_de_dados():
         """)
         # Coluna de m2 executado na etapa
         cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN IF NOT EXISTS m2_executado REAL DEFAULT 0")
+        cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN IF NOT EXISTS Numero_Projeto TEXT DEFAULT ''")
         cursor.execute("ALTER TABLE op_pecas ADD COLUMN IF NOT EXISTS m2_op_real REAL DEFAULT 0")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_lote ON op_pecas(lote_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_obra ON op_pecas(obra)")
@@ -856,6 +857,165 @@ def atualizar_componentes_status_pecas(lote_id: int, novo_status: str):
     finally:
         liberar_conexao(conn)
 
+def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
+    """Gera o documento de Ordem de Produção em xlsx."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from io import BytesIO
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Ordem de Producao"
+    ws.sheet_view.showGridLines = False
+
+    bd      = Side(style='thin', color="000000")
+    borda   = Border(left=bd, right=bd, top=bd, bottom=bd)
+    bd_bot  = Border(bottom=bd)
+    fill_az = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+    fill_lz = PatternFill(start_color="EFF6FF", end_color="EFF6FF", fill_type="solid")
+    fill_gz = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+
+    ws.column_dimensions['A'].width = 6
+    ws.column_dimensions['B'].width = 20
+    ws.column_dimensions['C'].width = 30
+    ws.column_dimensions['D'].width = 18
+    ws.column_dimensions['E'].width = 10
+    ws.column_dimensions['F'].width = 10
+
+    tipo_escopo = str(macro_row.get('Tipo_Escopo', 'ACM') or 'ACM')
+    num_projeto  = str(macro_row.get('Numero_Projeto', '') or '')
+
+    # ── CABEÇALHO ──────────────────────────────────────────
+    ws.merge_cells("A1:F1")
+    ws["A1"] = "PASSOLD SISTEMAS DE FACHADAS LTDA"
+    ws["A1"].font = Font(name="Arial", size=14, bold=True, color="FFFFFF")
+    ws["A1"].fill = fill_az
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 28
+
+    ws.merge_cells("A2:F2")
+    ws["A2"] = f"ORDEM DE PRODUÇÃO — {tipo_escopo.upper()}"
+    ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+    ws["A2"].fill = fill_az
+    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[2].height = 22
+
+    # ── INFO PRINCIPAL ─────────────────────────────────────
+    def info_row(ws, linha, label, valor, fill=None):
+        ws.cell(linha, 1, label).font = Font(name="Arial", size=11, bold=True)
+        ws.cell(linha, 1).fill = fill_gz
+        ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=6)
+        ws.cell(linha, 2, str(valor).upper()).font = Font(name="Arial", size=11)
+        for c in range(1, 7):
+            ws.cell(linha, c).border = borda
+            ws.cell(linha, c).alignment = Alignment(vertical="center")
+        ws.row_dimensions[linha].height = 18
+
+    linha = 3
+    info_row(ws, linha,   "Nº OP:",          lote_row.get('Num_OP', '—'))
+    info_row(ws, linha+1, "DATA:",            datetime.now().strftime('%d/%m/%Y'))
+    info_row(ws, linha+2, "OBRA:",            lote_row.get('Obra_Vinculada', '—'))
+    info_row(ws, linha+3, "PROJETO:",         f"{num_projeto} — {macro_row.get('Tarefa', '—')}" if num_projeto else macro_row.get('Tarefa', '—'))
+    info_row(ws, linha+4, "LOTE:",            lote_row.get('Cod_Lote', '—'))
+    info_row(ws, linha+5, "ETAPA/PAVIMENTOS:",lote_row.get('Romaneio_Chapas', '—'))
+    info_row(ws, linha+6, "MATERIAL:",        campos_extras.get('material', lote_row.get('Tipo_Material', '—')))
+
+    linha = 10
+
+    # ── CAMPOS ESPECÍFICOS POR TIPO ────────────────────────
+    if tipo_escopo.upper() == "ACM":
+        info_row(ws, linha,   "ÁREA TOTAL (m²):", f"{campos_extras.get('area_total', lote_row.get('M2_Item', 0)):.2f} m²")
+        info_row(ws, linha+1, "DIFICULDADE:",     campos_extras.get('dificuldade', lote_row.get('Dificuldade', '—')))
+        info_row(ws, linha+2, "QTD CHAPAS:",      lote_row.get('Qtd_Caixas', '—'))
+        info_row(ws, linha+3, "QTD FOLHAS PROJ:", campos_extras.get('qtd_folhas', '—'))
+        linha += 4
+    elif "ESQUADRIA" in tipo_escopo.upper() or "VIDRO" in tipo_escopo.upper():
+        info_row(ws, linha,   "PESO TOTAL:",      campos_extras.get('peso_total', '—'))
+        info_row(ws, linha+1, "QTD FOLHAS PROJ:", campos_extras.get('qtd_folhas', '—'))
+        linha += 2
+    else:  # Terceirizada
+        info_row(ws, linha,   "EMPRESA RESP.:",   campos_extras.get('empresa', '—'))
+        linha += 1
+
+    linha += 1
+
+    # ── OBSERVAÇÕES ────────────────────────────────────────
+    ws.merge_cells(f"A{linha}:F{linha}")
+    ws[f"A{linha}"] = "LIBERAÇÃO PARA PRODUÇÃO"
+    ws[f"A{linha}"].font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+    ws[f"A{linha}"].fill = fill_az
+    ws[f"A{linha}"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[linha].height = 20
+    linha += 1
+
+    obs_txt = campos_extras.get('observacoes', '')
+    ws.merge_cells(f"A{linha}:F{linha+2}")
+    ws[f"A{linha}"] = obs_txt
+    ws[f"A{linha}"].font = Font(name="Arial", size=11)
+    ws[f"A{linha}"].alignment = Alignment(wrap_text=True, vertical="top")
+    for r in range(linha, linha+3):
+        for c in range(1, 7):
+            ws.cell(r, c).border = borda
+    ws.row_dimensions[linha].height = 45
+    linha += 3
+
+    linha += 1
+
+    # ── TABELA DE PEÇAS ────────────────────────────────────
+    if not pecas_df.empty:
+        ws.merge_cells(f"A{linha}:F{linha}")
+        ws[f"A{linha}"] = "RELAÇÃO DE PEÇAS"
+        ws[f"A{linha}"].font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        ws[f"A{linha}"].fill = fill_az
+        ws[f"A{linha}"].alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[linha].height = 20
+        linha += 1
+
+        titulos_p = ["#", "CÓDIGO", "DESCRIÇÃO / LOCAL", "MEDIDA", "QTD", "SALDO"]
+        for ci, t in enumerate(titulos_p, 1):
+            cel = ws.cell(linha, ci, t)
+            cel.font = Font(name="Arial", size=10, bold=True)
+            cel.fill = fill_gz
+            cel.alignment = Alignment(horizontal="center")
+            cel.border = borda
+        linha += 1
+
+        for i, (_, peca) in enumerate(pecas_df.iterrows(), 1):
+            bg = fill_lz if i % 2 == 0 else PatternFill()
+            vals = [i, peca.get('codigo',''), peca.get('localizacao',''), peca.get('medida',''),
+                    peca.get('qtd_total',0), peca.get('saldo',0)]
+            for ci, v in enumerate(vals, 1):
+                cel = ws.cell(linha, ci, v)
+                cel.font = Font(name="Arial", size=10)
+                cel.alignment = Alignment(horizontal="center", vertical="center")
+                cel.border = borda
+                if i % 2 == 0:
+                    cel.fill = fill_lz
+            ws.row_dimensions[linha].height = 16
+            linha += 1
+
+        # Total
+        ws.merge_cells(f"A{linha}:D{linha}")
+        ws.cell(linha, 1, "TOTAL DE PEÇAS:").font = Font(name="Arial", size=10, bold=True)
+        ws.cell(linha, 5, int(pecas_df['qtd_total'].sum())).font = Font(name="Arial", size=10, bold=True)
+        for c in range(1, 7):
+            ws.cell(linha, c).border = borda
+        linha += 2
+
+    # ── ASSINATURAS ────────────────────────────────────────
+    assinaturas = ["Responsável PCP", "Responsável Produção", "Conferência"]
+    for ass in assinaturas:
+        ws.merge_cells(f"A{linha}:D{linha}")
+        ws.cell(linha, 1).border = bd_bot
+        ws.cell(linha+1, 1, ass).font = Font(name="Arial", size=10, bold=True)
+        ws.cell(linha, 5, "____/____/______").font = Font(name="Arial", size=10)
+        linha += 3
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
 def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: str) -> bytes:
     """Gera o romaneio .xlsx com as peças do lote."""
     from openpyxl import Workbook
@@ -1253,7 +1413,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             st.markdown("### 📆 Calendário de Produção — OPs Liberadas")
             st.caption("Apenas lotes liberados oficialmente na aba 'Liberar OPs da Semana'.")
             if not df_banco_micro.empty:
-                df_base = df_banco_micro[df_banco_micro['Status_Item'] == "Liberado para Fabrica"].copy()
+                df_base = df_banco_micro[df_banco_micro['Status_Item'].isin(["Liberado para Fabrica", "Parcialmente Concluido"])].copy()
                 if obra_tv != "Todas as obras":
                     df_base = df_base[df_base['Obra_Vinculada'] == obra_tv]
                 if not df_base.empty:
@@ -1376,148 +1536,167 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     op_txt = row['Num_OP'] if row.get('Num_OP') else "Aguardando OP"
                                     st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {row.get('Fase_Produtiva', '—')}")
                                     if pode_concluir:
-                                        st.markdown("<span style='color:#EA580C;font-size:12px;font-weight:600;'>Ultima semana — liberado para concluir</span>", unsafe_allow_html=True)
+                                        status_atual = row.get('Status_Item', '')
+                                        if status_atual == 'Parcialmente Concluido':
+                                            st.markdown("<span style='color:#D97706;font-size:12px;font-weight:700;'>🟠 Envio parcial anterior registrado — ainda há peças pendentes</span>", unsafe_allow_html=True)
+                                        else:
+                                            st.markdown("<span style='color:#EA580C;font-size:12px;font-weight:600;'>Ultima semana — liberado para concluir</span>", unsafe_allow_html=True)
                                     else:
                                         dias_restantes = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel).days
                                         st.markdown(f"<span style='color:#3B82F6;font-size:12px;'>Em producao — {dias_restantes} dias ate o prazo</span>", unsafe_allow_html=True)
                                 with ca:
                                     if pode_concluir:
                                         st.write("")
-                                        status_atual = row.get('Status_Item', '')
-                                        if status_atual == 'Parcialmente Concluido':
-                                            st.markdown("<span style='color:#D97706;font-size:11px;font-weight:700;'>🟠 ENVIO PARCIAL</span>", unsafe_allow_html=True)
-                                        if st.button("Pronto", key=f"baixa_{row['id']}", type="primary", use_container_width=True):
-                                            st.session_state[f"modal_pronto_{row['id']}"] = True
-                                        # Modal de envio parcial/total
-                                        if st.session_state.get(f"modal_pronto_{row['id']}", False):
-                                            with st.container(border=True):
-                                                st.markdown(f"#### Lote `{row['Cod_Lote']}` — Tipo de Envio")
-                                                tipo_envio = st.radio(
-                                                    "Este envio é:",
-                                                    ["Envio Total", "Envio Parcial"],
-                                                    key=f"tipo_envio_{row['id']}",
-                                                    horizontal=True
-                                                )
-                                                limite_desp = None
-                                                if not df_banco_macro.empty:
-                                                    fr = df_banco_macro[df_banco_macro['EDT'] == row['EDT_Vinculado']]
-                                                    if not fr.empty:
-                                                        limite_desp = fr.iloc[0].get('Data_Limite_Despacho')
-
-                                                if tipo_envio == "Envio Total":
-                                                    bt1, bt2 = st.columns(2)
-                                                    with bt1:
-                                                        if st.button("✅ Confirmar Total", key=f"conf_total_{row['id']}", type="primary", use_container_width=True):
-                                                            conn = conectar_banco()
-                                                            try:
-                                                                cursor = conn.cursor()
-                                                                cursor.execute(
-                                                                    "UPDATE itens_detalhado SET Status_Item='Concluido' WHERE id=%s",
-                                                                    (row['id'],)
-                                                                )
-                                                                conn.commit()
-                                                                _limpar_cache_geral()
-                                                            except Exception as e:
-                                                                conn.rollback()
-                                                                st.error(f"Erro: {e}")
-                                                            finally:
-                                                                liberar_conexao(conn)
-                                                            enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
-                                                            st.session_state[f"modal_pronto_{row['id']}"] = False
-                                                            st.toast(f"{row['Cod_Lote']} concluido!")
-                                                            time.sleep(0.3)
-                                                            st.rerun()
-                                                    with bt2:
-                                                        if st.button("Cancelar", key=f"cancel_total_{row['id']}", use_container_width=True):
-                                                            st.session_state[f"modal_pronto_{row['id']}"] = False
-                                                            st.rerun()
-
-                                                else:
-                                                    # Envio Parcial — lista as peças
-                                                    df_pecas_parc = carregar_pecas_lote(int(row['id']))
-                                                    if df_pecas_parc.empty:
-                                                        st.warning("Nenhuma peça lançada para este lote. Lance as peças na aba 'Liberar OPs da Semana' primeiro.")
-                                                        if st.button("Cancelar", key=f"cancel_parc_{row['id']}", use_container_width=True):
-                                                            st.session_state[f"modal_pronto_{row['id']}"] = False
-                                                            st.rerun()
-                                                    else:
-                                                        st.caption("Informe quantas unidades de cada peça estão prontas para envio agora:")
-                                                        pecas_envio = []
-                                                        for _, peca in df_pecas_parc.iterrows():
-                                                            saldo_peca = int(peca.get('saldo', 0))
-                                                            if saldo_peca <= 0:
-                                                                st.caption(f"~~{peca['codigo']}~~ — já enviado totalmente")
-                                                                continue
-                                                            pp1, pp2, pp3 = st.columns([3, 2, 2])
-                                                            with pp1:
-                                                                st.markdown(f"**{peca['codigo']}**")
-                                                                st.caption(f"{peca.get('localizacao','—')} | {peca.get('medida','—')}")
-                                                            with pp2:
-                                                                st.caption(f"Saldo: {saldo_peca}")
-                                                            with pp3:
-                                                                qtd_enviar = st.number_input(
-                                                                    "Enviar agora:",
-                                                                    min_value=0,
-                                                                    max_value=saldo_peca,
-                                                                    value=saldo_peca,
-                                                                    key=f"parc_{row['id']}_{peca['id']}"
-                                                                )
-                                                            if qtd_enviar > 0:
-                                                                pecas_envio.append({
-                                                                    "peca_id": int(peca['id']),
-                                                                    "codigo": peca['codigo'],
-                                                                    "qtd_enviar": qtd_enviar,
-                                                                    "saldo_atual": saldo_peca
-                                                                })
-
-                                                        bp1, bp2 = st.columns(2)
-                                                        with bp1:
-                                                            if st.button("🟠 Confirmar Envio Parcial", key=f"conf_parc_{row['id']}", type="primary", use_container_width=True):
-                                                                if not pecas_envio:
-                                                                    st.error("Selecione pelo menos uma peça.")
-                                                                else:
-                                                                    conn = conectar_banco()
-                                                                    try:
-                                                                        cursor = conn.cursor()
-                                                                        todas_zeradas = True
-                                                                        for pe in pecas_envio:
-                                                                            novo_enviado = pe['qtd_enviar']
-                                                                            novo_saldo   = pe['saldo_atual'] - pe['qtd_enviar']
-                                                                            if novo_saldo > 0:
-                                                                                todas_zeradas = False
-                                                                            cursor.execute("""
-                                                                                UPDATE op_pecas
-                                                                                SET qtd_enviada = qtd_enviada + %s,
-                                                                                    saldo = saldo - %s
-                                                                                WHERE id=%s
-                                                                            """, (novo_enviado, novo_enviado, pe['peca_id']))
-                                                                        # Status do lote
-                                                                        novo_status = 'Concluido' if todas_zeradas else 'Parcialmente Concluido'
-                                                                        cursor.execute(
-                                                                            "UPDATE itens_detalhado SET Status_Item=%s WHERE id=%s",
-                                                                            (novo_status, int(row['id']))
-                                                                        )
-                                                                        conn.commit()
-                                                                        _limpar_cache_geral()
-                                                                        carregar_pecas_lote.clear()
-                                                                    except Exception as e:
-                                                                        conn.rollback()
-                                                                        st.error(f"Erro: {e}")
-                                                                    finally:
-                                                                        liberar_conexao(conn)
-                                                                    # Envia para logística com as peças parciais
-                                                                    enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
-                                                                    st.session_state[f"modal_pronto_{row['id']}"] = False
-                                                                    emoji_toast = "✅" if todas_zeradas else "🟠"
-                                                                    st.toast(f"{emoji_toast} {row['Cod_Lote']} — {'Concluido!' if todas_zeradas else 'Envio parcial registrado!'}")
-                                                                    time.sleep(0.3)
-                                                                    st.rerun()
-                                                        with bp2:
-                                                            if st.button("Cancelar", key=f"cancel_parc2_{row['id']}", use_container_width=True):
-                                                                st.session_state[f"modal_pronto_{row['id']}"] = False
-                                                                st.rerun()
+                                        if st.button("✅ Pronto", key=f"baixa_{row['id']}", type="primary", use_container_width=True):
+                                            st.session_state[f"modal_pronto_{row['id']}"] = not st.session_state.get(f"modal_pronto_{row['id']}", False)
+                                            st.rerun()
                                     else:
                                         st.markdown("<div style='text-align:center;color:#94A3B8;font-size:12px;padding:8px;'>Em producao</div>", unsafe_allow_html=True)
+
+                            # ── MODAL EM LARGURA TOTAL ─────────────────────────
+                            if st.session_state.get(f"modal_pronto_{row['id']}", False):
+                                with st.container(border=True):
+                                    st.markdown(f"#### 📦 `{row['Cod_Lote']}` — {row['Obra_Vinculada']} — Tipo de Envio")
+                                    limite_desp = None
+                                    if not df_banco_macro.empty:
+                                        fr = df_banco_macro[df_banco_macro['EDT'] == row['EDT_Vinculado']]
+                                        if not fr.empty:
+                                            limite_desp = fr.iloc[0].get('Data_Limite_Despacho')
+
+                                    me1, me2 = st.columns([2, 3])
+                                    with me1:
+                                        tipo_envio = st.radio(
+                                            "Este envio é:",
+                                            ["Envio Total", "Envio Parcial"],
+                                            key=f"tipo_envio_{row['id']}",
+                                            horizontal=True
+                                        )
+
+                                    if tipo_envio == "Envio Total":
+                                        with me2:
+                                            st.info("Todas as peças serão marcadas como concluídas e enviadas para logística.")
+                                        bt1, bt2, _ = st.columns([2, 2, 4])
+                                        with bt1:
+                                            if st.button("✅ Confirmar Total", key=f"conf_total_{row['id']}", type="primary", use_container_width=True):
+                                                conn = conectar_banco()
+                                                try:
+                                                    cursor = conn.cursor()
+                                                    cursor.execute(
+                                                        "UPDATE itens_detalhado SET Status_Item='Concluido' WHERE id=%s",
+                                                        (row['id'],)
+                                                    )
+                                                    conn.commit()
+                                                    _limpar_cache_geral()
+                                                except Exception as e:
+                                                    conn.rollback()
+                                                    st.error(f"Erro: {e}")
+                                                finally:
+                                                    liberar_conexao(conn)
+                                                enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
+                                                st.session_state[f"modal_pronto_{row['id']}"] = False
+                                                st.toast(f"✅ {row['Cod_Lote']} concluido!")
+                                                time.sleep(0.3)
+                                                st.rerun()
+                                        with bt2:
+                                            if st.button("Cancelar", key=f"cancel_total_{row['id']}", use_container_width=True):
+                                                st.session_state[f"modal_pronto_{row['id']}"] = False
+                                                st.rerun()
+
+                                    else:
+                                        # Envio Parcial
+                                        df_pecas_parc = carregar_pecas_lote(int(row['id']))
+                                        if df_pecas_parc.empty:
+                                            st.warning("⚠️ Nenhuma peça lançada para este lote. Lance as peças na aba 'Liberar OPs da Semana' primeiro.")
+                                            if st.button("Fechar", key=f"cancel_parc_{row['id']}"):
+                                                st.session_state[f"modal_pronto_{row['id']}"] = False
+                                                st.rerun()
+                                        else:
+                                            st.caption("Informe quantas unidades de cada peça estão prontas para este envio:")
+                                            st.markdown("---")
+
+                                            pecas_envio = []
+                                            # Cabeçalho da tabela
+                                            th1, th2, th3, th4, th5 = st.columns([3, 2, 2, 1, 2])
+                                            th1.markdown("**Código**")
+                                            th2.markdown("**Localização**")
+                                            th3.markdown("**Medida**")
+                                            th4.markdown("**Saldo**")
+                                            th5.markdown("**Enviar agora**")
+                                            st.markdown("<hr style='margin:4px 0;'>", unsafe_allow_html=True)
+
+                                            for _, peca in df_pecas_parc.iterrows():
+                                                saldo_peca = int(peca.get('saldo', 0))
+                                                if saldo_peca <= 0:
+                                                    pc1, pc2, pc3, pc4, pc5 = st.columns([3, 2, 2, 1, 2])
+                                                    pc1.markdown(f"~~{peca['codigo']}~~")
+                                                    pc5.markdown("✅ enviado")
+                                                    continue
+                                                pc1, pc2, pc3, pc4, pc5 = st.columns([3, 2, 2, 1, 2])
+                                                pc1.markdown(f"**{peca['codigo']}**")
+                                                pc2.markdown(peca.get('localizacao', '—'))
+                                                pc3.markdown(peca.get('medida', '—'))
+                                                pc4.markdown(f"`{saldo_peca}`")
+                                                with pc5:
+                                                    qtd_enviar = st.number_input(
+                                                        "",
+                                                        min_value=0,
+                                                        max_value=saldo_peca,
+                                                        value=saldo_peca,
+                                                        key=f"parc_{row['id']}_{peca['id']}",
+                                                        label_visibility="collapsed"
+                                                    )
+                                                if qtd_enviar > 0:
+                                                    pecas_envio.append({
+                                                        "peca_id":    int(peca['id']),
+                                                        "codigo":     peca['codigo'],
+                                                        "qtd_enviar": qtd_enviar,
+                                                        "saldo_atual": saldo_peca
+                                                    })
+
+                                            st.markdown("---")
+                                            bp1, bp2, _ = st.columns([2, 2, 4])
+                                            with bp1:
+                                                if st.button("🟠 Confirmar Envio Parcial", key=f"conf_parc_{row['id']}", type="primary", use_container_width=True):
+                                                    if not pecas_envio:
+                                                        st.error("Selecione pelo menos uma peça.")
+                                                    else:
+                                                        conn = conectar_banco()
+                                                        try:
+                                                            cursor = conn.cursor()
+                                                            todas_zeradas = True
+                                                            for pe in pecas_envio:
+                                                                novo_saldo = pe['saldo_atual'] - pe['qtd_enviar']
+                                                                if novo_saldo > 0:
+                                                                    todas_zeradas = False
+                                                                cursor.execute("""
+                                                                    UPDATE op_pecas
+                                                                    SET qtd_enviada = qtd_enviada + %s,
+                                                                        saldo = saldo - %s
+                                                                    WHERE id=%s
+                                                                """, (pe['qtd_enviar'], pe['qtd_enviar'], pe['peca_id']))
+                                                            novo_status = 'Concluido' if todas_zeradas else 'Parcialmente Concluido'
+                                                            cursor.execute(
+                                                                "UPDATE itens_detalhado SET Status_Item=%s WHERE id=%s",
+                                                                (novo_status, int(row['id']))
+                                                            )
+                                                            conn.commit()
+                                                            _limpar_cache_geral()
+                                                            carregar_pecas_lote.clear()
+                                                        except Exception as e:
+                                                            conn.rollback()
+                                                            st.error(f"Erro: {e}")
+                                                        finally:
+                                                            liberar_conexao(conn)
+                                                        enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
+                                                        st.session_state[f"modal_pronto_{row['id']}"] = False
+                                                        emoji_t = "✅" if todas_zeradas else "🟠"
+                                                        st.toast(f"{emoji_t} {row['Cod_Lote']} — {'Concluido!' if todas_zeradas else 'Envio parcial registrado!'}")
+                                                        time.sleep(0.3)
+                                                        st.rerun()
+                                            with bp2:
+                                                if st.button("Cancelar", key=f"cancel_parc2_{row['id']}", use_container_width=True):
+                                                    st.session_state[f"modal_pronto_{row['id']}"] = False
+                                                    st.rerun()
                 else:
                     st.info("Nenhuma OP liberada para este filtro ainda.")
             else:
@@ -1711,7 +1890,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
             df_lib = df_banco_micro[
                 (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
-                (df_banco_micro['Status_Item'] == "Liberado para Fabrica")
+                (df_banco_micro['Status_Item'].isin(["Liberado para Fabrica", "Parcialmente Concluido"]))
             ].copy() if obra_selecionada and not df_banco_micro.empty else pd.DataFrame()
 
             if not df_lib.empty:
@@ -1724,113 +1903,151 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     num_op_sel   = lote_sel_str.split(" — ")[0].strip()
                     row_lote     = df_lib[df_lib['Num_OP'] == num_op_sel].iloc[0]
                     lote_id      = int(row_lote['id'])
+                    edt_lote     = row_lote.get('EDT_Vinculado', '')
 
-                    # Saldo da etapa
-                    edt_lote = row_lote.get('EDT_Vinculado', '')
+                    # Info da etapa em cards limpos
                     if not df_banco_macro.empty and edt_lote:
                         fr_edt = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
                         if not fr_edt.empty:
-                            m2_total_edt    = float(fr_edt.iloc[0].get('M2_Total_Tarefa', 0) or 0)
-                            m2_exec_edt     = float(fr_edt.iloc[0].get('m2_executado', 0) or 0)
+                            macro_row_sel   = fr_edt.iloc[0]
+                            m2_total_edt    = float(macro_row_sel.get('M2_Total_Tarefa', 0) or 0)
+                            m2_exec_edt     = float(macro_row_sel.get('m2_executado', 0) or 0)
                             m2_saldo_edt    = m2_total_edt - m2_exec_edt
-                            se1, se2, se3   = st.columns(3)
+                            num_proj_edt    = str(macro_row_sel.get('Numero_Projeto', '') or '')
+                            tipo_esc_edt    = str(macro_row_sel.get('Tipo_Escopo', 'ACM') or 'ACM')
+                            se1, se2, se3, se4 = st.columns(4)
                             se1.metric("Etapa", edt_lote)
-                            se2.metric("m² Total da Etapa", f"{m2_total_edt:.2f} m²")
-                            se3.metric("Saldo da Etapa", f"{m2_saldo_edt:.2f} m²",
-                                       delta=f"-{row_lote['M2_Item']:.2f}m² este lote",
-                                       delta_color="inverse")
+                            se2.metric("Projeto", num_proj_edt or "—")
+                            se3.metric("m² Total Etapa", f"{m2_total_edt:.2f}")
+                            se4.metric("Saldo Etapa", f"{m2_saldo_edt:.2f} m²")
+                        else:
+                            macro_row_sel = {}
+                            tipo_esc_edt  = "ACM"
+                            num_proj_edt  = ""
+                    else:
+                        macro_row_sel = {}
+                        tipo_esc_edt  = "ACM"
+                        num_proj_edt  = ""
+
+                    st.markdown("---")
 
                     # Peças já lançadas
                     df_pecas_existentes = carregar_pecas_lote(lote_id)
+
                     if not df_pecas_existentes.empty:
-                        st.success(f"✅ {len(df_pecas_existentes)} peça(s) já lançadas para este lote.")
-                        with st.expander("Ver peças lançadas", expanded=False):
+                        pc1, pc2 = st.columns([3, 1])
+                        with pc1:
+                            st.success(f"✅ {len(df_pecas_existentes)} peça(s) lançadas | "
+                                       f"Total: {int(df_pecas_existentes['qtd_total'].sum())} un | "
+                                       f"Saldo: {int(df_pecas_existentes['saldo'].sum())} un")
+                        with pc2:
+                            st.caption(f"Status comp.: **{df_pecas_existentes.iloc[0].get('componentes_status','—')}**")
+
+                        with st.expander("📋 Ver peças lançadas", expanded=False):
                             st.dataframe(
                                 df_pecas_existentes[['codigo', 'localizacao', 'medida', 'qtd_total', 'qtd_enviada', 'saldo']],
                                 hide_index=True, use_container_width=True
                             )
-                        # Romaneio de despacho
-                        st.markdown("#### 📄 Romaneio de Despacho")
-                        end_obra = st.text_input("Endereço da Obra:", key="end_romaneio")
-                        dig_por  = st.text_input("Digitado por:", value=st.session_state.usuario_nome, key="dig_romaneio")
-                        if st.button("⬇️ Gerar Romaneio .xlsx", key="btn_romaneio"):
-                            xlsx_bytes = gerar_romaneio_xlsx(row_lote, df_pecas_existentes, end_obra, dig_por)
-                            st.download_button(
-                                label="📥 Baixar Romaneio",
-                                data=xlsx_bytes,
-                                file_name=f"Romaneio_{num_op_sel}_{row_lote['Cod_Lote']}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key="dl_romaneio"
-                            )
 
+                        # Gerar OP
+                        st.markdown("#### 📄 Gerar Ordem de Produção")
+                        with st.expander("Configurar e Gerar OP", expanded=False):
+                            obs_op = st.text_area("Observações:", key="obs_op",
+                                                   placeholder="Informações adicionais para a produção...")
+                            campos_extras = {"observacoes": obs_op, "material": row_lote.get('Tipo_Material', '')}
+
+                            if tipo_esc_edt.upper() == "ACM":
+                                gf1, gf2 = st.columns(2)
+                                with gf1:
+                                    qtd_folhas = st.text_input("Qtd Folhas Projeto:", key="op_folhas", placeholder="Ex: 2")
+                                with gf2:
+                                    area_real = st.number_input("Área Total (m²):", value=float(row_lote.get('M2_Item', 0)), key="op_area")
+                                campos_extras.update({
+                                    "qtd_folhas": qtd_folhas,
+                                    "area_total": area_real,
+                                    "dificuldade": row_lote.get('Dificuldade', '—'),
+                                    "material": row_lote.get('Tipo_Material', 'ACM')
+                                })
+                            elif "ESQUADRIA" in tipo_esc_edt.upper() or "VIDRO" in tipo_esc_edt.upper():
+                                gf1, gf2 = st.columns(2)
+                                with gf1:
+                                    peso_total = st.text_input("Peso Total (kg):", key="op_peso", placeholder="Ex: 67,08kg")
+                                with gf2:
+                                    qtd_folhas = st.text_input("Qtd Folhas Projeto:", key="op_folhas2", placeholder="Ex: 2")
+                                campos_extras.update({
+                                    "peso_total": peso_total,
+                                    "qtd_folhas": qtd_folhas,
+                                    "material": "PERFIL EM ALUMINIO"
+                                })
+                            else:  # Terceirizada
+                                empresa = st.text_input("Empresa Responsável:", key="op_empresa")
+                                mat_terc = st.text_input("Material:", key="op_mat_terc")
+                                campos_extras.update({"empresa": empresa, "material": mat_terc})
+
+                            if st.button("🖨️ Gerar OP", key="btn_gerar_op", type="primary"):
+                                op_bytes = gerar_op_xlsx(row_lote, df_pecas_existentes, macro_row_sel, campos_extras)
+                                st.download_button(
+                                    label="📥 Baixar Ordem de Produção",
+                                    data=op_bytes,
+                                    file_name=f"OP_{num_op_sel}_{row_lote['Cod_Lote']}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key="dl_op"
+                                )
+
+                    # Lançar/Substituir peças
                     with st.expander(
-                        "➕ Lançar / Substituir Peças" if not df_pecas_existentes.empty else "➕ Lançar Peças",
+                        "✏️ Editar / Substituir Peças" if not df_pecas_existentes.empty else "➕ Lançar Peças",
                         expanded=df_pecas_existentes.empty
                     ):
                         st.caption("Cole os dados abaixo — um item por linha em cada campo.")
-                        st.info("Exemplo de Códigos:\nB24-01C\nB25-01C\nRF.JA.11/CNT-401")
 
-                        # m² REAL desta OP
-                        m2_op_real = st.number_input(
-                            "📐 m² real desta OP (informado pelo projetista):",
-                            min_value=0.0,
-                            value=float(row_lote.get('M2_Item', 0)),
-                            step=0.1,
-                            format="%.2f",
-                            key="m2_op_real_input",
-                            help="Este valor será abatido do saldo da etapa. Pode ser diferente do m² do fatiamento."
-                        )
-                        if not df_banco_macro.empty and edt_lote:
-                            fr_edt2 = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
-                            if not fr_edt2.empty:
-                                m2_exec_atual = float(fr_edt2.iloc[0].get('m2_executado', 0) or 0)
-                                m2_total_edt2 = float(fr_edt2.iloc[0].get('M2_Total_Tarefa', 0) or 0)
-                                saldo_apos = m2_total_edt2 - m2_exec_atual - m2_op_real
-                                st.caption(f"Saldo da etapa após lançamento: **{saldo_apos:.2f} m²**")
+                        # m² REAL
+                        gm1, gm2 = st.columns([2, 3])
+                        with gm1:
+                            m2_op_real = st.number_input(
+                                "📐 m² real desta OP:",
+                                min_value=0.0,
+                                value=float(row_lote.get('M2_Item', 0)),
+                                step=0.1,
+                                format="%.2f",
+                                key="m2_op_real_input",
+                                help="Será abatido do saldo da etapa."
+                            )
+                        with gm2:
+                            if not df_banco_macro.empty and edt_lote:
+                                fr2 = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
+                                if not fr2.empty:
+                                    m2_exec2  = float(fr2.iloc[0].get('m2_executado', 0) or 0)
+                                    m2_total2 = float(fr2.iloc[0].get('M2_Total_Tarefa', 0) or 0)
+                                    saldo_apos = m2_total2 - m2_exec2 - m2_op_real
+                                    st.metric("Saldo após este lançamento", f"{saldo_apos:.2f} m²")
 
                         p1, p2, p3, p4 = st.columns(4)
                         with p1:
-                            codigos_txt = st.text_area(
-                                "Códigos (um por linha):",
-                                height=200,
-                                key="pecas_codigos",
-                                placeholder="B24-01C\nB25-01C\nRF.JA.11/CNT"
-                            )
+                            codigos_txt = st.text_area("Códigos:", height=180, key="pecas_codigos",
+                                                        placeholder="B24-01C\nB25-01C\nRF.JA.11/CNT")
                         with p2:
-                            qtds_txt = st.text_area(
-                                "Quantidades (um por linha):",
-                                height=200,
-                                key="pecas_qtds",
-                                placeholder="3\n3\n1"
-                            )
+                            qtds_txt = st.text_area("Quantidades:", height=180, key="pecas_qtds",
+                                                     placeholder="3\n3\n1")
                         with p3:
-                            locs_txt = st.text_area(
-                                "Localização (um por linha):",
-                                height=200,
-                                key="pecas_locs",
-                                placeholder="Pav 27-37\nPav 27-37\n(opcional)"
-                            )
+                            locs_txt = st.text_area("Localização:", height=180, key="pecas_locs",
+                                                     placeholder="Pav 27-37\nPav 27-37\n(opcional)")
                         with p4:
-                            medidas_txt = st.text_area(
-                                "Medidas (um por linha):",
-                                height=200,
-                                key="pecas_medidas",
-                                placeholder="550x390\n550x400\n(opcional)"
-                            )
+                            medidas_txt = st.text_area("Medidas:", height=180, key="pecas_medidas",
+                                                        placeholder="550x390\n550x400\n(opcional)")
 
-                        st.markdown("**Status dos componentes desta OP:**")
                         comp_status = st.radio(
-                            "",
+                            "Status dos componentes:",
                             ["Aguardando Projetista", "Componentes OK"],
                             horizontal=True,
                             key="comp_status_radio"
                         )
 
                         if st.button("💾 Salvar Peças", key="btn_salvar_pecas", type="primary"):
-                            codigos  = [l.strip() for l in codigos_txt.strip().split('\n') if l.strip()]
-                            qtds     = [l.strip() for l in qtds_txt.strip().split('\n') if l.strip()]
-                            locs     = [l.strip() for l in locs_txt.strip().split('\n')] if locs_txt.strip() else []
-                            medidas  = [l.strip() for l in medidas_txt.strip().split('\n')] if medidas_txt.strip() else []
+                            codigos = [l.strip() for l in codigos_txt.strip().split('\n') if l.strip()]
+                            qtds    = [l.strip() for l in qtds_txt.strip().split('\n') if l.strip()]
+                            locs    = [l.strip() for l in locs_txt.strip().split('\n')] if locs_txt.strip() else []
+                            medidas = [l.strip() for l in medidas_txt.strip().split('\n')] if medidas_txt.strip() else []
 
                             if not codigos:
                                 st.error("Informe pelo menos um código.")
@@ -1848,7 +2065,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     row_lote['Cod_Lote'], row_lote['Num_OP'],
                                     pecas_list, comp_status, m2_op_real
                                 )
-                                st.toast(f"{len(pecas_list)} peça(s) salvas para {num_op_sel}!")
+                                st.toast(f"{len(pecas_list)} peça(s) salvas!")
                                 time.sleep(0.3)
                                 st.rerun()
                 else:
@@ -2140,9 +2357,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 nome_obra = st.text_input("Nome da Obra:", value=st.session_state.mem_obra).upper()
                 co1, co2  = st.columns(2)
                 with co1:
-                    escopo = st.selectbox("Escopo:", ["ACM", "Vidro/Esquadria"])
-                    frente = st.text_input("Frente Macro:", value=st.session_state.mem_frente)
-                    tarefa = st.text_input("Nome da Tarefa:", value=st.session_state.mem_tarefa)
+                    escopo      = st.selectbox("Escopo:", ["ACM", "Vidro/Esquadria", "Terceirizada"])
+                    num_projeto = st.text_input("Número do Projeto:", placeholder="Ex: 1068")
+                    frente      = st.text_input("Frente Macro:", value=st.session_state.mem_frente)
+                    tarefa      = st.text_input("Nome da Tarefa:", value=st.session_state.mem_tarefa)
                 with co2:
                     edt_cod = st.text_input("Codigo EDT (unico):")
                     subdiv  = st.text_input("Subdivisao / Balancim:").upper()
@@ -2167,10 +2385,12 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             cursor.execute("""
                                 INSERT INTO cronograma_macro
                                 (Obra, EDT, Tipo_Escopo, Etapa_Macro, Subdivisao, Tarefa,
-                                 M2_Total_Tarefa, Inicio_Previsto, Termino_Obra, Status, Status_Engenharia)
-                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente','Aguardando Medicao In Loco')
+                                 M2_Total_Tarefa, Inicio_Previsto, Termino_Obra, Status,
+                                 Status_Engenharia, Numero_Projeto)
+                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente','Aguardando Medicao In Loco',%s)
                             """, (nome_obra, edt_cod, escopo, frente, subdiv, tarefa,
-                                  float(m2_tot), dt_ini.strftime('%Y-%m-%d'), dt_fim.strftime('%Y-%m-%d')))
+                                  float(m2_tot), dt_ini.strftime('%Y-%m-%d'),
+                                  dt_fim.strftime('%Y-%m-%d'), num_projeto.strip()))
                             conn.commit()
                             _limpar_cache_geral()
                             st.toast("Frente registrada!")
