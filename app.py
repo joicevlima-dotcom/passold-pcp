@@ -2825,7 +2825,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         periodos = df_hist3['periodo'].tolist()
                         per_sel  = st.selectbox("Período:", periodos, index=len(periodos)-1, key="sel_per_med")
                         hist_row = df_hist3[df_hist3['periodo'] == per_sel].iloc[0]
-                        snapshot = _json.loads(hist_row['snapshot']) if hist_row['snapshot'] else []
+                        snapshot = hist_row['snapshot'] if isinstance(hist_row['snapshot'], list) else (_json.loads(hist_row['snapshot']) if isinstance(hist_row['snapshot'], str) else [])
                         obra_info3 = df_med_obras3[df_med_obras3['id'] == obra_id3].iloc[0]
                         total_contratado = obra_info3['valor_m2_global'] * obra_info3['metragem_geral']
 
@@ -2894,7 +2894,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         st.markdown("#### Tabela Comparativa por Período")
                         rows_comp = []
                         for _, h in df_hist4.iterrows():
-                            snap = _json.loads(h['snapshot']) if h['snapshot'] else []
+                            snap = h['snapshot'] if isinstance(h['snapshot'], list) else (_json.loads(h['snapshot']) if isinstance(h['snapshot'], str) else [])
                             for srv in snap:
                                 for sub in srv.get('subdivisoes', []):
                                     preco_m2 = srv['valor_m2_servico'] * (sub['percentual'] / 100)
