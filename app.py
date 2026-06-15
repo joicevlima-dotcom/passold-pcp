@@ -5,11 +5,14 @@ from datetime import datetime, timedelta
 import calendar as py_calendar
 import os
 import time
-import hashlib
+import bcrypt
 import psycopg2
 import psycopg2.extras
+from psycopg2 import pool
 from zoneinfo import ZoneInfo
+
 FUSO_BR = ZoneInfo('America/Sao_Paulo')
+HOJE_PROJETO = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
 st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide")
 
@@ -43,44 +46,57 @@ div[data-testid="stMetricLabel"] { color: var(--text-muted)!important; font-weig
 .stButton > button { background-color: var(--primary-color)!important; color: #FFFFFF!important; font-weight: 600!important; border-radius: 6px!important; border: none!important; padding: 10px 24px!important; font-size: 0.9rem!important; box-shadow: var(--shadow-sm)!important; transition: all 0.2s ease!important; }
 .stButton > button p, .stButton > button span, .stButton > button div { color: #FFFFFF!important; }
 .stButton > button:hover { background-color: var(--primary-light)!important; transform: translateY(-1px); box-shadow: var(--shadow-md)!important; color: #FFFFFF!important; }
-.stButton > button *, .stButton > button p, .stButton > button span { color: white!important; }
 .stButton > button[kind="primary"] { background-color: var(--accent-color)!important; }
 .stButton > button[kind="primary"]:hover { background-color: #c2410c!important; }
 .stTextInput > div > div > input, .stSelectbox > div > div > select, .stNumberInput > div > div > input { background-color: var(--bg-card)!important; border: 1px solid var(--border-color)!important; border-radius: 6px!important; color: var(--text-main)!important; padding: 10px!important; font-size: 0.9rem!important; box-shadow: none!important; }
-.stTextInput > div > div > input:focus, .stSelectbox > div > div > select:focus { border-color: var(--primary-color)!important; box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.1)!important; }
 div[data-testid="stDataFrame"] { border-radius: var(--radius)!important; border: 1px solid var(--border-color)!important; overflow: hidden; }
-thead tr th { background-color: #F1F5F9!important; color: var(--primary-light)!important; font-weight: 600!important; text-transform: uppercase; font-size: 0.75rem!important; letter-spacing: 0.05em; border-bottom: 2px solid var(--border-color)!important; }
 .stTabs [data-baseweb="tab-list"] { gap: 24px; border-bottom: 1px solid var(--border-color); }
-.stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: transparent; border-radius: 4px 4px 0px 0px; color: var(--text-muted); font-weight: 500; transition: all 0.2s; }
+.stTabs [data-baseweb="tab"] { height: 50px; background-color: transparent; border-radius: 4px 4px 0px 0px; color: var(--text-muted); font-weight: 500; transition: all 0.2s; }
 .stTabs [aria-selected="true"] { background-color: var(--bg-body); color: var(--accent-color); font-weight: 700; border-bottom: 3px solid var(--accent-color); }
 .badge-obra { background:#FFF7ED; color:#C2410C; padding:4px 10px; border-radius:6px; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; }
 .badge-edt  { background:#F1F5F9; color:#334155; padding:4px 10px; border-radius:6px; font-weight:600; font-size:11px; border:1px solid #E2E8F0; }
 .badge-lote { background:#ECFDF5; color:#047857; padding:4px 10px; border-radius:6px; font-weight:700; font-size:11px; }
-.cal-day-active, .cal-day-today { background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%); border: 1px solid #3B82F6; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2); }
 .bar-ok      { border-left: 5px solid var(--success-color); background: #F0FDF4; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
 .bar-warn    { border-left: 5px solid var(--warning-color); background: #FFFBEB; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
 .bar-danger  { border-left: 5px solid var(--danger-color);  background: #FEF2F2; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
 .bar-neutral { border-left: 5px solid var(--text-muted);    background: #F8FAFC; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
-.login-container { background: var(--bg-card); padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1); border: 1px solid var(--border-color); text-align: center; }
 #MainMenu { visibility: hidden; }
 footer    { visibility: hidden; }
 header    { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
-HOJE_PROJETO = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+# ========================================================
+# CONNECTION POOL — criado uma única vez para todos os usuários
+# ========================================================
+@st.cache_resource
+def get_connection_pool():
+    return pool.ThreadedConnectionPool(
+        minconn=2,
+        maxconn=20,
+        dsn=st.secrets["supabase"]["url"]
+    )
 
-# ========================================================
-# CONEXÃO SUPABASE
-# ========================================================
 def conectar_banco():
-    url = st.secrets["supabase"]["url"]
-    conn = psycopg2.connect(url)
-    conn.autocommit = False
-    return conn
+    return get_connection_pool().getconn()
 
+def liberar_conexao(conn):
+    try:
+        get_connection_pool().putconn(conn)
+    except Exception:
+        pass
+
+# ========================================================
+# SENHAS — bcrypt com salt
+# ========================================================
 def hash_senha(senha: str) -> str:
-    return hashlib.sha256(senha.encode()).hexdigest()
+    return bcrypt.hashpw(senha.encode(), bcrypt.gensalt()).decode()
+
+def verificar_senha(senha: str, hash_salvo: str) -> bool:
+    try:
+        return bcrypt.checkpw(senha.encode(), hash_salvo.encode())
+    except Exception:
+        return False
 
 # ========================================================
 # INICIALIZAÇÃO DAS TABELAS
@@ -88,115 +104,167 @@ def hash_senha(senha: str) -> str:
 def inicializar_banco_de_dados():
     conn = conectar_banco()
     cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS cronograma_macro (
-            id SERIAL PRIMARY KEY,
-            Obra TEXT,
-            EDT TEXT UNIQUE,
-            Tipo_Escopo TEXT,
-            Etapa_Macro TEXT,
-            Subdivisao TEXT,
-            Tarefa TEXT,
-            M2_Total_Tarefa REAL,
-            Inicio_Previsto DATE,
-            Termino_Obra DATE,
-            Status TEXT DEFAULT 'Pendente',
-            Status_Engenharia TEXT DEFAULT 'Aguardando Medicao In Loco',
-            Prazo_Engenharia DATE,
-            Data_Limite_Despacho DATE,
-            Primeiro_Dia_Producao DATE
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS itens_detalhado (
-            id SERIAL PRIMARY KEY,
-            Obra_Vinculada TEXT,
-            EDT_Vinculado TEXT,
-            Cod_Lote TEXT,
-            Num_OP TEXT,
-            Tipo_Material TEXT,
-            Qtd_Caixas INTEGER,
-            M2_Item REAL,
-            Data_Producao_Programada DATE,
-            Data_Limite_Obra DATE,
-            Data_Despacho DATE,
-            Romaneio_Chapas TEXT,
-            Status_Item TEXT DEFAULT 'Pendente',
-            Dificuldade INTEGER DEFAULT 3,
-            Fase_Produtiva TEXT,
-            Enviado_Logistica INTEGER DEFAULT 0
-        )
-    """)
-    cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Data_Despacho DATE")
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id SERIAL PRIMARY KEY,
-            usuario TEXT UNIQUE,
-            nome TEXT,
-            setor TEXT,
-            senha TEXT
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS solicitacoes_prazo (
-            id SERIAL PRIMARY KEY,
-            edt TEXT,
-            tarefa TEXT,
-            prazo_atual TEXT,
-            prazo_solicitado TEXT,
-            justificativa TEXT,
-            criado_por TEXT,
-            status TEXT DEFAULT 'Pendente de Aprovacao',
-            criado_em TEXT
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS logistica_envios (
-            id SERIAL PRIMARY KEY,
-            item_id INTEGER,
-            Obra_Vinculada TEXT,
-            EDT_Vinculado TEXT,
-            Cod_Lote TEXT,
-            Num_OP TEXT,
-            Tipo_Material TEXT,
-            Qtd_Caixas INTEGER,
-            M2_Item REAL,
-            Romaneio_Chapas TEXT,
-            Data_Limite_Despacho DATE,
-            Data_Envio_Agendado DATE,
-            Transportadora TEXT,
-            Veiculo TEXT,
-            Observacoes TEXT,
-            Status_Logistica TEXT DEFAULT 'Aguardando Agendamento',
-            Confirmado_Por TEXT,
-            Confirmado_Em TEXT
-        )
-    """)
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS cronograma_macro (
+                id SERIAL PRIMARY KEY,
+                Obra TEXT,
+                EDT TEXT UNIQUE,
+                Tipo_Escopo TEXT,
+                Etapa_Macro TEXT,
+                Subdivisao TEXT,
+                Tarefa TEXT,
+                M2_Total_Tarefa REAL,
+                Inicio_Previsto DATE,
+                Termino_Obra DATE,
+                Status TEXT DEFAULT 'Pendente',
+                Status_Engenharia TEXT DEFAULT 'Aguardando Medicao In Loco',
+                Prazo_Engenharia DATE,
+                Data_Limite_Despacho DATE,
+                Primeiro_Dia_Producao DATE
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS itens_detalhado (
+                id SERIAL PRIMARY KEY,
+                Obra_Vinculada TEXT,
+                EDT_Vinculado TEXT,
+                Cod_Lote TEXT,
+                Num_OP TEXT,
+                Tipo_Material TEXT,
+                Qtd_Caixas INTEGER,
+                M2_Item REAL,
+                Data_Producao_Programada DATE,
+                Data_Limite_Obra DATE,
+                Data_Despacho DATE,
+                Romaneio_Chapas TEXT,
+                Status_Item TEXT DEFAULT 'Pendente',
+                Dificuldade INTEGER DEFAULT 3,
+                Fase_Produtiva TEXT,
+                Enviado_Logistica INTEGER DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Data_Despacho DATE")
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id SERIAL PRIMARY KEY,
+                usuario TEXT UNIQUE,
+                nome TEXT,
+                setor TEXT,
+                senha TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS solicitacoes_prazo (
+                id SERIAL PRIMARY KEY,
+                edt TEXT,
+                tarefa TEXT,
+                prazo_atual TEXT,
+                prazo_solicitado TEXT,
+                justificativa TEXT,
+                criado_por TEXT,
+                status TEXT DEFAULT 'Pendente de Aprovacao',
+                criado_em TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS logistica_envios (
+                id SERIAL PRIMARY KEY,
+                item_id INTEGER,
+                Obra_Vinculada TEXT,
+                EDT_Vinculado TEXT,
+                Cod_Lote TEXT,
+                Num_OP TEXT,
+                Tipo_Material TEXT,
+                Qtd_Caixas INTEGER,
+                M2_Item REAL,
+                Romaneio_Chapas TEXT,
+                Data_Limite_Despacho DATE,
+                Data_Envio_Agendado DATE,
+                Transportadora TEXT,
+                Veiculo TEXT,
+                Observacoes TEXT,
+                Status_Logistica TEXT DEFAULT 'Aguardando Agendamento',
+                Confirmado_Por TEXT,
+                Confirmado_Em TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS componentes_op (
+                id SERIAL PRIMARY KEY,
+                item_id INTEGER,
+                Obra_Vinculada TEXT,
+                Cod_Lote TEXT,
+                Num_OP TEXT,
+                Nome_Componente TEXT,
+                Quantidade REAL,
+                Unidade TEXT,
+                Status_Item TEXT DEFAULT 'Aguardando Conferencia',
+                Observacao TEXT,
+                Conferido_Por TEXT,
+                Conferido_Em TEXT
+            )
+        """)
+        # ── TABELAS DO SISTEMA DE MEDIÇÃO ──────────────────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS medicao_obras (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL,
+                valor_m2_global REAL NOT NULL,
+                metragem_geral REAL NOT NULL,
+                criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS medicao_servicos (
+                id SERIAL PRIMARY KEY,
+                obra_id INTEGER NOT NULL REFERENCES medicao_obras(id) ON DELETE CASCADE,
+                nome TEXT NOT NULL,
+                valor_m2_servico REAL NOT NULL
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS medicao_subdivisoes (
+                id SERIAL PRIMARY KEY,
+                servico_id INTEGER NOT NULL REFERENCES medicao_servicos(id) ON DELETE CASCADE,
+                nome TEXT NOT NULL,
+                m2 REAL NOT NULL DEFAULT 0,
+                percentual REAL NOT NULL DEFAULT 0
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS medicao_historico (
+                id SERIAL PRIMARY KEY,
+                obra_id INTEGER NOT NULL REFERENCES medicao_obras(id) ON DELETE CASCADE,
+                periodo TEXT NOT NULL,
+                total_medido REAL NOT NULL DEFAULT 0,
+                snapshot JSONB,
+                criado_em TIMESTAMP DEFAULT NOW(),
+                UNIQUE(obra_id, periodo)
+            )
+        """)
+        # ── ÍNDICES DE PERFORMANCE ──────────────────────────────────
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_itens_obra ON itens_detalhado(Obra_Vinculada)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_itens_status ON itens_detalhado(Status_Item)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_itens_edt ON itens_detalhado(EDT_Vinculado)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_macro_obra ON cronograma_macro(Obra)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_logistica_status ON logistica_envios(Status_Logistica)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_medicao_hist_obra ON medicao_historico(obra_id)")
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS componentes_op (
-            id SERIAL PRIMARY KEY,
-            item_id INTEGER,
-            Obra_Vinculada TEXT,
-            Cod_Lote TEXT,
-            Num_OP TEXT,
-            Nome_Componente TEXT,
-            Quantidade REAL,
-            Unidade TEXT,
-            Status_Item TEXT DEFAULT 'Aguardando Conferencia',
-            Observacao TEXT,
-            Conferido_Por TEXT,
-            Conferido_Em TEXT
-        )
-    """)
-    cursor.execute("SELECT COUNT(*) FROM usuarios")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute(
-            "INSERT INTO usuarios (usuario, nome, setor, senha) VALUES (%s, %s, %s, %s)",
-            ('master', 'Joice Master', 'Master', hash_senha('Jv568279.'))
-        )
-    conn.commit()
-    conn.close()
+        cursor.execute("SELECT COUNT(*) FROM usuarios")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute(
+                "INSERT INTO usuarios (usuario, nome, setor, senha) VALUES (%s, %s, %s, %s)",
+                ('master', 'Joice Master', 'Master', hash_senha('Jv568279.'))
+            )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro na inicialização: {e}")
+    finally:
+        liberar_conexao(conn)
 
 inicializar_banco_de_dados()
 
@@ -254,19 +322,17 @@ def prazo_valido(valor) -> bool:
     except Exception:
         return False
 
-def ultima_semana_producao(dt_inicio, dt_fim):
-    dt_fim_dt    = pd.to_datetime(dt_fim)
-    dt_inicio_dt = pd.to_datetime(dt_inicio)
-    inicio_ultima_semana = dt_fim_dt - timedelta(days=6)
-    return max(inicio_ultima_semana, dt_inicio_dt)
-
 # ========================================================
-# FUNÇÕES DE BANCO
+# FUNÇÕES DE BANCO — com cache, pool e try/finally
 # ========================================================
+@st.cache_data(ttl=30)
 def carregar_macro():
     conn = conectar_banco()
-    df = pd.read_sql_query("SELECT * FROM cronograma_macro ORDER BY id", conn)
-    conn.close()
+    try:
+        with st.spinner("Carregando cronograma..."):
+            df = pd.read_sql_query("SELECT * FROM cronograma_macro ORDER BY id", conn)
+    finally:
+        liberar_conexao(conn)
     for col in ['inicio_previsto', 'termino_obra', 'prazo_engenharia', 'data_limite_despacho', 'primeiro_dia_producao']:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
@@ -278,13 +344,18 @@ def carregar_macro():
         'M2_Total_Tarefa': 'M2_Total_Tarefa', 'Status_Engenharia': 'Status_Engenharia',
         'Tipo_Escopo': 'Tipo_Escopo', 'Etapa_Macro': 'Etapa_Macro',
     }
-    df = df.rename(columns=rename)
-    return df
+    return df.rename(columns=rename)
 
+@st.cache_data(ttl=30)
 def carregar_micro():
     conn = conectar_banco()
-    df = pd.read_sql_query("SELECT * FROM itens_detalhado ORDER BY Data_Producao_Programada ASC", conn)
-    conn.close()
+    try:
+        with st.spinner("Carregando lotes..."):
+            df = pd.read_sql_query(
+                "SELECT * FROM itens_detalhado ORDER BY Data_Producao_Programada ASC", conn
+            )
+    finally:
+        liberar_conexao(conn)
     for col in ['data_producao_programada', 'data_limite_obra', 'data_despacho']:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
@@ -297,13 +368,63 @@ def carregar_micro():
         'Romaneio_Chapas': 'Romaneio_Chapas', 'Status_Item': 'Status_Item',
         'Fase_Produtiva': 'Fase_Produtiva', 'Enviado_Logistica': 'Enviado_Logistica',
     }
-    df = df.rename(columns=rename)
-    return df
+    return df.rename(columns=rename)
 
+@st.cache_data(ttl=30)
+def carregar_micro_por_obra(obra: str):
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            "SELECT * FROM itens_detalhado WHERE Obra_Vinculada = %s ORDER BY Data_Producao_Programada ASC",
+            conn, params=(obra,)
+        )
+    finally:
+        liberar_conexao(conn)
+    for col in ['data_producao_programada', 'data_limite_obra', 'data_despacho']:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+    df.columns = [c.replace('_', ' ').title().replace(' ', '_') if c != 'id' else c for c in df.columns]
+    rename = {
+        'Data_Producao_Programada': 'Data_Producao_Programada', 'Data_Limite_Obra': 'Data_Limite_Obra',
+        'Data_Despacho': 'Data_Despacho', 'Edt_Vinculado': 'EDT_Vinculado',
+        'Obra_Vinculada': 'Obra_Vinculada', 'Cod_Lote': 'Cod_Lote', 'Num_Op': 'Num_OP',
+        'Tipo_Material': 'Tipo_Material', 'Qtd_Caixas': 'Qtd_Caixas', 'M2_Item': 'M2_Item',
+        'Romaneio_Chapas': 'Romaneio_Chapas', 'Status_Item': 'Status_Item',
+        'Fase_Produtiva': 'Fase_Produtiva', 'Enviado_Logistica': 'Enviado_Logistica',
+    }
+    return df.rename(columns=rename)
+
+@st.cache_data(ttl=30)
+def carregar_macro_por_obra(obra: str):
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            "SELECT * FROM cronograma_macro WHERE Obra = %s ORDER BY id", conn, params=(obra,)
+        )
+    finally:
+        liberar_conexao(conn)
+    for col in ['inicio_previsto', 'termino_obra', 'prazo_engenharia', 'data_limite_despacho', 'primeiro_dia_producao']:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+    df.columns = [c.replace('_', ' ').title().replace(' ', '_') if c != 'id' else c for c in df.columns]
+    rename = {
+        'Inicio_Previsto': 'Inicio_Previsto', 'Termino_Obra': 'Termino_Obra',
+        'Prazo_Engenharia': 'Prazo_Engenharia', 'Data_Limite_Despacho': 'Data_Limite_Despacho',
+        'Primeiro_Dia_Producao': 'Primeiro_Dia_Producao', 'Edt': 'EDT',
+        'M2_Total_Tarefa': 'M2_Total_Tarefa', 'Status_Engenharia': 'Status_Engenharia',
+        'Tipo_Escopo': 'Tipo_Escopo', 'Etapa_Macro': 'Etapa_Macro',
+    }
+    return df.rename(columns=rename)
+
+@st.cache_data(ttl=30)
 def carregar_fila_logistica():
     conn = conectar_banco()
-    df = pd.read_sql_query("SELECT * FROM logistica_envios ORDER BY data_limite_despacho ASC NULLS LAST", conn)
-    conn.close()
+    try:
+        df = pd.read_sql_query(
+            "SELECT * FROM logistica_envios ORDER BY data_limite_despacho ASC NULLS LAST", conn
+        )
+    finally:
+        liberar_conexao(conn)
     for col in ['data_limite_despacho', 'data_envio_agendado']:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
@@ -317,200 +438,441 @@ def carregar_fila_logistica():
         'Confirmado_Por': 'Confirmado_Por', 'Confirmado_Em': 'Confirmado_Em',
         'Item_Id': 'item_id', 'Edt_Vinculado': 'EDT_Vinculado',
     }
-    df = df.rename(columns=rename)
-    return df
+    return df.rename(columns=rename)
 
+@st.cache_data(ttl=30)
 def carregar_solicitacoes():
     conn = conectar_banco()
-    df = pd.read_sql_query("SELECT * FROM solicitacoes_prazo ORDER BY id DESC", conn)
-    conn.close()
+    try:
+        df = pd.read_sql_query("SELECT * FROM solicitacoes_prazo ORDER BY id DESC", conn)
+    finally:
+        liberar_conexao(conn)
     return df
+
+def _limpar_cache_geral():
+    carregar_macro.clear()
+    carregar_micro.clear()
+    carregar_fila_logistica.clear()
+    carregar_solicitacoes.clear()
+    try:
+        carregar_macro_por_obra.clear()
+        carregar_micro_por_obra.clear()
+    except Exception:
+        pass
 
 def salvar_lotes_micro(lotes: list):
     if not lotes:
         return
     conn = conectar_banco()
-    cursor = conn.cursor()
-    for l in lotes:
-        cursor.execute("""
-            INSERT INTO itens_detalhado
-            (Obra_Vinculada, EDT_Vinculado, Cod_Lote, Num_OP, Tipo_Material,
-             Qtd_Caixas, M2_Item, Data_Producao_Programada, Data_Limite_Obra,
-             Data_Despacho, Romaneio_Chapas, Status_Item, Dificuldade, Fase_Produtiva, Enviado_Logistica)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        """, (
-            l['Obra_Vinculada'], l['EDT_Vinculado'], l['Cod_Lote'], l['Num_OP'],
-            l['Tipo_Material'], l['Qtd_Caixas'], l['M2_Item'],
-            l['Data_Producao_Programada'], l['Data_Limite_Obra'], l['Data_Despacho'],
-            l['Romaneio_Chapas'], l['Status_Item'], l['Dificuldade'],
-            l['Fase_Produtiva'], l['Enviado_Logistica']
-        ))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        for l in lotes:
+            cursor.execute("""
+                INSERT INTO itens_detalhado
+                (Obra_Vinculada, EDT_Vinculado, Cod_Lote, Num_OP, Tipo_Material,
+                 Qtd_Caixas, M2_Item, Data_Producao_Programada, Data_Limite_Obra,
+                 Data_Despacho, Romaneio_Chapas, Status_Item, Dificuldade, Fase_Produtiva, Enviado_Logistica)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (
+                l['Obra_Vinculada'], l['EDT_Vinculado'], l['Cod_Lote'], l['Num_OP'],
+                l['Tipo_Material'], l['Qtd_Caixas'], l['M2_Item'],
+                l['Data_Producao_Programada'], l['Data_Limite_Obra'], l['Data_Despacho'],
+                l['Romaneio_Chapas'], l['Status_Item'], l['Dificuldade'],
+                l['Fase_Produtiva'], l['Enviado_Logistica']
+            ))
+        conn.commit()
+        _limpar_cache_geral()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar lotes: {e}")
+    finally:
+        liberar_conexao(conn)
 
 def deletar_lotes_por_edt_lote(obra, edt, cod_lote):
     conn = conectar_banco()
-    cursor = conn.cursor()
-    if edt:
-        cursor.execute("DELETE FROM itens_detalhado WHERE Obra_Vinculada=%s AND EDT_Vinculado=%s AND Cod_Lote=%s", (obra, edt, cod_lote))
-    else:
-        cursor.execute("DELETE FROM itens_detalhado WHERE Obra_Vinculada=%s AND Cod_Lote=%s", (obra, cod_lote))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        if edt:
+            cursor.execute(
+                "DELETE FROM itens_detalhado WHERE Obra_Vinculada=%s AND EDT_Vinculado=%s AND Cod_Lote=%s",
+                (obra, edt, cod_lote)
+            )
+        else:
+            cursor.execute(
+                "DELETE FROM itens_detalhado WHERE Obra_Vinculada=%s AND Cod_Lote=%s",
+                (obra, cod_lote)
+            )
+        conn.commit()
+        _limpar_cache_geral()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao deletar lote: {e}")
+    finally:
+        liberar_conexao(conn)
 
 def atualizar_cronograma_macro_datas(edt, prazo_eng, primeiro_prod, despacho):
     conn = conectar_banco()
-    cursor = conn.cursor()
-    cursor.execute("SELECT prazo_engenharia, primeiro_dia_producao, data_limite_despacho FROM cronograma_macro WHERE EDT=%s", (edt,))
-    row = cursor.fetchone()
-    def to_dt(v):
-        try:
-            return pd.to_datetime(v) if v else None
-        except Exception:
-            return None
-    if row:
-        pa, pp, pd_ = to_dt(row[0]), to_dt(row[1]), to_dt(row[2])
-        novo_prazo    = min(pa,  pd.to_datetime(prazo_eng))     if pa  else pd.to_datetime(prazo_eng)
-        novo_primeiro = min(pp,  pd.to_datetime(primeiro_prod)) if pp  else pd.to_datetime(primeiro_prod)
-        novo_despacho = min(pd_, pd.to_datetime(despacho))      if pd_ else pd.to_datetime(despacho)
-    else:
-        novo_prazo    = pd.to_datetime(prazo_eng)
-        novo_primeiro = pd.to_datetime(primeiro_prod)
-        novo_despacho = pd.to_datetime(despacho)
-    cursor.execute("""
-        UPDATE cronograma_macro
-        SET Prazo_Engenharia=%s, Primeiro_Dia_Producao=%s, Data_Limite_Despacho=%s
-        WHERE EDT=%s
-    """, (novo_prazo.strftime('%Y-%m-%d'), novo_primeiro.strftime('%Y-%m-%d'), novo_despacho.strftime('%Y-%m-%d'), edt))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT prazo_engenharia, primeiro_dia_producao, data_limite_despacho FROM cronograma_macro WHERE EDT=%s",
+            (edt,)
+        )
+        row = cursor.fetchone()
+        def to_dt(v):
+            try:
+                return pd.to_datetime(v) if v else None
+            except Exception:
+                return None
+        if row:
+            pa, pp, pd_ = to_dt(row[0]), to_dt(row[1]), to_dt(row[2])
+            novo_prazo    = min(pa,  pd.to_datetime(prazo_eng))     if pa  else pd.to_datetime(prazo_eng)
+            novo_primeiro = min(pp,  pd.to_datetime(primeiro_prod)) if pp  else pd.to_datetime(primeiro_prod)
+            novo_despacho = min(pd_, pd.to_datetime(despacho))      if pd_ else pd.to_datetime(despacho)
+        else:
+            novo_prazo    = pd.to_datetime(prazo_eng)
+            novo_primeiro = pd.to_datetime(primeiro_prod)
+            novo_despacho = pd.to_datetime(despacho)
+        cursor.execute("""
+            UPDATE cronograma_macro
+            SET Prazo_Engenharia=%s, Primeiro_Dia_Producao=%s, Data_Limite_Despacho=%s
+            WHERE EDT=%s
+        """, (
+            novo_prazo.strftime('%Y-%m-%d'),
+            novo_primeiro.strftime('%Y-%m-%d'),
+            novo_despacho.strftime('%Y-%m-%d'),
+            edt
+        ))
+        conn.commit()
+        _limpar_cache_geral()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao atualizar datas: {e}")
+    finally:
+        liberar_conexao(conn)
 
 def atualizar_status_engenharia(edt_id, novo_status):
     conn = conectar_banco()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE cronograma_macro SET Status_Engenharia=%s WHERE id=%s", (novo_status, edt_id))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE cronograma_macro SET Status_Engenharia=%s WHERE id=%s", (novo_status, edt_id))
+        conn.commit()
+        _limpar_cache_geral()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao atualizar status: {e}")
+    finally:
+        liberar_conexao(conn)
 
 def salvar_solicitacao(edt, tarefa, prazo_atual, prazo_sol, justif, criado_por):
     conn = conectar_banco()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO solicitacoes_prazo (edt, tarefa, prazo_atual, prazo_solicitado, justificativa, criado_por, status, criado_em)
-        VALUES (%s,%s,%s,%s,%s,%s,'Pendente de Aprovacao',%s)
-    """, (edt, tarefa, prazo_atual, prazo_sol, justif, criado_por, datetime.now().strftime('%d/%m/%Y %H:%M')))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO solicitacoes_prazo (edt, tarefa, prazo_atual, prazo_solicitado, justificativa, criado_por, status, criado_em)
+            VALUES (%s,%s,%s,%s,%s,%s,'Pendente de Aprovacao',%s)
+        """, (edt, tarefa, prazo_atual, prazo_sol, justif, criado_por, datetime.now().strftime('%d/%m/%Y %H:%M')))
+        conn.commit()
+        carregar_solicitacoes.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar solicitação: {e}")
+    finally:
+        liberar_conexao(conn)
 
 def atualizar_status_solicitacao(sol_id, novo_status):
     conn = conectar_banco()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE solicitacoes_prazo SET status=%s WHERE id=%s", (novo_status, sol_id))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE solicitacoes_prazo SET status=%s WHERE id=%s", (novo_status, sol_id))
+        conn.commit()
+        carregar_solicitacoes.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao atualizar solicitação: {e}")
+    finally:
+        liberar_conexao(conn)
 
 def enviar_para_logistica(row, limite_despacho):
     conn = conectar_banco()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM logistica_envios WHERE item_id=%s", (int(row['id']),))
-    if cursor.fetchone():
-        conn.close()
-        return
-    cursor.execute("""
-        INSERT INTO logistica_envios
-        (item_id, Obra_Vinculada, EDT_Vinculado, Cod_Lote, Num_OP, Tipo_Material,
-         Qtd_Caixas, M2_Item, Romaneio_Chapas, Data_Limite_Despacho, Status_Logistica)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'Aguardando Agendamento')
-    """, (
-        int(row['id']), row['Obra_Vinculada'], row['EDT_Vinculado'], row['Cod_Lote'],
-        row.get('Num_OP') or '', row['Tipo_Material'], int(row['Qtd_Caixas']), float(row['M2_Item']),
-        row['Romaneio_Chapas'], limite_despacho.strftime('%Y-%m-%d') if prazo_valido(limite_despacho) else None
-    ))
-    cursor.execute("UPDATE itens_detalhado SET Enviado_Logistica=1 WHERE id=%s", (int(row['id']),))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM logistica_envios WHERE item_id=%s", (int(row['id']),))
+        if cursor.fetchone():
+            return
+        cursor.execute("""
+            INSERT INTO logistica_envios
+            (item_id, Obra_Vinculada, EDT_Vinculado, Cod_Lote, Num_OP, Tipo_Material,
+             Qtd_Caixas, M2_Item, Romaneio_Chapas, Data_Limite_Despacho, Status_Logistica)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'Aguardando Agendamento')
+        """, (
+            int(row['id']), row['Obra_Vinculada'], row['EDT_Vinculado'], row['Cod_Lote'],
+            row.get('Num_OP') or '', row['Tipo_Material'], int(row['Qtd_Caixas']), float(row['M2_Item']),
+            row['Romaneio_Chapas'],
+            limite_despacho.strftime('%Y-%m-%d') if prazo_valido(limite_despacho) else None
+        ))
+        cursor.execute("UPDATE itens_detalhado SET Enviado_Logistica=1 WHERE id=%s", (int(row['id']),))
+        conn.commit()
+        _limpar_cache_geral()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao enviar para logística: {e}")
+    finally:
+        liberar_conexao(conn)
 
 def agendar_envio(log_id, data_envio, transportadora, veiculo, obs, usuario):
     conn = conectar_banco()
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE logistica_envios
-        SET Data_Envio_Agendado=%s, Transportadora=%s, Veiculo=%s, Observacoes=%s, Status_Logistica='Envio Agendado'
-        WHERE id=%s
-    """, (data_envio.strftime('%Y-%m-%d') if data_envio else None, transportadora, veiculo, obs, log_id))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE logistica_envios
+            SET Data_Envio_Agendado=%s, Transportadora=%s, Veiculo=%s, Observacoes=%s, Status_Logistica='Envio Agendado'
+            WHERE id=%s
+        """, (
+            data_envio.strftime('%Y-%m-%d') if data_envio else None,
+            transportadora, veiculo, obs, log_id
+        ))
+        conn.commit()
+        carregar_fila_logistica.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao agendar envio: {e}")
+    finally:
+        liberar_conexao(conn)
 
 def confirmar_despacho(log_id, usuario):
     conn = conectar_banco()
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE logistica_envios
-        SET Status_Logistica='Despachado', Confirmado_Por=%s, Confirmado_Em=%s
-        WHERE id=%s
-    """, (usuario, datetime.now().strftime('%d/%m/%Y %H:%M'), log_id))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE logistica_envios
+            SET Status_Logistica='Despachado', Confirmado_Por=%s, Confirmado_Em=%s
+            WHERE id=%s
+        """, (usuario, datetime.now().strftime('%d/%m/%Y %H:%M'), log_id))
+        conn.commit()
+        carregar_fila_logistica.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao confirmar despacho: {e}")
+    finally:
+        liberar_conexao(conn)
 
 def verificar_login(usuario, senha):
     conn = conectar_banco()
-    cursor = conn.cursor()
-    cursor.execute("SELECT nome, setor FROM usuarios WHERE usuario=%s AND senha=%s", (usuario, hash_senha(senha)))
-    resultado = cursor.fetchone()
-    conn.close()
-    return resultado
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT nome, setor, senha FROM usuarios WHERE usuario=%s", (usuario,))
+        resultado = cursor.fetchone()
+        if resultado and verificar_senha(senha, resultado[2]):
+            return resultado[0], resultado[1]
+        return None
+    except Exception:
+        return None
+    finally:
+        liberar_conexao(conn)
 
 def resetar_banco_dados_completo():
     conn = conectar_banco()
-    cursor = conn.cursor()
-    for tabela in ['cronograma_macro', 'itens_detalhado', 'solicitacoes_prazo', 'logistica_envios']:
-        cursor.execute(f"DELETE FROM {tabela}")
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        for tabela in ['cronograma_macro', 'itens_detalhado', 'solicitacoes_prazo', 'logistica_envios',
+                       'medicao_historico', 'medicao_subdivisoes', 'medicao_servicos', 'medicao_obras']:
+            cursor.execute(f"DELETE FROM {tabela}")
+        conn.commit()
+        _limpar_cache_geral()
+        carregar_medicao_obras.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro no reset: {e}")
+    finally:
+        liberar_conexao(conn)
 
 def salvar_componentes(item_id, obra, cod_lote, num_op, componentes: list):
     conn = conectar_banco()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM componentes_op WHERE item_id=%s", (item_id,))
-    for c in componentes:
-        cursor.execute("""
-            INSERT INTO componentes_op
-            (item_id, Obra_Vinculada, Cod_Lote, Num_OP, Nome_Componente, Quantidade, Unidade,
-             Status_Item, Observacao)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,'Aguardando Conferencia',NULL)
-        """, (item_id, obra, cod_lote, num_op, c['nome'], c['qtd'], c['unidade']))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM componentes_op WHERE item_id=%s", (item_id,))
+        for c in componentes:
+            cursor.execute("""
+                INSERT INTO componentes_op
+                (item_id, Obra_Vinculada, Cod_Lote, Num_OP, Nome_Componente, Quantidade, Unidade,
+                 Status_Item, Observacao)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,'Aguardando Conferencia',NULL)
+            """, (item_id, obra, cod_lote, num_op, c['nome'], c['qtd'], c['unidade']))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar componentes: {e}")
+    finally:
+        liberar_conexao(conn)
 
+@st.cache_data(ttl=30)
 def carregar_componentes_op(item_id):
     conn = conectar_banco()
-    df = pd.read_sql_query("SELECT * FROM componentes_op WHERE item_id=%s ORDER BY id", conn, params=(item_id,))
-    conn.close()
+    try:
+        df = pd.read_sql_query(
+            "SELECT * FROM componentes_op WHERE item_id=%s ORDER BY id", conn, params=(item_id,)
+        )
+    finally:
+        liberar_conexao(conn)
     return df
 
+@st.cache_data(ttl=30)
 def carregar_todas_ops_com_componentes():
     conn = conectar_banco()
-    df = pd.read_sql_query("""
-        SELECT DISTINCT item_id, Obra_Vinculada, Cod_Lote, Num_OP
-        FROM componentes_op
-        ORDER BY Obra_Vinculada, Cod_Lote
-    """, conn)
-    conn.close()
+    try:
+        df = pd.read_sql_query("""
+            SELECT DISTINCT item_id, Obra_Vinculada, Cod_Lote, Num_OP
+            FROM componentes_op ORDER BY Obra_Vinculada, Cod_Lote
+        """, conn)
+    finally:
+        liberar_conexao(conn)
     return df
 
 def atualizar_componente(comp_id, status, obs, usuario):
     conn = conectar_banco()
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE componentes_op
-        SET Status_Item=%s, Observacao=%s, Conferido_Por=%s, Conferido_Em=%s
-        WHERE id=%s
-    """, (status, obs, usuario, datetime.now().strftime('%d/%m/%Y %H:%M'), comp_id))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE componentes_op
+            SET Status_Item=%s, Observacao=%s, Conferido_Por=%s, Conferido_Em=%s
+            WHERE id=%s
+        """, (status, obs, usuario, datetime.now().strftime('%d/%m/%Y %H:%M'), comp_id))
+        conn.commit()
+        carregar_componentes_op.clear()
+        carregar_todas_ops_com_componentes.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao atualizar componente: {e}")
+    finally:
+        liberar_conexao(conn)
 
 # ========================================================
-# HELPER — BLOCOS SEMANAIS (reutilizável)
+# FUNÇÕES DO SISTEMA DE MEDIÇÃO — agora no banco
+# ========================================================
+@st.cache_data(ttl=30)
+def carregar_medicao_obras():
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query("SELECT * FROM medicao_obras ORDER BY id", conn)
+    finally:
+        liberar_conexao(conn)
+    return df
+
+@st.cache_data(ttl=30)
+def carregar_medicao_servicos(obra_id: int):
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            "SELECT * FROM medicao_servicos WHERE obra_id=%s ORDER BY id", conn, params=(obra_id,)
+        )
+    finally:
+        liberar_conexao(conn)
+    return df
+
+@st.cache_data(ttl=30)
+def carregar_medicao_subdivisoes(servico_id: int):
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            "SELECT * FROM medicao_subdivisoes WHERE servico_id=%s ORDER BY id", conn, params=(servico_id,)
+        )
+    finally:
+        liberar_conexao(conn)
+    return df
+
+@st.cache_data(ttl=30)
+def carregar_medicao_historico(obra_id: int):
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            "SELECT * FROM medicao_historico WHERE obra_id=%s ORDER BY periodo", conn, params=(obra_id,)
+        )
+    finally:
+        liberar_conexao(conn)
+    return df
+
+def salvar_medicao_obra(nome, valor_m2, metragem):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO medicao_obras (nome, valor_m2_global, metragem_geral) VALUES (%s,%s,%s) RETURNING id",
+            (nome, valor_m2, metragem)
+        )
+        new_id = cursor.fetchone()[0]
+        conn.commit()
+        carregar_medicao_obras.clear()
+        return new_id
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar obra: {e}")
+        return None
+    finally:
+        liberar_conexao(conn)
+
+def excluir_medicao_obra(obra_id):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM medicao_obras WHERE id=%s", (obra_id,))
+        conn.commit()
+        carregar_medicao_obras.clear()
+        carregar_medicao_servicos.clear()
+        carregar_medicao_subdivisoes.clear()
+        carregar_medicao_historico.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao excluir obra: {e}")
+    finally:
+        liberar_conexao(conn)
+
+def salvar_servicos_medicao(obra_id: int, periodo: str, servicos: list):
+    """Salva serviços, subdivisões e snapshot do histórico para o período."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        # Apaga serviços antigos e recria (substituição total)
+        cursor.execute("DELETE FROM medicao_servicos WHERE obra_id=%s", (obra_id,))
+        total_medido = 0.0
+        snapshot = []
+        for srv in servicos:
+            cursor.execute(
+                "INSERT INTO medicao_servicos (obra_id, nome, valor_m2_servico) VALUES (%s,%s,%s) RETURNING id",
+                (obra_id, srv['nome'], srv['valor_m2_servico'])
+            )
+            srv_id = cursor.fetchone()[0]
+            subs_snap = []
+            for sub in srv['subdivisoes']:
+                cursor.execute(
+                    "INSERT INTO medicao_subdivisoes (servico_id, nome, m2, percentual) VALUES (%s,%s,%s,%s)",
+                    (srv_id, sub['nome'], sub['m2'], sub['percentual'])
+                )
+                val = sub['m2'] * (srv['valor_m2_servico'] * (sub['percentual'] / 100))
+                total_medido += val
+                subs_snap.append({**sub, 'subtotal': val})
+            snapshot.append({**srv, 'subdivisoes': subs_snap})
+        import json
+        cursor.execute("""
+            INSERT INTO medicao_historico (obra_id, periodo, total_medido, snapshot)
+            VALUES (%s,%s,%s,%s)
+            ON CONFLICT (obra_id, periodo)
+            DO UPDATE SET total_medido=EXCLUDED.total_medido, snapshot=EXCLUDED.snapshot, criado_em=NOW()
+        """, (obra_id, periodo, total_medido, json.dumps(snapshot)))
+        conn.commit()
+        carregar_medicao_servicos.clear()
+        carregar_medicao_subdivisoes.clear()
+        carregar_medicao_historico.clear()
+        return total_medido
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar serviços: {e}")
+        return None
+    finally:
+        liberar_conexao(conn)
+
+# ========================================================
+# HELPER — BLOCOS SEMANAIS
 # ========================================================
 def blocos_semanais(df_input):
     if df_input.empty:
@@ -565,8 +927,7 @@ if not st.session_state.autenticado:
         with ci2:
             st.image("assets/LOGO_BAUDENPASSOLD.png", use_container_width=True)
         st.markdown("""
-        <p style='text-align:center; color:#64748B; font-size:13px;
-                    margin-top:8px; letter-spacing:0.05em;'>
+        <p style='text-align:center; color:#64748B; font-size:13px; margin-top:8px; letter-spacing:0.05em;'>
         PCP & Controle Operacional
         </p>
         """, unsafe_allow_html=True)
@@ -575,7 +936,8 @@ if not st.session_state.autenticado:
             user_input = st.text_input("Usuário:")
             pass_input = st.text_input("Senha:", type="password")
             if st.button("Entrar", use_container_width=True):
-                dados = verificar_login(user_input.strip(), pass_input)
+                with st.spinner("Verificando..."):
+                    dados = verificar_login(user_input.strip(), pass_input)
                 if dados:
                     st.session_state.autenticado   = True
                     st.session_state.usuario_nome  = dados[0]
@@ -584,6 +946,7 @@ if not st.session_state.autenticado:
                 else:
                     st.error("Usuário ou senha inválidos.")
     st.stop()
+
 # ========================================================
 # HEADER
 # ========================================================
@@ -601,9 +964,9 @@ df_banco_macro = carregar_macro()
 df_banco_micro = carregar_micro()
 
 if not df_banco_macro.empty:
-    obras_lista       = sorted(df_banco_macro['Obra'].unique().tolist())
-    obra_selecionada  = st.selectbox("Obra de trabalho:", obras_lista)
-    df_macro_filtrado = df_banco_macro[df_banco_macro['Obra'] == obra_selecionada].copy()
+    obras_lista      = sorted(df_banco_macro['Obra'].unique().tolist())
+    obra_selecionada = st.selectbox("Obra de trabalho:", obras_lista)
+    df_macro_filtrado = carregar_macro_por_obra(obra_selecionada)
 else:
     obra_selecionada  = None
     df_macro_filtrado = pd.DataFrame()
@@ -651,7 +1014,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             )
             obra_tv = st.selectbox("Filtrar por obra:", obras_tv, key="sb_obra_tv")
 
-            # SEÇÃO 1 — PREVISÃO
             st.markdown("### 📋 Previsão de Entrada em Produção")
             st.caption("Lotes planejados no Vincular Datas — ainda não liberados oficialmente.")
             df_prev = df_banco_micro.copy() if not df_banco_micro.empty else pd.DataFrame()
@@ -664,8 +1026,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 blocos_semanais(df_prev_pend)
 
             st.markdown("---")
-
-            # SEÇÃO 2 — CALENDÁRIO
             st.markdown("### 📆 Calendário de Produção — OPs Liberadas")
             st.caption("Apenas lotes liberados oficialmente na aba 'Liberar OPs da Semana'.")
             if not df_banco_micro.empty:
@@ -792,7 +1152,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     op_txt = row['Num_OP'] if row.get('Num_OP') else "Aguardando OP"
                                     st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {row.get('Fase_Produtiva', '—')}")
                                     if pode_concluir:
-                                        st.markdown("<span style='color:#EA580C;font-size:12px;font-weight:600;'>Ultima semana de producao — liberado para concluir</span>", unsafe_allow_html=True)
+                                        st.markdown("<span style='color:#EA580C;font-size:12px;font-weight:600;'>Ultima semana — liberado para concluir</span>", unsafe_allow_html=True)
                                     else:
                                         dias_restantes = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel).days
                                         st.markdown(f"<span style='color:#3B82F6;font-size:12px;'>Em producao — {dias_restantes} dias ate o prazo</span>", unsafe_allow_html=True)
@@ -806,16 +1166,24 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                                 if not fr.empty:
                                                     limite_desp = fr.iloc[0].get('Data_Limite_Despacho')
                                             conn = conectar_banco()
-                                            cursor = conn.cursor()
-                                            cursor.execute("UPDATE itens_detalhado SET Status_Item='Concluido' WHERE id=%s", (row['id'],))
-                                            conn.commit()
-                                            conn.close()
+                                            try:
+                                                cursor = conn.cursor()
+                                                cursor.execute(
+                                                    "UPDATE itens_detalhado SET Status_Item='Concluido' WHERE id=%s",
+                                                    (row['id'],)
+                                                )
+                                                conn.commit()
+                                                _limpar_cache_geral()
+                                            except Exception as e:
+                                                conn.rollback()
+                                                st.error(f"Erro: {e}")
+                                            finally:
+                                                liberar_conexao(conn)
                                             enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
-                                            st.toast(f"{row['Cod_Lote']} concluido — enviado para Logistica!")
+                                            st.toast(f"{row['Cod_Lote']} concluido!")
                                             time.sleep(0.3)
                                             st.rerun()
                                     else:
-                                        st.write("")
                                         st.markdown("<div style='text-align:center;color:#94A3B8;font-size:12px;padding:8px;'>Em producao</div>", unsafe_allow_html=True)
                 else:
                     st.info("Nenhuma OP liberada para este filtro ainda.")
@@ -854,12 +1222,11 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
             df_tv = carregar_micro()
             if df_tv.empty:
-                st.markdown("<div style='text-align:center;padding:60px;color:#94A3B8;font-size:20px;'>Nenhum lote cadastrado no sistema.</div>", unsafe_allow_html=True)
+                st.markdown("<div style='text-align:center;padding:60px;color:#94A3B8;font-size:20px;'>Nenhum lote cadastrado.</div>", unsafe_allow_html=True)
             else:
                 def urgencia(row):
                     prazo = row.get('Data_Limite_Obra')
-                    if not prazo_valido(prazo):
-                        return 'sem_prazo'
+                    if not prazo_valido(prazo): return 'sem_prazo'
                     dias = (pd.to_datetime(prazo).normalize() - HOJE_PROJETO).days
                     if dias < 0:   return 'vencido'
                     if dias <= 3:  return 'critico'
@@ -907,16 +1274,16 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             st.markdown(f"""
                             <div style='border:2px solid {cfg["border"]};background:{cfg["bg"]};border-radius:10px;padding:18px 20px;margin-bottom:12px;box-shadow:0 4px 12px rgba(0,0,0,0.10);'>
                                 <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;'>
-                                    <span style='font-size:11px;font-weight:700;color:{cfg["tag_color"]};background:{cfg["bg"]};border:1px solid {cfg["border"]};padding:2px 8px;border-radius:4px;'>{cfg["tag"]}</span>
+                                    <span style='font-size:11px;font-weight:700;color:{cfg["tag_color"]};border:1px solid {cfg["border"]};padding:2px 8px;border-radius:4px;'>{cfg["tag"]}</span>
                                     <span style='font-size:11px;color:#64748B;font-weight:600;'>{dias_txt}</span>
                                 </div>
                                 <div style='font-size:20px;font-weight:800;color:#0F172A;margin-bottom:4px;'>{row["Obra_Vinculada"]}</div>
-                                <div style='font-size:13px;color:#475569;margin-bottom:12px;'>{row["Tipo_Material"]} &nbsp;·&nbsp; {row["Romaneio_Chapas"] or "—"}</div>
+                                <div style='font-size:13px;color:#475569;margin-bottom:12px;'>{row["Tipo_Material"]} · {row["Romaneio_Chapas"] or "—"}</div>
                                 <div style='display:grid;grid-template-columns:1fr 1fr;gap:8px;'>
-                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.05em;'>OP</div><div style='font-size:15px;font-weight:700;color:#1E293B;'>{op_txt}</div></div>
-                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.05em;'>M²</div><div style='font-size:15px;font-weight:700;color:#1E293B;'>{row["M2_Item"]:.2f}</div></div>
-                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.05em;'>Status</div><div style='font-size:13px;font-weight:700;color:{ec};'>{em} {row["Status_Item"]}</div></div>
-                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.05em;'>Prazo</div><div style='font-size:15px;font-weight:700;color:{cfg["tag_color"]};'>{prazo_fmt}</div></div>
+                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;'>OP</div><div style='font-size:15px;font-weight:700;color:#1E293B;'>{op_txt}</div></div>
+                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;'>M²</div><div style='font-size:15px;font-weight:700;color:#1E293B;'>{row["M2_Item"]:.2f}</div></div>
+                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;'>Status</div><div style='font-size:13px;font-weight:700;color:{ec};'>{em} {row["Status_Item"]}</div></div>
+                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;'>Prazo</div><div style='font-size:15px;font-weight:700;color:{cfg["tag_color"]};'>{prazo_fmt}</div></div>
                                 </div>
                             </div>
                             """, unsafe_allow_html=True)
@@ -952,7 +1319,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 st.session_state.tv_last_refresh = time.time()
                 st.rerun()
 
-# ==================================================
+    # ==================================================
     # LIBERAR OPS
     # ==================================================
     elif nome_aba == "Liberar OPs da Semana":
@@ -975,14 +1342,20 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     if st.button("Liberar para producao"):
                         if ids_sel:
                             conn = conectar_banco()
-                            cursor = conn.cursor()
-                            for item_id in ids_sel:
-                                cursor.execute(
-                                    "UPDATE itens_detalhado SET Status_Item='Liberado para Fabrica', Num_OP=%s WHERE id=%s",
-                                    (f"{prefixo}{str(item_id).zfill(3)}", item_id)
-                                )
-                            conn.commit()
-                            conn.close()
+                            try:
+                                cursor = conn.cursor()
+                                for item_id in ids_sel:
+                                    cursor.execute(
+                                        "UPDATE itens_detalhado SET Status_Item='Liberado para Fabrica', Num_OP=%s WHERE id=%s",
+                                        (f"{prefixo}{str(item_id).zfill(3)}", item_id)
+                                    )
+                                conn.commit()
+                                _limpar_cache_geral()
+                            except Exception as e:
+                                conn.rollback()
+                                st.error(f"Erro: {e}")
+                            finally:
+                                liberar_conexao(conn)
                             st.toast("OPs liberadas!")
                             time.sleep(0.5)
                             st.rerun()
@@ -991,13 +1364,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 else:
                     st.success("Todos os lotes ja foram liberados.")
 
-                # ------------------------------------------------
-                # INSERIR COMPONENTES POR OP
-                # ------------------------------------------------
                 st.markdown("---")
                 st.markdown("### 📦 Inserir Componentes por OP")
-                st.caption("Selecione uma OP já liberada e insira a lista de componentes para o almoxarifado.")
-
                 df_lib_ops = df_banco_micro[
                     (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
                     (df_banco_micro['Status_Item'] == "Liberado para Fabrica")
@@ -1006,17 +1374,14 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 if not df_lib_ops.empty:
                     opcoes_ops = [
                         f"{row['Num_OP']} — {row['Cod_Lote']} | {row['Tipo_Material']}"
-                        for _, row in df_lib_ops.iterrows()
-                        if row.get('Num_OP')
+                        for _, row in df_lib_ops.iterrows() if row.get('Num_OP')
                     ]
                     if opcoes_ops:
                         op_sel = st.selectbox("OP:", opcoes_ops, key="sel_op_comp")
                         row_op = df_lib_ops[df_lib_ops['Num_OP'] == op_sel.split(" — ")[0].strip()].iloc[0]
-
                         comp_existentes = carregar_componentes_op(int(row_op['id']))
                         if not comp_existentes.empty:
                             st.success(f"✅ {len(comp_existentes)} componente(s) já cadastrado(s) para esta OP.")
-
                         with st.expander("➕ Adicionar / Substituir lista de componentes", expanded=comp_existentes.empty):
                             st.caption("⚠️ Salvar substitui a lista anterior desta OP.")
                             num_itens = st.number_input("Quantos componentes?", min_value=1, max_value=30, value=3, key="num_comp")
@@ -1031,26 +1396,18 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     und = st.selectbox(f"Un {idx+1}:", ["un", "kg", "m", "m²", "cx", "pç", "rolo"], key=f"comp_und_{idx}")
                                 if nome.strip():
                                     componentes_input.append({"nome": nome.strip(), "qtd": qtd, "unidade": und})
-
                             if st.button("💾 Salvar lista de componentes", key="btn_salvar_comp"):
                                 if not componentes_input:
                                     st.error("Preencha pelo menos um componente.")
                                 else:
-                                    salvar_componentes(
-                                        int(row_op['id']),
-                                        row_op['Obra_Vinculada'],
-                                        row_op['Cod_Lote'],
-                                        row_op['Num_OP'],
-                                        componentes_input
-                                    )
+                                    salvar_componentes(int(row_op['id']), row_op['Obra_Vinculada'], row_op['Cod_Lote'], row_op['Num_OP'], componentes_input)
                                     st.toast(f"Lista salva para {row_op['Num_OP']}!")
                                     time.sleep(0.3)
                                     st.rerun()
                     else:
-                        st.info("Nenhuma OP com número gerado ainda. Libere as OPs primeiro.")
+                        st.info("Nenhuma OP com número gerado ainda.")
                 else:
                     st.info("Nenhuma OP liberada para esta obra ainda.")
-
             else:
                 st.info("Nenhum lote pendente encontrado.")
 
@@ -1070,17 +1427,15 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Metragem Total", f"{df_dir['M2_Item'].sum():,.2f} m²")
                 c2.metric("Subdivisoes", f"{df_dir['EDT_Vinculado'].nunique()} frentes")
-                c3.metric("Prazo de Despacho Mais Distante", data_max.strftime('%d/%m/%Y') if prazo_valido(data_max) else "N/A")
+                c3.metric("Prazo Mais Distante", data_max.strftime('%d/%m/%Y') if prazo_valido(data_max) else "N/A")
 
                 st.markdown("---")
                 st.subheader("Carga Semanal")
-
                 obras_macro = ["Todas as obras"] + (
                     sorted(df_banco_micro['Obra_Vinculada'].dropna().unique().tolist())
                     if not df_banco_micro.empty else []
                 )
 
-                # BLOCO 1: PREVISÃO
                 st.markdown("#### 📋 Previsão")
                 col_f1, _ = st.columns([2, 3])
                 with col_f1:
@@ -1093,8 +1448,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 blocos_semanais(df_prev)
 
                 st.markdown("---")
-
-                # BLOCO 2: EM PRODUÇÃO
                 st.markdown("#### 🔧 Em Produção")
                 col_f2, _ = st.columns([2, 3])
                 with col_f2:
@@ -1107,8 +1460,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 blocos_semanais(df_prod)
 
                 st.markdown("---")
-
-                # BLOCO 3: CONCLUÍDOS
                 st.markdown("#### ✅ Concluídos")
                 col_f3, _ = st.columns([2, 3])
                 with col_f3:
@@ -1160,8 +1511,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     mapa_rows[label] = row
 
                 st.markdown("### Nova Entrega")
-                st.caption("1 lote = 1 entrega. Informe quantas caixas e ate quando — o sistema calcula quando comeca a producao.")
-
                 with st.form("form_fatiamento"):
                     c1, c2 = st.columns(2)
                     with c1:
@@ -1178,9 +1527,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             pd.to_datetime(inicio_prev).date() if prazo_valido(inicio_prev)
                             else (datetime.now() + timedelta(days=30)).date()
                         )
-                        data_alvo = st.date_input("Precisa estar na obra ate:", value=default_dt, format="DD/MM/YYYY",
-                                                  help="Data limite — tudo e calculado retroativamente a partir daqui")
-                        dias_log  = st.number_input("Dias de transporte ate a obra (corridos):", min_value=1, value=3)
+                        data_alvo = st.date_input("Precisa estar na obra ate:", value=default_dt, format="DD/MM/YYYY")
+                        dias_log  = st.number_input("Dias de transporte (corridos):", min_value=1, value=3)
                         dias_fab  = st.number_input("Dias uteis de producao:", min_value=1, value=10)
                         total_cx  = st.number_input("Quantidade de caixas:", min_value=1, value=31)
                         total_m2  = st.number_input("Metragem (m²):", min_value=0.1, value=70.0)
@@ -1213,31 +1561,32 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
                 st.markdown("---")
                 st.markdown("### Lotes Gerados")
-                df_ed_raw = carregar_micro()
+                df_ed_raw = carregar_micro_por_obra(obra_selecionada)
                 if not df_ed_raw.empty:
-                    df_obra = df_ed_raw[df_ed_raw['Obra_Vinculada'] == obra_selecionada].copy()
-                    if not df_obra.empty:
-                        df_obra['Data_Producao_Programada'] = df_obra['Data_Producao_Programada'].dt.strftime('%Y-%m-%d')
-                        df_obra['Data_Limite_Obra']         = df_obra['Data_Limite_Obra'].dt.strftime('%Y-%m-%d')
-                        df_str  = df_obra.copy()
-                        df_edit = st.data_editor(df_str, key="editor_lotes", hide_index=True, use_container_width=True,
-                                                 disabled=["id", "Obra_Vinculada", "Num_OP"])
-                        alteradas = []
-                        for i in df_edit.index:
-                            try:
-                                if not df_edit.loc[i].equals(df_str.loc[i]):
-                                    alteradas.append(df_edit.loc[i])
-                            except Exception:
-                                pass
-                        if alteradas:
-                            conn = conectar_banco()
+                    df_obra = df_ed_raw.copy()
+                    df_obra['Data_Producao_Programada'] = df_obra['Data_Producao_Programada'].dt.strftime('%Y-%m-%d')
+                    df_obra['Data_Limite_Obra']         = df_obra['Data_Limite_Obra'].dt.strftime('%Y-%m-%d')
+                    df_str  = df_obra.copy()
+                    df_edit = st.data_editor(df_str, key="editor_lotes", hide_index=True, use_container_width=True,
+                                             disabled=["id", "Obra_Vinculada", "Num_OP"])
+                    alteradas = []
+                    for i in df_edit.index:
+                        try:
+                            if not df_edit.loc[i].equals(df_str.loc[i]):
+                                alteradas.append(df_edit.loc[i])
+                        except Exception:
+                            pass
+                    if alteradas:
+                        conn = conectar_banco()
+                        try:
                             cursor = conn.cursor()
                             for row in alteradas:
                                 cursor.execute("""
                                     UPDATE itens_detalhado
                                     SET Cod_Lote=%s, Tipo_Material=%s, Qtd_Caixas=%s, M2_Item=%s,
                                         Data_Producao_Programada=%s, Data_Limite_Obra=%s,
-                                        Romaneio_Chapas=%s, Status_Item=%s, Dificuldade=%s, Fase_Produtiva=%s
+                                        Romaneio_Chapas=%s, Status_Item=%s, Dificuldade=%s, Fase_Produtiva=%s,
+                                        updated_at=NOW()
                                     WHERE id=%s
                                 """, (
                                     row['Cod_Lote'], row['Tipo_Material'], int(row['Qtd_Caixas']),
@@ -1247,19 +1596,25 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     row['Fase_Produtiva'], int(row['id'])
                                 ))
                             conn.commit()
-                            conn.close()
-                            st.toast("Salvo!")
-                            time.sleep(0.3)
-                            st.rerun()
-                        st.markdown("#### Remover Lote")
-                        lote_del = st.selectbox("Lote para excluir:", df_obra['Cod_Lote'].unique().tolist())
-                        if st.button(f"Excluir {lote_del}"):
-                            deletar_lotes_por_edt_lote(obra_selecionada, None, lote_del)
-                            st.toast(f"Lote {lote_del} removido!")
-                            time.sleep(0.5)
-                            st.rerun()
-                    else:
-                        st.info("Nenhum lote fatiado ainda.")
+                            _limpar_cache_geral()
+                        except Exception as e:
+                            conn.rollback()
+                            st.error(f"Erro ao salvar: {e}")
+                        finally:
+                            liberar_conexao(conn)
+                        st.toast("Salvo!")
+                        time.sleep(0.3)
+                        st.rerun()
+
+                    st.markdown("#### Remover Lote")
+                    lote_del = st.selectbox("Lote para excluir:", df_obra['Cod_Lote'].unique().tolist())
+                    if st.button(f"Excluir {lote_del}"):
+                        deletar_lotes_por_edt_lote(obra_selecionada, None, lote_del)
+                        st.toast(f"Lote {lote_del} removido!")
+                        time.sleep(0.5)
+                        st.rerun()
+                else:
+                    st.info("Nenhum lote fatiado ainda.")
 
     # ==================================================
     # CADASTRAR OBRA
@@ -1301,8 +1656,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         st.session_state.mem_dt_ini = dt_ini
                         st.session_state.mem_dt_fim = dt_fim
                         conn = conectar_banco()
-                        cursor = conn.cursor()
                         try:
+                            cursor = conn.cursor()
                             cursor.execute("""
                                 INSERT INTO cronograma_macro
                                 (Obra, EDT, Tipo_Escopo, Etapa_Macro, Subdivisao, Tarefa,
@@ -1311,13 +1666,15 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             """, (nome_obra, edt_cod, escopo, frente, subdiv, tarefa,
                                   float(m2_tot), dt_ini.strftime('%Y-%m-%d'), dt_fim.strftime('%Y-%m-%d')))
                             conn.commit()
+                            _limpar_cache_geral()
                             st.toast("Frente registrada!")
                             time.sleep(0.4)
                             st.rerun()
                         except Exception as e:
+                            conn.rollback()
                             st.error(f"EDT '{edt_cod}' ja existe ou erro: {e}")
                         finally:
-                            conn.close()
+                            liberar_conexao(conn)
 
             if not df_banco_macro.empty:
                 st.markdown("---")
@@ -1331,7 +1688,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 st.dataframe(df_show[cols_s], hide_index=True, use_container_width=True)
 
                 st.markdown("#### Excluir Frente")
-                st.warning("Isso remove a frente do cronograma macro. Lotes vinculados NÃO são removidos automaticamente.")
+                st.warning("Isso remove a frente do cronograma macro.")
                 opcoes_del = [
                     f"{row['EDT']} — {row['Tarefa']} [{row.get('Subdivisao','')}]"
                     for _, row in df_banco_macro[df_banco_macro['Obra'] == obra_selecionada].iterrows()
@@ -1341,13 +1698,19 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     edt_del    = frente_del.split(" — ")[0].strip()
                     if st.button(f"Excluir frente {edt_del}", key="btn_del_frente"):
                         conn = conectar_banco()
-                        cursor = conn.cursor()
-                        cursor.execute("DELETE FROM cronograma_macro WHERE EDT=%s", (edt_del,))
-                        conn.commit()
-                        conn.close()
-                        st.toast(f"Frente {edt_del} removida!")
-                        time.sleep(0.5)
-                        st.rerun()
+                        try:
+                            cursor = conn.cursor()
+                            cursor.execute("DELETE FROM cronograma_macro WHERE EDT=%s", (edt_del,))
+                            conn.commit()
+                            _limpar_cache_geral()
+                            st.toast(f"Frente {edt_del} removida!")
+                            time.sleep(0.5)
+                            st.rerun()
+                        except Exception as e:
+                            conn.rollback()
+                            st.error(f"Erro: {e}")
+                        finally:
+                            liberar_conexao(conn)
 
     # ==================================================
     # PAINEL DE ENGENHARIA
@@ -1356,11 +1719,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
         with aba_objeto:
             st.header("Painel Tecnico da Engenharia")
             st.caption(f"Hoje: {HOJE_PROJETO.strftime('%d/%m/%Y')} | Obra: **{obra_selecionada or 'Nenhuma'}**")
-            df_eng = carregar_macro()
-            if obra_selecionada:
-                df_eng = df_eng[df_eng['Obra'] == obra_selecionada]
-            else:
-                df_eng = pd.DataFrame()
+            df_eng = carregar_macro_por_obra(obra_selecionada) if obra_selecionada else pd.DataFrame()
 
             ESTADOS = [
                 "Aguardando Medicao In Loco", "Medicao Realizada — Em Projetos",
@@ -1604,7 +1963,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 else:
                     c4.metric("Atrasos", "Nenhum")
             else:
-                st.info("Nenhum lote na fila. Quando a producao marcar como pronto, aparece aqui automaticamente.")
+                st.info("Nenhum lote na fila ainda.")
 
             st.markdown("---")
 
@@ -1617,9 +1976,9 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         prazo_d = row['Data_Limite_Despacho']
                         if prazo_valido(prazo_d):
                             dias_r = (pd.to_datetime(prazo_d) - HOJE_PROJETO).days
-                            if dias_r < 0:   css_bar = "bar-danger"; tag = f"ATRASADO {abs(dias_r)}d"
-                            elif dias_r <= 3: css_bar = "bar-warn";  tag = f"URGENTE — {dias_r}d restantes"
-                            else:             css_bar = "bar-ok";    tag = f"{dias_r} dias restantes"
+                            if dias_r < 0:    css_bar = "bar-danger"; tag = f"ATRASADO {abs(dias_r)}d"
+                            elif dias_r <= 3: css_bar = "bar-warn";   tag = f"URGENTE — {dias_r}d restantes"
+                            else:             css_bar = "bar-ok";     tag = f"{dias_r} dias restantes"
                         else:
                             css_bar = "bar-neutral"; tag = "Sem prazo definido"
 
@@ -1699,10 +2058,16 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 st.rerun()
                             if st.button("Reagendar", key=f"rag_{row['id']}", use_container_width=True):
                                 conn = conectar_banco()
-                                cursor = conn.cursor()
-                                cursor.execute("UPDATE logistica_envios SET Status_Logistica='Aguardando Agendamento' WHERE id=%s", (row['id'],))
-                                conn.commit()
-                                conn.close()
+                                try:
+                                    cursor = conn.cursor()
+                                    cursor.execute("UPDATE logistica_envios SET Status_Logistica='Aguardando Agendamento' WHERE id=%s", (row['id'],))
+                                    conn.commit()
+                                    carregar_fila_logistica.clear()
+                                except Exception as e:
+                                    conn.rollback()
+                                    st.error(f"Erro: {e}")
+                                finally:
+                                    liberar_conexao(conn)
                                 st.rerun()
                         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1722,6 +2087,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     if not df_pont.empty:
                         ok = (pd.to_datetime(df_pont['Data_Envio_Agendado']) <= pd.to_datetime(df_pont['Data_Limite_Despacho'])).sum()
                         st.metric("Pontualidade nos despachos", f"{ok / len(df_pont) * 100:.0f}%")
+
     # ==================================================
     # ALMOXARIFADO
     # ==================================================
@@ -1729,640 +2095,317 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
         with aba_objeto:
             st.header("Almoxarifado — Conferência de Componentes")
             st.caption(f"Hoje: {HOJE_PROJETO.strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
-
             df_ops_comp = carregar_todas_ops_com_componentes()
 
             if df_ops_comp.empty:
                 st.info("Nenhuma OP com lista de componentes cadastrada ainda.")
             else:
-                # métricas rápidas
-                todos_comps = pd.read_sql_query(
-                    "SELECT * FROM componentes_op ORDER BY item_id, id",
-                    conectar_banco()
-                )
+                conn_alm = conectar_banco()
+                try:
+                    todos_comps = pd.read_sql_query("SELECT * FROM componentes_op ORDER BY item_id, id", conn_alm)
+                finally:
+                    liberar_conexao(conn_alm)
+
                 n_aguard  = len(todos_comps[todos_comps['status_item'] == 'Aguardando Conferencia'])
                 n_ok      = len(todos_comps[todos_comps['status_item'] == 'Disponivel'])
                 n_falta   = len(todos_comps[todos_comps['status_item'] == 'Indisponivel'])
-
                 c1, c2, c3 = st.columns(3)
                 c1.metric("⏳ Aguardando", n_aguard)
                 c2.metric("✅ Disponíveis", n_ok)
                 c3.metric("❌ Indisponíveis", n_falta)
                 st.markdown("---")
 
-                # agrupa por OP
                 for _, op_row in df_ops_comp.iterrows():
                     df_comp = carregar_componentes_op(int(op_row['item_id']))
                     if df_comp.empty:
                         continue
-
                     n_total   = len(df_comp)
                     n_conf    = len(df_comp[df_comp['status_item'] != 'Aguardando Conferencia'])
                     n_indisp  = len(df_comp[df_comp['status_item'] == 'Indisponivel'])
-
-                    if n_indisp > 0:
-                        css_bar = "bar-danger"
-                        icone   = "❌"
-                    elif n_conf == n_total:
-                        css_bar = "bar-ok"
-                        icone   = "✅"
-                    else:
-                        css_bar = "bar-warn"
-                        icone   = "⏳"
+                    if n_indisp > 0:   css_bar = "bar-danger"; icone = "❌"
+                    elif n_conf == n_total: css_bar = "bar-ok"; icone = "✅"
+                    else:              css_bar = "bar-warn";  icone = "⏳"
 
                     with st.expander(
                         f"{icone} OP: {op_row['num_op']} — {op_row['cod_lote']} | {op_row['obra_vinculada']}  "
                         f"({n_conf}/{n_total} conferidos{f' — {n_indisp} FALTANDO' if n_indisp > 0 else ''})",
                         expanded=(n_indisp > 0 or n_conf < n_total)
                     ):
-                        # cabeçalho
                         hc = st.columns([4, 2, 2, 3, 2])
                         for col_h, label in zip(hc, ["COMPONENTE", "QTD", "UN", "STATUS", "AÇÃO"]):
-                            col_h.markdown(
-                                f"<div style='font-size:11px;font-weight:700;color:#94A3B8;"
-                                f"text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>",
-                                unsafe_allow_html=True
-                            )
+                            col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
                         st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
 
                         for _, comp in df_comp.iterrows():
                             st_item = comp['status_item']
-                            if st_item == 'Disponivel':
-                                cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
-                            elif st_item == 'Indisponivel':
-                                cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
-                            else:
-                                cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
-
+                            if st_item == 'Disponivel':     cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
+                            elif st_item == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
+                            else:                           cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
                             rc = st.columns([4, 2, 2, 3, 2])
                             rc[0].markdown(f"**{comp['nome_componente']}**")
                             rc[1].markdown(f"`{comp['quantidade']}`")
                             rc[2].markdown(f"{comp['unidade']}")
-                            rc[3].markdown(
-                                f"<span style='background:{bg};color:{cor};padding:3px 8px;"
-                                f"border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {st_item}</span>",
-                                unsafe_allow_html=True
-                            )
+                            rc[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {st_item}</span>", unsafe_allow_html=True)
                             with rc[4]:
                                 acao = st.selectbox(
                                     "", ["Aguardando Conferencia", "Disponivel", "Indisponivel"],
                                     index=["Aguardando Conferencia", "Disponivel", "Indisponivel"].index(st_item),
-                                    key=f"alm_st_{comp['id']}",
-                                    label_visibility="collapsed"
+                                    key=f"alm_st_{comp['id']}", label_visibility="collapsed"
                                 )
                                 if acao != st_item:
                                     atualizar_componente(comp['id'], acao, comp.get('observacao') or '', st.session_state.usuario_nome)
                                     st.rerun()
-
-                            # campo de observação livre por item
                             obs_atual = comp.get('observacao') or ''
-                            obs_nova  = st.text_input(
-                                f"Obs — {comp['nome_componente']}:",
-                                value=obs_atual,
-                                key=f"alm_obs_{comp['id']}",
-                                placeholder="Ex: em falta, previsão 20/06..."
-                            )
+                            obs_nova  = st.text_input(f"Obs — {comp['nome_componente']}:", value=obs_atual,
+                                                      key=f"alm_obs_{comp['id']}", placeholder="Ex: em falta, previsão 20/06...")
                             if obs_nova != obs_atual:
                                 atualizar_componente(comp['id'], st_item, obs_nova, st.session_state.usuario_nome)
-
                             st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
 
-                        # resumo da OP
                         if n_indisp > 0:
                             itens_falt = df_comp[df_comp['status_item'] == 'Indisponivel']['nome_componente'].tolist()
                             st.error(f"⚠️ Itens em falta: {', '.join(itens_falt)}")
                         elif n_conf == n_total:
                             st.success("✅ Todos os componentes conferidos e disponíveis!")
-    
+
     # ==================================================
-    # SISTEMA DE MEDICAO
+    # SISTEMA DE MEDICAO — agora 100% no banco
     # ==================================================
     elif nome_aba == "Sistema de Medicao":
         with aba_objeto:
-            st.components.v1.html("""
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        .tab-active { border-color: #1e40af; color: #1e40af; font-weight: 700; background-color: #f8fafc; }
-        @media print { .no-print { display: none !important; } body { background-color: #fff; } }
-    </style>
-</head>
-<body class="bg-slate-50 min-h-screen text-slate-800 font-sans">
-    <header class="bg-white border-b border-slate-200 shadow-sm">
-        <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div class="flex items-center gap-4">
-                <span class="text-lg font-black text-slate-900 tracking-tight">Passold Sistemas de Fachadas</span>
-                <div class="h-8 w-px bg-slate-200 hidden sm:block"></div>
-                <span class="text-xs font-bold uppercase tracking-wider text-slate-400 hidden sm:block">Sistema de Medição</span>
-            </div>
-            <p class="text-xs text-slate-500 font-medium">Gestão de Saldos & Escopos Físicos</p>
-        </div>
-    </header>
+            st.header("Sistema de Medição — Gestão de Saldos & Escopos")
+            st.caption(f"Usuário: {st.session_state.usuario_nome}")
 
-    <nav class="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-xs">
-        <div class="max-w-7xl mx-auto px-4 flex overflow-x-auto space-x-1 sm:space-x-4">
-            <button onclick="mudarAba('aba-cadastro')" id="btn-cadastro" class="py-3.5 px-4 border-b-2 border-transparent text-xs sm:text-sm font-semibold transition-all cursor-pointer text-slate-600 hover:text-slate-900 tab-active whitespace-nowrap">1. Cadastrar Obra Base</button>
-            <button onclick="mudarAba('aba-servicos')" id="btn-servicos" class="py-3.5 px-4 border-b-2 border-transparent text-xs sm:text-sm font-semibold transition-all cursor-pointer text-slate-600 hover:text-slate-900 whitespace-nowrap">2. Parâmetros de Serviços & Etapas</button>
-            <button onclick="mudarAba('aba-medicao')" id="btn-medicao" class="py-3.5 px-4 border-b-2 border-transparent text-xs sm:text-sm font-semibold transition-all cursor-pointer text-slate-600 hover:text-slate-900 whitespace-nowrap">3. Relatório de Saldos e Medições</button>
-            <button onclick="mudarAba('aba-relatorios')" id="btn-relatorios" class="py-3.5 px-4 border-b-2 border-transparent text-xs sm:text-sm font-bold transition-all cursor-pointer text-blue-600 hover:text-blue-800 whitespace-nowrap">📊 4. Dashboards & Comparativos</button>
-        </div>
-    </nav>
+            import json as _json
 
-    <main class="max-w-7xl mx-auto p-4 md:p-8">
-        <section id="aba-cadastro" class="space-y-6">
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                <div class="border-l-4 border-blue-800 pl-3 mb-6">
-                    <h2 class="text-lg font-bold text-slate-900">Cadastrar Nova Obra (Teto Geral)</h2>
-                    <p class="text-xs text-slate-500">Defina os limites orçamentários base do contrato</p>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
-                    <div>
-                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1.5">Nome da Obra / Contrato</label>
-                        <input type="text" id="cad-nome-obra" placeholder="Ex: Residencial Bella Vista" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-600 focus:bg-white outline-none">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1.5">Valor m² Teto da Obra (R$/m²)</label>
-                        <input type="number" id="cad-valor-m2" placeholder="Ex: 500.00" step="any" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-600 focus:bg-white outline-none font-bold">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1.5">Metragem Geral da Obra (m²)</label>
-                        <input type="number" id="cad-metragem-geral" placeholder="Ex: 1500.00" step="any" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-600 focus:bg-white outline-none">
-                    </div>
-                </div>
-                <div class="flex justify-end border-t border-slate-100 pt-4">
-                    <button onclick="salvarObraBase()" class="bg-blue-800 hover:bg-blue-900 text-white font-bold px-6 py-2.5 rounded-lg text-xs uppercase tracking-wider shadow-sm transition cursor-pointer">Salvar Obra</button>
-                </div>
-            </div>
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                <h3 class="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Obras Cadastradas</h3>
-                <div id="grid-obras" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
-            </div>
-        </section>
+            tab_cad, tab_srv, tab_med, tab_dash = st.tabs([
+                "1. Cadastrar Obra Base",
+                "2. Serviços & Etapas",
+                "3. Relatório de Saldos",
+                "4. Dashboards"
+            ])
 
-        <section id="aba-servicos" class="space-y-6 hidden">
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-6">
-                    <div class="flex flex-col md:flex-row md:items-center gap-6">
-                        <div class="border-l-4 border-blue-800 pl-3">
-                            <h2 class="text-lg font-bold text-slate-900">Configurar Preços e Subdivisões por Serviço</h2>
-                            <p class="text-xs text-slate-500 mt-0.5" id="info-teto-obra-ativa"></p>
-                        </div>
-                        <div class="flex flex-col">
-                            <label class="text-xs font-bold text-slate-400 uppercase mb-1">Período de Referência</label>
-                            <input type="month" id="mes-servicos-referencia" class="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs outline-none focus:ring-2 focus:ring-blue-600 font-bold text-slate-700">
-                        </div>
-                    </div>
-                    <div class="w-full lg:w-72">
-                        <label class="block text-xs font-bold text-slate-400 uppercase mb-1">Selecione a Obra Alvo</label>
-                        <select id="select-obra-servicos" onchange="selecionarObraServicos()" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-600">
-                            <option value="">-- Escolha uma Obra --</option>
-                        </select>
-                    </div>
-                </div>
-                <div id="aviso-selecao-servicos" class="text-center py-12 text-slate-400 border border-dashed border-slate-200 rounded-xl bg-slate-50/50 text-sm">Selecione uma obra acima para liberar a planilha de engenharia e custos locais.</div>
-                <div id="container-lista-servicos" class="space-y-6"></div>
-                <div class="flex justify-between items-center pt-4 border-t border-slate-100 mt-6">
-                    <button id="btn-novo-servico" onclick="criarCardServicoDOM()" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold uppercase tracking-wider px-4 py-2.5 rounded-lg shadow-sm cursor-pointer hidden transition-all">+ Adicionar Novo Serviço</button>
-                    <button id="btn-salvar-servicos" onclick="salvarServicosObra()" class="bg-blue-700 hover:bg-blue-800 text-white font-bold px-6 py-2.5 rounded-lg text-xs uppercase tracking-wider shadow-md transition cursor-pointer hidden">Salvar Lançamentos</button>
-                </div>
-            </div>
-        </section>
+            # ── ABA 1: CADASTRAR OBRA ─────────────────────────────
+            with tab_cad:
+                with st.form("form_med_obra"):
+                    st.markdown("#### Nova Obra / Contrato")
+                    mc1, mc2, mc3 = st.columns(3)
+                    with mc1:
+                        med_nome = st.text_input("Nome da Obra / Contrato")
+                    with mc2:
+                        med_valm2 = st.number_input("Valor m² Teto (R$/m²)", min_value=0.01, value=500.0)
+                    with mc3:
+                        med_metro = st.number_input("Metragem Geral (m²)", min_value=0.01, value=1500.0)
+                    if st.form_submit_button("Salvar Obra"):
+                        if not med_nome.strip():
+                            st.error("Informe o nome da obra.")
+                        else:
+                            with st.spinner("Salvando..."):
+                                new_id = salvar_medicao_obra(med_nome.strip(), med_valm2, med_metro)
+                            if new_id:
+                                st.success(f"Obra '{med_nome}' cadastrada!")
+                                st.rerun()
 
-        <section id="aba-medicao" class="space-y-6 hidden">
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 border-b border-slate-200 pb-6 mb-6 items-end">
-                    <div>
-                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Selecione o Contrato</label>
-                        <select id="select-obra-medicao" onchange="configurarFiltrosMesesMedicao(); carregarPlanilhaMedicao();" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-600">
-                            <option value="">-- Escolha uma Obra --</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Mês de Referência Histórico</label>
-                        <select id="select-mes-medicao-historico" onchange="carregarPlanilhaMedicao()" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-600">
-                            <option value="">-- Selecione uma Obra Primeiro --</option>
-                        </select>
-                    </div>
-                    <div class="flex justify-end no-print">
-                        <button onclick="window.print()" class="w-full bg-blue-800 hover:bg-blue-900 text-white font-bold uppercase tracking-wider p-2.5 rounded-lg text-xs shadow-sm cursor-pointer transition">🖨️ Imprimir Medição Atual</button>
-                    </div>
-                </div>
-                <div id="painel-calculos" class="hidden space-y-6">
-                    <div class="overflow-x-auto rounded-lg border border-slate-200">
-                        <table class="w-full text-left border-collapse overflow-hidden">
-                            <thead>
-                                <tr class="bg-blue-900 text-white text-xs uppercase tracking-wider font-bold">
-                                    <th class="p-3 border-r border-blue-800 w-1/4">Serviço</th>
-                                    <th class="p-3 border-r border-blue-800 w-1/4">Subdivisão / Etapa</th>
-                                    <th class="p-3 text-right border-r border-blue-800 w-32 bg-blue-950/40">Metragem (m²)</th>
-                                    <th class="p-3 text-right border-r border-blue-800 w-32 text-blue-100">Preço m²</th>
-                                    <th class="p-3 text-right bg-slate-900 w-44">Subtotal Orçado</th>
-                                </tr>
-                            </thead>
-                            <tbody id="corpo-tabela-medicao" class="text-sm divide-y divide-slate-200"></tbody>
-                        </table>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-5 rounded-xl border border-slate-200">
-                        <div>
-                            <span class="block text-xs font-bold text-slate-400 uppercase tracking-wider">TOTAL CONTRATADO</span>
-                            <span id="tot-meta-reais" class="text-xl font-black text-slate-900">R$ 0,00</span>
-                        </div>
-                        <div class="border-t md:border-t-0 md:border-l border-slate-200 md:pl-6">
-                            <span class="block text-xs font-bold text-blue-600 uppercase tracking-wider">MEDIÇÃO DO MÊS SELECIONADO</span>
-                            <span id="tot-medido-reais" class="text-xl font-black text-blue-800">R$ 0,00</span>
-                        </div>
-                    </div>
-                    <div class="pt-16 grid grid-cols-2 gap-12 text-center text-xs text-slate-600 mt-12 border-t border-dashed border-slate-200">
-                        <div>
-                            <div class="w-full border-t border-slate-300 mx-auto max-w-xs mb-1.5"></div>
-                            <p class="font-bold text-slate-800">Responsável Técnico / Engenharia</p>
-                            <p class="text-[10px] text-slate-400 uppercase tracking-wider">Passold Sistemas de Fachada</p>
-                        </div>
-                        <div>
-                            <div class="w-full border-t border-slate-300 mx-auto max-w-xs mb-1.5"></div>
-                            <p class="font-bold text-slate-800">Fiscalização / Aprovação do Cliente</p>
-                            <p class="text-[10px] text-slate-400">Data: ____/____/_______</p>
-                        </div>
-                    </div>
-                </div>
-                <div id="aviso-selecao" class="text-center py-12 text-slate-400 text-sm">Selecione um Contrato e um Mês correspondente para abrir a folha operacional consolidada.</div>
-            </div>
-        </section>
+                st.markdown("---")
+                st.markdown("#### Obras Cadastradas")
+                df_med_obras = carregar_medicao_obras()
+                if df_med_obras.empty:
+                    st.info("Nenhuma obra cadastrada ainda.")
+                else:
+                    cols_obra = st.columns(min(len(df_med_obras), 3))
+                    for i, (_, obra_row) in enumerate(df_med_obras.iterrows()):
+                        total = obra_row['valor_m2_global'] * obra_row['metragem_geral']
+                        with cols_obra[i % 3]:
+                            with st.container(border=True):
+                                st.markdown(f"**{obra_row['nome']}**")
+                                st.caption(f"Metragem: {obra_row['metragem_geral']:.2f} m²")
+                                st.caption(f"Valor limite m²: R$ {obra_row['valor_m2_global']:.2f}")
+                                st.metric("Total Contratado", f"R$ {total:,.2f}")
+                                if st.button("Excluir", key=f"del_med_obra_{obra_row['id']}", type="primary"):
+                                    excluir_medicao_obra(int(obra_row['id']))
+                                    st.toast("Obra removida!")
+                                    time.sleep(0.3)
+                                    st.rerun()
 
-        <section id="aba-relatorios" class="space-y-6 hidden">
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 border-b border-slate-200 pb-6 mb-6 items-end">
-                    <div>
-                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Selecione o Contrato</label>
-                        <select id="select-obra-relatorios" onchange="configurarFiltrosPeriodo(); configurarFiltroServicosDashboard(); gerarDashboardsEComparativosGlobal();" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-600">
-                            <option value="">-- Escolha uma Obra --</option>
-                        </select>
-                    </div>
-                    <div class="no-print">
-                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Filtrar por Serviço</label>
-                        <select id="select-servico-dashboard" onchange="gerarDashboardsEComparativosGlobal();" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-600">
-                            <option value="">Todos os Serviços</option>
-                        </select>
-                    </div>
-                    <div class="no-print">
-                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Mês Inicial</label>
-                        <select id="select-mes-inicial" onchange="gerarDashboardsEComparativosGlobal();" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-600">
-                            <option value="">-- Selecione a Obra --</option>
-                        </select>
-                    </div>
-                    <div class="no-print">
-                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Mês Final</label>
-                        <select id="select-mes-final" onchange="gerarDashboardsEComparativosGlobal();" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-600">
-                            <option value="">-- Selecione a Obra --</option>
-                        </select>
-                    </div>
-                </div>
-                <div id="painel-vazio-relatorios" class="text-center py-12 text-slate-400 text-sm">Selecione um contrato com históricos salvos para renderizar a evolução e matrizes gráficas.</div>
-                <div id="dashboard-visual" class="hidden grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                    <div class="bg-slate-50 p-4 border border-slate-200 rounded-xl">
-                        <h4 class="text-xs font-bold text-slate-700 uppercase tracking-wider mb-4 text-center">Evolução Cronológica de Medições</h4>
-                        <div class="h-64 flex items-center justify-center"><canvas id="chartEvolucao"></canvas></div>
-                    </div>
-                    <div class="bg-slate-50 p-4 border border-slate-200 rounded-xl">
-                        <h4 id="titulo-grafico-distribuicao" class="text-xs font-bold text-slate-700 uppercase tracking-wider mb-4 text-center">Distribuição Física Financeira (%)</h4>
-                        <div class="h-64 flex items-center justify-center"><canvas id="chartDistribuicao"></canvas></div>
-                    </div>
-                </div>
-                <div id="painel-tabela-comparativa" class="hidden space-y-6">
-                    <h3 class="text-sm font-bold uppercase tracking-wider text-slate-900 border-l-4 border-blue-800 pl-2">Painel de Evolução Cronológica das Medições</h3>
-                    <div class="overflow-x-auto rounded-lg border border-slate-200">
-                        <table id="tabela-evolucao-global" class="w-full text-left border-collapse">
-                            <thead id="head-tabela-comparativa" class="bg-slate-800 text-white text-xs uppercase tracking-wider font-semibold"></thead>
-                            <tbody id="corpo-tabela-comparativa" class="text-sm divide-y divide-slate-200 bg-white"></tbody>
-                            <tfoot id="foot-tabela-comparativa" class="bg-slate-100 text-slate-900 font-bold border-t-2 border-slate-300 text-right"></tfoot>
-                        </table>
-                    </div>
-                    <div class="bg-slate-900 text-white p-5 rounded-xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-6">
-                        <div class="space-y-1">
-                            <span class="block text-xs font-bold text-slate-400 uppercase tracking-wider">Dedução de Saldo Global</span>
-                            <div class="text-xs md:text-sm text-slate-300 flex flex-wrap gap-2 items-center">
-                                <span>Contrato Base: <strong id="calc-txt-contrato" class="text-white font-bold">R$ 0,00</strong></span>
-                                <span class="text-slate-600 font-bold">−</span>
-                                <span>Medido no Período: <strong id="calc-txt-medicoes" class="text-blue-400 font-bold">R$ 0,00</strong></span>
-                            </div>
-                        </div>
-                        <div class="bg-slate-800 px-6 py-3 rounded-lg border border-slate-700/60 flex flex-col items-start md:items-end min-w-[240px]">
-                            <span class="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">Saldo Remanescente Total</span>
-                            <span id="calc-txt-saldo-restante" class="text-xl md:text-2xl font-black text-cyan-400 tracking-tight">R$ 0,00</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-    </main>
+            # ── ABA 2: SERVIÇOS & ETAPAS ──────────────────────────
+            with tab_srv:
+                df_med_obras2 = carregar_medicao_obras()
+                if df_med_obras2.empty:
+                    st.info("Cadastre uma obra primeiro.")
+                else:
+                    opcoes_med = {row['nome']: row['id'] for _, row in df_med_obras2.iterrows()}
+                    obra_med_sel = st.selectbox("Obra:", list(opcoes_med.keys()), key="sel_obra_srv")
+                    obra_med_id  = opcoes_med[obra_med_sel]
+                    periodo_ref  = st.text_input("Período de referência (MM/AAAA):",
+                                                  value=datetime.now().strftime('%m/%Y'),
+                                                  placeholder="Ex: 06/2025")
 
-    <script>
-        let OBRAS = JSON.parse(localStorage.getItem('passold_medicao_v1')) || [];
-        let chartLineInstance = null;
-        let chartPieInstance = null;
+                    obra_med_info = df_med_obras2[df_med_obras2['id'] == obra_med_id].iloc[0]
+                    st.info(f"Teto da obra: **R$ {obra_med_info['valor_m2_global']:.2f}/m²**")
 
-        function mudarAba(idAba) {
-            ['aba-cadastro','aba-servicos','aba-medicao','aba-relatorios'].forEach(id => document.getElementById(id).classList.add('hidden'));
-            ['btn-cadastro','btn-servicos','btn-medicao','btn-relatorios'].forEach(id => document.getElementById(id).classList.remove('tab-active'));
-            document.getElementById(idAba).classList.remove('hidden');
-            const btnMap = {'aba-cadastro':'btn-cadastro','aba-servicos':'btn-servicos','aba-medicao':'btn-medicao','aba-relatorios':'btn-relatorios'};
-            document.getElementById(btnMap[idAba]).classList.add('tab-active');
-            if(idAba==='aba-cadastro') renderizarCardsObras();
-            if(idAba==='aba-servicos'){atualizarSelectObras('select-obra-servicos');selecionarObraServicos();}
-            if(idAba==='aba-medicao'){atualizarSelectObras('select-obra-medicao');configuterFiltrosMesesMedicaoPadrao();}
-            if(idAba==='aba-relatorios'){atualizarSelectObras('select-obra-relatorios');configurarFiltrosPeriodo();configurarFiltroServicosDashboard();gerarDashboardsEComparativosGlobal();}
-        }
+                    df_srvs = carregar_medicao_servicos(obra_med_id)
+                    if "med_num_servicos" not in st.session_state:
+                        st.session_state.med_num_servicos = max(1, len(df_srvs))
 
-        function salvarObraBase() {
-            const nome = document.getElementById('cad-nome-obra').value.trim();
-            const valorM2Geral = parseFloat(document.getElementById('cad-valor-m2').value)||0;
-            const metragemGeral = parseFloat(document.getElementById('cad-metragem-geral').value)||0;
-            if(!nome||valorM2Geral<=0||metragemGeral<=0) return alert("Preencha todas as especificações da obra.");
-            OBRAS.push({id:'obra_'+Date.now(),nome,valorM2Global:valorM2Geral,metragemGeral,servicos:[],historicoMedicoes:{}});
-            salvarDados();
-            document.getElementById('cad-nome-obra').value='';
-            document.getElementById('cad-valor-m2').value='';
-            document.getElementById('cad-metragem-geral').value='';
-            renderizarCardsObras();
-        }
+                    st.markdown(f"#### Serviços ({st.session_state.med_num_servicos})")
 
-        function renderizarCardsObras() {
-            const container = document.getElementById('grid-obras');
-            container.innerHTML='';
-            if(OBRAS.length===0){container.innerHTML='<p class="text-sm text-slate-400 col-span-3">Nenhum contrato arquivado.</p>';return;}
-            OBRAS.forEach(obra=>{
-                const total=obra.valorM2Global*obra.metragemGeral;
-                const card=document.createElement('div');
-                card.className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between shadow-xs";
-                card.innerHTML=`<div><h4 class="font-bold text-slate-900 text-base mb-2 border-b border-slate-100 pb-1">${obra.nome}</h4><div class="text-xs text-slate-600 space-y-1.5"><div class="flex justify-between"><span>Metragem Geral:</span><strong>${obra.metragemGeral.toFixed(2)} m²</strong></div><div class="flex justify-between"><span>Valor Limite m²:</span><strong>R$ ${obra.valorM2Global.toFixed(2)}</strong></div><div class="flex justify-between border-t border-slate-100 pt-1.5 font-bold text-blue-800 text-xs uppercase"><span>TOTAL CONTRATADO:</span><span>${total.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</span></div></div></div><div class="mt-4 flex justify-end border-t border-slate-50 pt-2"><button onclick="excluirObra('${obra.id}')" class="text-[11px] font-bold uppercase tracking-wider text-red-500 hover:text-red-700 cursor-pointer">✕ Excluir</button></div>`;
-                container.appendChild(card);
-            });
-        }
+                    servicos_form = []
+                    for si in range(st.session_state.med_num_servicos):
+                        srv_existente = df_srvs.iloc[si] if si < len(df_srvs) else None
+                        with st.expander(f"Serviço {si+1}", expanded=(si == 0)):
+                            s1, s2 = st.columns(2)
+                            with s1:
+                                srv_nome = st.text_input("Nome:", value=srv_existente['nome'] if srv_existente is not None else "", key=f"srv_nome_{si}")
+                            with s2:
+                                srv_val  = st.number_input("Valor m²:", min_value=0.0, value=float(srv_existente['valor_m2_servico']) if srv_existente is not None else 0.0, key=f"srv_val_{si}")
 
-        function excluirObra(id){if(confirm("Deseja deletar permanentemente esta obra?")){OBRAS=OBRAS.filter(o=>o.id!==id);salvarDados();renderizarCardsObras();}}
-        function atualizarSelectObras(selectId){const s=document.getElementById(selectId);const a=s.value;s.innerHTML='<option value="">-- Escolha uma Obra --</option>';OBRAS.forEach(o=>{s.innerHTML+=`<option value="${o.id}">${o.nome}</option>`;});s.value=a;}
+                            df_subs = carregar_medicao_subdivisoes(int(srv_existente['id'])) if srv_existente is not None else pd.DataFrame()
+                            if "med_num_subs" not in st.session_state:
+                                st.session_state[f"med_num_subs_{si}"] = max(1, len(df_subs))
+                            n_subs = st.number_input(f"Qtd subdivisões:", min_value=1, max_value=20, value=st.session_state.get(f"med_num_subs_{si}", max(1, len(df_subs))), key=f"n_subs_{si}")
 
-        function selecionarObraServicos(){
-            const idObra=document.getElementById('select-obra-servicos').value;
-            const container=document.getElementById('container-lista-servicos');
-            const infoTeto=document.getElementById('info-teto-obra-ativa');
-            container.innerHTML='';infoTeto.innerText='';
-            if(!idObra){document.getElementById('btn-novo-servico').classList.add('hidden');document.getElementById('btn-salvar-servicos').classList.add('hidden');document.getElementById('aviso-selecao-servicos').classList.remove('hidden');return;}
-            document.getElementById('btn-novo-servico').classList.remove('hidden');document.getElementById('btn-salvar-servicos').classList.remove('hidden');document.getElementById('aviso-selecao-servicos').classList.add('hidden');
-            const obra=OBRAS.find(o=>o.id===idObra);
-            infoTeto.innerHTML=`Teto Obra Base: <strong class="text-blue-800">R$ ${obra.valorM2Global.toFixed(2)}</strong>`;
-            if(obra.servicos&&obra.servicos.length>0){obra.servicos.forEach(srv=>criarCardServicoDOM(srv));}else{criarCardServicoDOM();}
-            recalcularTudoServicosTab();
-        }
+                            subdivisoes_form = []
+                            for subi in range(int(n_subs)):
+                                sub_existente = df_subs.iloc[subi] if subi < len(df_subs) else None
+                                sb1, sb2, sb3, sb4 = st.columns([3, 2, 2, 2])
+                                with sb1:
+                                    sub_nome = st.text_input("Subdivisão:", value=sub_existente['nome'] if sub_existente is not None else "", key=f"sub_nome_{si}_{subi}")
+                                with sb2:
+                                    sub_m2   = st.number_input("m²:", min_value=0.0, value=float(sub_existente['m2']) if sub_existente is not None else 0.0, key=f"sub_m2_{si}_{subi}")
+                                with sb3:
+                                    sub_pct  = st.number_input("% serv:", min_value=0.0, max_value=100.0, value=float(sub_existente['percentual']) if sub_existente is not None else 0.0, key=f"sub_pct_{si}_{subi}")
+                                with sb4:
+                                    val_calc = srv_val * (sub_pct / 100)
+                                    sub_total = sub_m2 * val_calc
+                                    st.metric("Subtotal", f"R$ {sub_total:,.2f}")
+                                if sub_nome.strip():
+                                    subdivisoes_form.append({"nome": sub_nome, "m2": sub_m2, "percentual": sub_pct})
 
-        function criarCardServicoDOM(dadosSrv=null){
-            const container=document.getElementById('container-lista-servicos');
-            const srvDiv=document.createElement('div');
-            srvDiv.className="bg-slate-50/70 p-5 rounded-xl border border-slate-200 space-y-4 card-servico-item";
-            srvDiv.dataset.srvId=dadosSrv?dadosSrv.id:'srv_'+Math.random().toString(36).substr(2,5);
-            srvDiv.innerHTML=`<div class="grid grid-cols-1 md:grid-cols-3 gap-4 border-b border-slate-200 pb-4 items-end"><div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Nome do Serviço</label><input type="text" value="${dadosSrv?dadosSrv.nome:''}" placeholder="Ex: Pintura" class="w-full bg-white border border-slate-200 rounded-lg p-2 text-sm font-semibold text-slate-800 input-nome-servico outline-none focus:ring-2 focus:ring-blue-600"></div><div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Valor m² Próprio do Serviço (R$)</label><input type="number" value="${dadosSrv?dadosSrv.valorM2Servico:''}" oninput="recalcularTudoServicosTab()" class="w-full bg-white border border-slate-200 rounded-lg p-2 text-sm font-bold text-blue-900 input-val-m2-servico outline-none focus:ring-2 focus:ring-blue-600"></div><div class="flex justify-end"><button onclick="this.closest('.card-servico-item').remove();recalcularTudoServicosTab();" class="text-red-500 hover:text-red-700 text-xs font-bold uppercase tracking-wide cursor-pointer mb-2">✕ Remover Serviço</button></div></div><div><div class="overflow-x-auto rounded-lg border border-slate-200"><table class="w-full text-left border-collapse text-sm bg-white"><thead><tr class="bg-slate-200/60 text-xs text-slate-600 uppercase border-b border-slate-300 font-bold"><th class="p-2">Nome da Subdivisão</th><th class="p-2 w-32 text-right">Metragem (m²)</th><th class="p-2 w-28 text-right">% da Subdivisão</th><th class="p-2 w-32 text-right text-blue-800">R$/m² Local</th><th class="p-2 w-36 text-right text-slate-900">Subtotal Orçado</th><th class="p-2 w-12 text-center">Ação</th></tr></thead><tbody class="container-subdivisoes divide-y divide-slate-200"></tbody></table></div><button onclick="adicionarLinhaSubdivisaoDOM(this.closest('.card-servico-item').querySelector('.container-subdivisoes'))" class="mt-3 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold uppercase tracking-wider px-3 py-1.5 border border-slate-300 rounded shadow-xs cursor-pointer">+ Adicionar Linha de Subdivisão</button></div>`;
-            container.appendChild(srvDiv);
-            const tbody=srvDiv.querySelector('.container-subdivisoes');
-            if(dadosSrv&&dadosSrv.subdivisoes){dadosSrv.subdivisoes.forEach(sub=>adicionarLinhaSubdivisaoDOM(tbody,sub));}else{adicionarLinhaSubdivisaoDOM(tbody);}
-        }
+                            if srv_nome.strip():
+                                servicos_form.append({"nome": srv_nome, "valor_m2_servico": srv_val, "subdivisoes": subdivisoes_form})
 
-        function adicionarLinhaSubdivisaoDOM(tbody,dadosSub=null){
-            const tr=document.createElement('tr');
-            tr.className="linha-subdivisao-item";
-            tr.dataset.subId=dadosSub?dadosSub.id:'sub_'+Math.random().toString(36).substr(2,5);
-            tr.innerHTML=`<td class="p-2"><input type="text" value="${dadosSub?dadosSub.nome:''}" class="w-full bg-white border border-slate-200 rounded p-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-600 input-sub-nome"></td><td class="p-2"><input type="number" value="${dadosSub?dadosSub.m2:''}" oninput="recalcularTudoServicosTab()" class="w-full bg-white border border-slate-200 rounded p-1.5 text-xs text-right input-sub-m2 focus:ring-1 focus:ring-blue-600"></td><td class="p-2"><input type="number" value="${dadosSub?dadosSub.percentual:''}" oninput="recalcularTudoServicosTab()" class="w-full bg-white border border-slate-200 rounded p-1.5 text-xs text-right input-sub-pct focus:ring-1 focus:ring-blue-600"></td><td class="p-2 text-right text-blue-800 font-bold text-xs pr-3 span-sub-val-m2">R$ 0,00</td><td class="p-2 text-right text-slate-900 font-black text-xs pr-3 span-sub-total">R$ 0,00</td><td class="p-2 text-center"><button onclick="this.closest('tr').remove();recalcularTudoServicosTab();" class="text-red-500 font-black text-lg hover:text-red-700">&times;</button></td>`;
-            tbody.appendChild(tr);
-            recalcularTudoServicosTab();
-        }
+                    col_add, col_save = st.columns([1, 2])
+                    with col_add:
+                        if st.button("+ Serviço"):
+                            st.session_state.med_num_servicos += 1
+                            st.rerun()
+                    with col_save:
+                        if st.button("💾 Salvar Lançamentos", type="primary"):
+                            if not periodo_ref.strip():
+                                st.error("Informe o período.")
+                            elif not servicos_form:
+                                st.error("Adicione pelo menos um serviço.")
+                            else:
+                                with st.spinner("Salvando..."):
+                                    total = salvar_servicos_medicao(obra_med_id, periodo_ref.strip(), servicos_form)
+                                if total is not None:
+                                    st.success(f"Salvo! Total medido: R$ {total:,.2f}")
+                                    st.rerun()
 
-        function recalcularTudoServicosTab(){
-            const idObra=document.getElementById('select-obra-servicos').value;
-            if(!idObra)return;
-            const obra=OBRAS.find(o=>o.id===idObra);
-            const valM2TetoObra=obra.valorM2Global;
-            document.querySelectorAll('.card-servico-item').forEach(card=>{
-                const inputValM2Servico=card.querySelector('.input-val-m2-servico');
-                let valM2Servico=parseFloat(inputValM2Servico.value)||0;
-                if(valM2Servico>valM2TetoObra){inputValM2Servico.classList.add('border-red-500','bg-red-50','text-red-700');valM2Servico=valM2TetoObra;}
-                else{inputValM2Servico.classList.remove('border-red-500','bg-red-50','text-red-700');}
-                card.querySelectorAll('.linha-subdivisao-item').forEach(tr=>{
-                    const m2=parseFloat(tr.querySelector('.input-sub-m2').value)||0;
-                    const pct=parseFloat(tr.querySelector('.input-sub-pct').value)||0;
-                    const valM2CalcSub=valM2Servico*(pct/100);
-                    const totalCalcSub=m2*valM2CalcSub;
-                    tr.querySelector('.span-sub-val-m2').innerText=valM2CalcSub.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-                    tr.querySelector('.span-sub-total').innerText=totalCalcSub.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-                });
-            });
-        }
+            # ── ABA 3: RELATÓRIO DE SALDOS ────────────────────────
+            with tab_med:
+                df_med_obras3 = carregar_medicao_obras()
+                if df_med_obras3.empty:
+                    st.info("Nenhuma obra cadastrada.")
+                else:
+                    opcoes_med3 = {row['nome']: row['id'] for _, row in df_med_obras3.iterrows()}
+                    obra_med3   = st.selectbox("Obra:", list(opcoes_med3.keys()), key="sel_obra_med")
+                    obra_id3    = opcoes_med3[obra_med3]
+                    df_hist3    = carregar_medicao_historico(obra_id3)
 
-        function salvarServicosObra(){
-            const idObra=document.getElementById('select-obra-servicos').value;
-            const periodoReferencia=document.getElementById('mes-servicos-referencia').value;
-            if(!idObra||!periodoReferencia)return alert("Selecione a Obra Alvo e preencha o Período de Referência.");
-            const idxObra=OBRAS.findIndex(o=>o.id===idObra);
-            let novosServicos=[];let valido=true;let totalMedidoCalculadoSrv=0;
-            document.querySelectorAll('.card-servico-item').forEach(card=>{
-                const nomeServico=card.querySelector('.input-nome-servico').value.trim();
-                const valorM2Servico=parseFloat(card.querySelector('.input-val-m2-servico').value)||0;
-                if(!nomeServico||valorM2Servico<=0)valido=false;
-                let subdivisoes=[];
-                card.querySelectorAll('.linha-subdivisao-item').forEach(lin=>{
-                    const subM2=parseFloat(lin.querySelector('.input-sub-m2').value)||0;
-                    const subPct=parseFloat(lin.querySelector('.input-sub-pct').value)||0;
-                    subdivisoes.push({id:lin.dataset.subId,nome:lin.querySelector('.input-sub-nome').value.trim(),m2:subM2,percentual:subPct});
-                    totalMedidoCalculadoSrv+=(subM2*(valorM2Servico*(subPct/100)));
-                });
-                novosServicos.push({id:card.dataset.srvId,nome:nomeServico,valorM2Servico,subdivisoes});
-            });
-            if(!valido)return alert("Verifique as informações dos serviços e valores.");
-            OBRAS[idxObra].servicos=novosServicos;
-            if(!OBRAS[idxObra].historicoMedicoes)OBRAS[idxObra].historicoMedicoes={};
-            OBRAS[idxObra].historicoMedicoes[periodoReferencia]={totalMedidoMesa:totalMedidoCalculadoSrv,snapshotServicos:JSON.parse(JSON.stringify(novosServicos))};
-            salvarDados();
-            alert(`Medição do mês (${periodoReferencia.split('-')[1]}/${periodoReferencia.split('-')[0]}) salva com sucesso!`);
-            document.getElementById('select-obra-medicao').value=idObra;
-            configurarFiltrosMesesMedicao(periodoReferencia);
-            mudarAba('aba-medicao');
-        }
+                    if df_hist3.empty:
+                        st.info("Nenhuma medição salva para esta obra.")
+                    else:
+                        periodos = df_hist3['periodo'].tolist()
+                        per_sel  = st.selectbox("Período:", periodos, index=len(periodos)-1, key="sel_per_med")
+                        hist_row = df_hist3[df_hist3['periodo'] == per_sel].iloc[0]
+                        snapshot = _json.loads(hist_row['snapshot']) if hist_row['snapshot'] else []
+                        obra_info3 = df_med_obras3[df_med_obras3['id'] == obra_id3].iloc[0]
+                        total_contratado = obra_info3['valor_m2_global'] * obra_info3['metragem_geral']
 
-        function configuterFiltrosMesesMedicaoPadrao(){configurarFiltrosMesesMedicao();carregarPlanilhaMedicao();}
+                        if snapshot:
+                            st.markdown("---")
+                            # Tabela
+                            rows_table = []
+                            for srv in snapshot:
+                                for sub in srv.get('subdivisoes', []):
+                                    preco_m2 = srv['valor_m2_servico'] * (sub['percentual'] / 100)
+                                    rows_table.append({
+                                        "Serviço": srv['nome'],
+                                        "Subdivisão": f"{sub['nome']} ({sub['percentual']:.0f}%)",
+                                        "m²": f"{sub['m2']:.2f}",
+                                        "R$/m²": f"R$ {preco_m2:.2f}",
+                                        "Subtotal": f"R$ {sub.get('subtotal', sub['m2']*preco_m2):,.2f}"
+                                    })
+                            if rows_table:
+                                st.dataframe(pd.DataFrame(rows_table), hide_index=True, use_container_width=True)
 
-        function configurarFiltrosMesesMedicao(mesSelecionarForcado=null){
-            const idObra=document.getElementById('select-obra-medicao').value;
-            const selectMes=document.getElementById('select-mes-medicao-historico');
-            const valorAtual=selectMes.value;
-            selectMes.innerHTML='';
-            if(!idObra){selectMes.innerHTML='<option value="">-- Selecione uma Obra Primeiro --</option>';return;}
-            const obra=OBRAS.find(o=>o.id===idObra);
-            if(obra.historicoMedicoes&&Object.keys(obra.historicoMedicoes).length>0){
-                const mesesSorted=Object.keys(obra.historicoMedicoes).sort();
-                mesesSorted.forEach(m=>{const[ano,mes]=m.split('-');selectMes.innerHTML+=`<option value="${m}">${mes}/${ano}</option>`;});
-                if(mesSelecionarForcado&&mesesSorted.includes(mesSelecionarForcado)){selectMes.value=mesSelecionarForcado;}
-                else if(mesesSorted.includes(valorAtual)){selectMes.value=valorAtual;}
-                else{selectMes.value=mesesSorted[mesesSorted.length-1];}
-            }else{selectMes.innerHTML='<option value="">Sem históricos salvos nesta obra</option>';}
-        }
+                        mc1, mc2 = st.columns(2)
+                        mc1.metric("Total Contratado", f"R$ {total_contratado:,.2f}")
+                        mc2.metric(f"Medição — {per_sel}", f"R$ {hist_row['total_medido']:,.2f}")
 
-        function carregarPlanilhaMedicao(){
-            const idObra=document.getElementById('select-obra-medicao').value;
-            const mesSelecionado=document.getElementById('select-mes-medicao-historico').value;
-            if(!idObra||!mesSelecionado){document.getElementById('painel-calculos').classList.add('hidden');document.getElementById('aviso-selecao').classList.remove('hidden');return;}
-            document.getElementById('painel-calculos').classList.remove('hidden');document.getElementById('aviso-selecao').classList.add('hidden');
-            const obra=OBRAS.find(o=>o.id===idObra);
-            const corpo=document.getElementById('corpo-tabela-medicao');corpo.innerHTML='';
-            const totalContratado=(obra.valorM2Global||0)*(obra.metragemGeral||0);
-            const historicoDoMes=obra.historicoMedicoes[mesSelecionado];
-            const listaServicosExibir=historicoDoMes?historicoDoMes.snapshotServicos:[];
-            let medicaoDoMesAcumulada=historicoDoMes?historicoDoMes.totalMedidoMesa:0;
-            if(listaServicosExibir.length===0){corpo.innerHTML='<tr><td colspan="5" class="p-4 text-center text-slate-400">Nenhum registro encontrado.</td></tr>';document.getElementById('tot-meta-reais').innerText=totalContratado.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});document.getElementById('tot-medido-reais').innerText="R$ 0,00";return;}
-            listaServicosExibir.forEach(servico=>{
-                const qtdSubdivisoes=servico.subdivisoes.length;
-                servico.subdivisoes.forEach((sub,index)=>{
-                    const precoM2Sub=servico.valorM2Servico*(sub.percentual/100);
-                    const subtotalOrcadoSubdivisao=sub.m2*precoM2Sub;
-                    const tr=document.createElement('tr');
-                    tr.className="bg-white border-b border-slate-200";
-                    let tdServicoHtml=index===0?`<td rowspan="${qtdSubdivisoes}" class="p-3 border-r border-slate-200 align-middle font-bold text-slate-900 bg-white">${servico.nome}</td>`:'';
-                    tr.innerHTML=`${tdServicoHtml}<td class="p-3 border-r border-slate-200 text-slate-700"><span class="block text-xs font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded w-max">${sub.nome} (${sub.percentual}%)</span></td><td class="p-3 text-right font-bold text-slate-700 bg-slate-50/50 border-r border-slate-200">${sub.m2.toFixed(2)} m²</td><td class="p-3 text-right border-r border-slate-200 text-slate-500 font-medium">R$ ${precoM2Sub.toFixed(2)}</td><td class="p-3 text-right font-bold text-slate-950">${subtotalOrcadoSubdivisao.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</td>`;
-                    corpo.appendChild(tr);
-                });
-            });
-            document.getElementById('tot-meta-reais').innerText=totalContratado.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-            document.getElementById('tot-medido-reais').innerText=medicaoDoMesAcumulada.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-        }
+            # ── ABA 4: DASHBOARDS ─────────────────────────────────
+            with tab_dash:
+                df_med_obras4 = carregar_medicao_obras()
+                if df_med_obras4.empty:
+                    st.info("Nenhuma obra cadastrada.")
+                else:
+                    opcoes_med4 = {row['nome']: row['id'] for _, row in df_med_obras4.iterrows()}
+                    obra_med4   = st.selectbox("Obra:", list(opcoes_med4.keys()), key="sel_obra_dash")
+                    obra_id4    = opcoes_med4[obra_med4]
+                    df_hist4    = carregar_medicao_historico(obra_id4)
+                    obra_info4  = df_med_obras4[df_med_obras4['id'] == obra_id4].iloc[0]
+                    total_contratado4 = obra_info4['valor_m2_global'] * obra_info4['metragem_geral']
 
-        function configurarFiltrosPeriodo(){
-            const idObra=document.getElementById('select-obra-relatorios').value;
-            const sI=document.getElementById('select-mes-inicial');const sF=document.getElementById('select-mes-final');
-            sI.innerHTML='';sF.innerHTML='';
-            if(!idObra){sI.innerHTML='<option value="">-- Selecione a Obra --</option>';sF.innerHTML='<option value="">-- Selecione a Obra --</option>';return;}
-            const obra=OBRAS.find(o=>o.id===idObra);
-            const meses=Object.keys(obra.historicoMedicoes||{}).sort();
-            if(meses.length===0){sI.innerHTML='<option value="">Sem históricos</option>';sF.innerHTML='<option value="">Sem históricos</option>';return;}
-            meses.forEach(m=>{const[ano,mes]=m.split('-');sI.innerHTML+=`<option value="${m}">${mes}/${ano}</option>`;sF.innerHTML+=`<option value="${m}">${mes}/${ano}</option>`;});
-            sI.value=meses[0];sF.value=meses[meses.length-1];
-        }
+                    if df_hist4.empty:
+                        st.info("Nenhuma medição salva para esta obra.")
+                    else:
+                        # Gráfico de evolução
+                        fig_evo = px.bar(
+                            df_hist4, x='periodo', y='total_medido',
+                            title="Evolução de Medições por Período",
+                            labels={'periodo': 'Período', 'total_medido': 'R$ Medido'},
+                            color_discrete_sequence=["#1E3A8A"]
+                        )
+                        fig_evo.add_hline(
+                            y=total_contratado4, line_dash="dash",
+                            line_color="#EA580C", annotation_text="Total Contratado"
+                        )
+                        fig_evo.update_layout(height=350, margin=dict(l=20, r=20, t=40, b=20))
+                        st.plotly_chart(fig_evo, use_container_width=True)
 
-        function configurarFiltroServicosDashboard(){
-            const idObra=document.getElementById('select-obra-relatorios').value;
-            const s=document.getElementById('select-servico-dashboard');
-            s.innerHTML='<option value="">Todos os Serviços</option>';
-            if(!idObra)return;
-            const obra=OBRAS.find(o=>o.id===idObra);
-            if(obra&&obra.servicos)obra.servicos.forEach(sv=>{s.innerHTML+=`<option value="${sv.nome}">${sv.nome}</option>`;});
-        }
+                        # Acumulado e saldo
+                        total_medido_acum = df_hist4['total_medido'].sum()
+                        saldo = total_contratado4 - total_medido_acum
 
-        function gerarDashboardsEComparativosGlobal(){
-            const idObra=document.getElementById('select-obra-relatorios').value;
-            const servicoFiltrado=document.getElementById('select-servico-dashboard').value;
-            const painelVazio=document.getElementById('painel-vazio-relatorios');
-            const dashVisual=document.getElementById('dashboard-visual');
-            const painelTabela=document.getElementById('painel-tabela-comparativa');
-            if(!idObra){painelVazio.classList.remove('hidden');dashVisual.classList.add('hidden');painelTabela.classList.add('hidden');return;}
-            const obra=OBRAS.find(o=>o.id===idObra);
-            const todosMeses=Object.keys(obra.historicoMedicoes||{}).sort();
-            if(todosMeses.length===0){painelVazio.innerHTML="Esta obra ainda não possui históricos de medições gravados.";painelVazio.classList.remove('hidden');dashVisual.classList.add('hidden');painelTabela.classList.add('hidden');return;}
-            const mesInicial=document.getElementById('select-mes-inicial').value;
-            const mesFinal=document.getElementById('select-mes-final').value;
-            let mesesDisponiveis=todosMeses.filter(m=>m>=mesInicial&&m<=mesFinal);
-            if(mesesDisponiveis.length===0){painelVazio.innerHTML="Nenhum registro encontrado para o intervalo selecionado.";painelVazio.classList.remove('hidden');dashVisual.classList.add('hidden');painelTabela.classList.add('hidden');return;}
-            painelVazio.classList.add('hidden');dashVisual.classList.remove('hidden');painelTabela.classList.remove('hidden');
-            const thead=document.getElementById('head-tabela-comparativa');
-            let headerHtml=`<tr><th class="p-3 border-r border-slate-600">Serviço</th><th class="p-3 border-r border-slate-600">Subdivisão</th>`;
-            mesesDisponiveis.forEach(m=>{const[ano,mes]=m.split('-');headerHtml+=`<th class="p-3 text-right border-r border-slate-600 bg-blue-900/90">${mes}/${ano}</th>`;});
-            headerHtml+=`<th class="p-3 text-right bg-emerald-900 text-white">Acumulado Período</th></tr>`;
-            thead.innerHTML=headerHtml;
-            let chavesUnicas=new Set();let mapeamentoLinhas={};
-            obra.servicos.forEach(s=>{
-                if(servicoFiltrado&&s.nome!==servicoFiltrado)return;
-                s.subdivisoes.forEach(sub=>{const chave=`${s.nome}|||${sub.nome}`;chavesUnicas.add(chave);mapeamentoLinhas[chave]={servicoNome:s.nome,subdivisaoNome:sub.nome,valoresMensais:{}};});
-            });
-            mesesDisponiveis.forEach(m=>{
-                const snapshot=obra.historicoMedicoes[m].snapshotServicos||[];
-                snapshot.forEach(s=>{
-                    if(servicoFiltrado&&s.nome!==servicoFiltrado)return;
-                    s.subdivisoes.forEach(sub=>{
-                        const chave=`${s.nome}|||${sub.nome}`;
-                        chavesUnicas.add(chave);
-                        const precoM2Sub=s.valorM2Servico*(sub.percentual/100);
-                        const valorMedidoNoMes=sub.m2*precoM2Sub;
-                        if(!mapeamentoLinhas[chave])mapeamentoLinhas[chave]={servicoNome:s.nome,subdivisaoNome:sub.nome,valoresMensais:{}};
-                        mapeamentoLinhas[chave].valoresMensais[m]=valorMedidoNoMes;
-                    });
-                });
-            });
-            const corpo=document.getElementById('corpo-tabela-comparativa');corpo.innerHTML='';
-            const chavesOrdenadas=Array.from(chavesUnicas).sort();
-            let contagemServicos={};chavesOrdenadas.forEach(ch=>{const sNome=mapeamentoLinhas[ch].servicoNome;contagemServicos[sNome]=(contagemServicos[sNome]||0)+1;});
-            let servicosRenderizados={};let totaisColunasMensais={};mesesDisponiveis.forEach(m=>totaisColunasMensais[m]=0);let totalGeralAcumulado=0;
-            chavesOrdenadas.forEach(chave=>{
-                const item=mapeamentoLinhas[chave];
-                const tr=document.createElement('tr');tr.className="bg-white hover:bg-slate-50 border-b border-slate-100";
-                let tdServicoHtml='';
-                if(!servicosRenderizados[item.servicoNome]){const totalLinhas=contagemServicos[item.servicoNome];tdServicoHtml=`<td rowspan="${totalLinhas}" class="p-3 border-r border-slate-200 align-middle font-bold text-slate-900 bg-white">${item.servicoNome}</td>`;servicosRenderizados[item.servicoNome]=true;}
-                let acumuladoLinha=0;let colunasMesesHtml='';
-                mesesDisponiveis.forEach(m=>{const valMes=item.valoresMensais[m]||0;acumuladoLinha+=valMes;totaisColunasMensais[m]+=valMes;colunasMesesHtml+=`<td class="p-3 text-right border-r border-slate-200 font-semibold text-slate-600">${valMes>0?valMes.toLocaleString('pt-BR',{style:'currency',currency:'BRL'}):'−'}</td>`;});
-                totalGeralAcumulado+=acumuladoLinha;
-                tr.innerHTML=`${tdServicoHtml}<td class="p-3 font-medium border-r border-slate-200 text-slate-700">${item.subdivisaoNome}</td>${colunasMesesHtml}<td class="p-3 text-right font-bold bg-emerald-50 text-emerald-800">${acumuladoLinha.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</td>`;
-                corpo.appendChild(tr);
-            });
-            const tfoot=document.getElementById('foot-tabela-comparativa');
-            let footHtml=`<tr class="bg-slate-200 font-black text-slate-950"><td colspan="2" class="p-3 border-r border-slate-300 uppercase tracking-wider text-left text-xs">Totalização do Período:</td>`;
-            mesesDisponiveis.forEach(m=>{footHtml+=`<td class="p-3 border-r border-slate-300 text-right text-blue-950 bg-blue-100/60">${totaisColunasMensais[m].toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</td>`;});
-            footHtml+=`<td class="p-3 text-right bg-emerald-200 text-emerald-950">${totalGeralAcumulado.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</td></tr>`;
-            tfoot.innerHTML=footHtml;
-            const totalContratadoGlobal=obra.valorM2Global*obra.metragemGeral;
-            let totalMedidoAcumuladoTudo=0;
-            Object.keys(obra.historicoMedicoes).forEach(mesKey=>{let snapshot=obra.historicoMedicoes[mesKey].snapshotServicos||[];snapshot.forEach(s=>{s.subdivisoes.forEach(sub=>{totalMedidoAcumuladoTudo+=sub.m2*(s.valorM2Servico*(sub.percentual/100));});});});
-            document.getElementById('calc-txt-contrato').innerText=totalContratadoGlobal.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-            document.getElementById('calc-txt-medicoes').innerText=totalGeralAcumulado.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-            document.getElementById('calc-txt-saldo-restante').innerText=(totalContratadoGlobal-totalMedidoAcumuladoTudo).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-            renderizarGraficosObra(obra,mesesDisponiveis,servicoFiltrado);
-        }
+                        d1, d2, d3 = st.columns(3)
+                        d1.metric("Total Contratado", f"R$ {total_contratado4:,.2f}")
+                        d2.metric("Total Medido (acumulado)", f"R$ {total_medido_acum:,.2f}")
+                        d3.metric("Saldo Remanescente", f"R$ {saldo:,.2f}",
+                                  delta=f"{(total_medido_acum/total_contratado4*100):.1f}% executado" if total_contratado4 > 0 else "—")
 
-        function renderizarGraficosObra(obra,mesesFiltrados,servicoFiltrado=""){
-            const valoresHistorico=mesesFiltrados.map(m=>{
-                if(!servicoFiltrado)return obra.historicoMedicoes[m].totalMedidoMesa;
-                let totalMesSrv=0;
-                const snapshot=obra.historicoMedicoes[m].snapshotServicos||[];
-                snapshot.forEach(s=>{if(s.nome===servicoFiltrado){s.subdivisoes.forEach(sub=>{totalMesSrv+=sub.m2*(s.valorM2Servico*(sub.percentual/100));});}});
-                return totalMesSrv;
-            });
-            const labelsMesesFormatados=mesesFiltrados.map(m=>`${m.split('-')[1]}/${m.split('-')[0]}`);
-            if(chartLineInstance)chartLineInstance.destroy();
-            const ctxLine=document.getElementById('chartEvolucao').getContext('2d');
-            chartLineInstance=new Chart(ctxLine,{type:'line',data:{labels:labelsMesesFormatados,datasets:[{label:servicoFiltrado?`${servicoFiltrado} (R$)`:'Produção do Mês (R$)',data:valoresHistorico,borderColor:'#1e3a8a',backgroundColor:'rgba(30,58,138,0.08)',borderWidth:3,fill:true,tension:0.25}]},options:{responsive:true,maintainAspectRatio:false}});
-            let servicosLabels=[];let servicosValores=[];
-            const tituloGrafico=document.getElementById('titulo-grafico-distribuicao');
-            if(!servicoFiltrado){
-                tituloGrafico.innerText="Distribuição Física Financeira por Serviço (%)";
-                obra.servicos.forEach(s=>{
-                    servicosLabels.push(s.nome);let totalAcumuladoServico=0;
-                    mesesFiltrados.forEach(m=>{if(obra.historicoMedicoes[m]&&obra.historicoMedicoes[m].snapshotServicos){const srvM=obra.historicoMedicoes[m].snapshotServicos.find(srv=>srv.nome===s.nome||srv.id===s.id);if(srvM){srvM.subdivisoes.forEach(subM=>{const precoM2Sub=srvM.valorM2Servico*(subM.percentual/100);totalAcumuladoServico+=subM.m2*precoM2Sub;});}}});
-                    servicosValores.push(totalAcumuladoServico);
-                });
-            }else{
-                tituloGrafico.innerText=`Distribuição por Etapas: ${servicoFiltrado} (%)`;
-                const srvBase=obra.servicos.find(s=>s.nome===servicoFiltrado);
-                if(srvBase){srvBase.subdivisoes.forEach(sub=>{servicosLabels.push(sub.nome);let totalAcumuladoSub=0;mesesFiltrados.forEach(m=>{if(obra.historicoMedicoes[m]&&obra.historicoMedicoes[m].snapshotServicos){const srvM=obra.historicoMedicoes[m].snapshotServicos.find(srv=>srv.nome===servicoFiltrado);if(srvM){const subM=srvM.subdivisoes.find(sb=>sb.nome===sub.nome);if(subM){totalAcumuladoSub+=subM.m2*(srvM.valorM2Servico*(subM.percentual/100));}}}});servicosValores.push(totalAcumuladoSub);});}
-            }
-            if(chartPieInstance)chartPieInstance.destroy();
-            const ctxPie=document.getElementById('chartDistribuicao').getContext('2d');
-            chartPieInstance=new Chart(ctxPie,{type:'doughnut',data:{labels:servicosLabels,datasets:[{data:servicosValores,backgroundColor:['#1e293b','#1e3a8a','#0284c7','#0d9488','#b45309','#475569','#312e81']}]},options:{responsive:true,maintainAspectRatio:false}});
-        }
-
-        function salvarDados(){localStorage.setItem('passold_medicao_v1',JSON.stringify(OBRAS));}
-        window.onload=function(){renderizarCardsObras();};
-    </script>
-</body>
-</html>
-            """, height=900, scrolling=True)
+                        st.markdown("---")
+                        st.markdown("#### Tabela Comparativa por Período")
+                        rows_comp = []
+                        for _, h in df_hist4.iterrows():
+                            snap = _json.loads(h['snapshot']) if h['snapshot'] else []
+                            for srv in snap:
+                                for sub in srv.get('subdivisoes', []):
+                                    preco_m2 = srv['valor_m2_servico'] * (sub['percentual'] / 100)
+                                    rows_comp.append({
+                                        "Período": h['periodo'],
+                                        "Serviço": srv['nome'],
+                                        "Subdivisão": sub['nome'],
+                                        "m²": sub['m2'],
+                                        "R$/m²": preco_m2,
+                                        "Subtotal (R$)": sub.get('subtotal', sub['m2'] * preco_m2)
+                                    })
+                        if rows_comp:
+                            df_comp_tab = pd.DataFrame(rows_comp)
+                            st.dataframe(
+                                df_comp_tab.style.format({"m²": "{:.2f}", "R$/m²": "R$ {:.2f}", "Subtotal (R$)": "R$ {:,.2f}"}),
+                                hide_index=True, use_container_width=True
+                            )
 
     # ==================================================
     # CONFIGURACOES
@@ -2370,32 +2413,39 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     elif nome_aba == "Configuracoes":
         with aba_objeto:
             st.header("Painel de Controle Master")
+
             with st.expander("Cadastrar Novo Usuario"):
                 with st.form("form_user"):
                     nu = st.text_input("Login:").lower().strip()
                     nn = st.text_input("Nome:")
-                    ns = st.selectbox("Setor:", ["Producao", "Engenharia", "Diretoria", "Logistica", "Almoxarifado", "Medicao", "Master"])                   
+                    ns = st.selectbox("Setor:", ["Producao", "Engenharia", "Diretoria", "Logistica", "Almoxarifado", "Medicao", "Master"])
                     np = st.text_input("Senha:", type="password")
                     if st.form_submit_button("Salvar"):
                         if not all([nu, nn, np]):
                             st.error("Preencha tudo.")
                         else:
                             conn = conectar_banco()
-                            cursor = conn.cursor()
                             try:
-                                cursor.execute("INSERT INTO usuarios (usuario, nome, setor, senha) VALUES (%s,%s,%s,%s)", (nu, nn, ns, hash_senha(np)))
+                                cursor = conn.cursor()
+                                cursor.execute(
+                                    "INSERT INTO usuarios (usuario, nome, setor, senha) VALUES (%s,%s,%s,%s)",
+                                    (nu, nn, ns, hash_senha(np))
+                                )
                                 conn.commit()
                                 st.success(f"{nn} criado!")
                                 time.sleep(0.5)
                                 st.rerun()
                             except Exception as e:
+                                conn.rollback()
                                 st.error(f"Erro: {e}")
                             finally:
-                                conn.close()
+                                liberar_conexao(conn)
 
-            conn = conectar_banco()
-            df_u = pd.read_sql_query("SELECT id, usuario, nome, setor FROM usuarios ORDER BY id", conn)
-            conn.close()
+            conn_cfg = conectar_banco()
+            try:
+                df_u = pd.read_sql_query("SELECT id, usuario, nome, setor FROM usuarios ORDER BY id", conn_cfg)
+            finally:
+                liberar_conexao(conn_cfg)
             st.dataframe(df_u, hide_index=True, use_container_width=True)
 
             if len(df_u) > 1:
@@ -2405,19 +2455,28 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 else:
                     if st.button(f"Excluir {del_u}"):
                         conn = conectar_banco()
-                        cursor = conn.cursor()
-                        cursor.execute("DELETE FROM usuarios WHERE usuario=%s", (del_u,))
-                        conn.commit()
-                        conn.close()
-                        st.toast("Removido!")
-                        time.sleep(0.5)
-                        st.rerun()
+                        try:
+                            cursor = conn.cursor()
+                            cursor.execute("DELETE FROM usuarios WHERE usuario=%s", (del_u,))
+                            conn.commit()
+                            st.toast("Removido!")
+                            time.sleep(0.5)
+                            st.rerun()
+                        except Exception as e:
+                            conn.rollback()
+                            st.error(f"Erro: {e}")
+                        finally:
+                            liberar_conexao(conn)
 
             st.markdown("---")
-            st.markdown("### Reset Geral")
-            st.warning("Remove TODOS os dados permanentemente.")
-            if st.button("Confirmar limpeza total"):
-                resetar_banco_dados_completo()
-                st.toast("Resetado!")
-                time.sleep(0.5)
-                st.rerun()
+            st.markdown("### ⚠️ Reset Geral")
+            st.error("Esta ação remove TODOS os dados permanentemente e não pode ser desfeita.")
+            confirma_reset = st.text_input("Digite CONFIRMAR para habilitar o reset:")
+            if confirma_reset == "CONFIRMAR":
+                if st.button("🗑️ Executar limpeza total", type="primary"):
+                    resetar_banco_dados_completo()
+                    st.toast("Sistema resetado!")
+                    time.sleep(1)
+                    st.rerun()
+            else:
+                st.caption("Digite CONFIRMAR no campo acima para liberar o botão de reset.")
