@@ -1512,11 +1512,13 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         kc3.metric("Total m²", f"{lotes_sel['M2_Item'].sum():.2f}")
                         st.markdown("---")
                         for _, row in lotes_sel.iterrows():
-                            pode_concluir = bool(row.get('_pode_concluir', False))
+                            # Parcialmente Concluido sempre pode concluir o restante
+                            eh_parcial    = row.get('Status_Item', '') == 'Parcialmente Concluido'
+                            pode_concluir = bool(row.get('_pode_concluir', False)) or eh_parcial
                             dt_i = pd.to_datetime(row['Data_Producao_Programada']).strftime('%d/%m/%Y')
                             dt_f = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
-                            border_color = "#EA580C" if pode_concluir else "#3B82F6"
-                            bg_color     = "#FFF7ED" if pode_concluir else "#F8FAFC"
+                            border_color = "#D97706" if eh_parcial else ("#EA580C" if pode_concluir else "#3B82F6")
+                            bg_color     = "#FFFBEB" if eh_parcial else ("#FFF7ED" if pode_concluir else "#F8FAFC")
                             st.markdown(
                                 f"<div style='border-left:4px solid {border_color};background:{bg_color};"
                                 f"padding:12px 16px;border-radius:6px;margin-bottom:4px;'></div>",
@@ -1535,12 +1537,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     st.caption(f"Periodo: {dt_i} a {dt_f} &nbsp;|&nbsp; {row['Romaneio_Chapas']}")
                                     op_txt = row['Num_OP'] if row.get('Num_OP') else "Aguardando OP"
                                     st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {row.get('Fase_Produtiva', '—')}")
-                                    if pode_concluir:
-                                        status_atual = row.get('Status_Item', '')
-                                        if status_atual == 'Parcialmente Concluido':
-                                            st.markdown("<span style='color:#D97706;font-size:12px;font-weight:700;'>🟠 Envio parcial anterior registrado — ainda há peças pendentes</span>", unsafe_allow_html=True)
-                                        else:
-                                            st.markdown("<span style='color:#EA580C;font-size:12px;font-weight:600;'>Ultima semana — liberado para concluir</span>", unsafe_allow_html=True)
+                                    if eh_parcial:
+                                        st.markdown("<span style='color:#D97706;font-size:12px;font-weight:700;'>🟠 Envio parcial registrado — ainda há peças pendentes</span>", unsafe_allow_html=True)
+                                    elif pode_concluir:
+                                        st.markdown("<span style='color:#EA580C;font-size:12px;font-weight:600;'>Ultima semana — liberado para concluir</span>", unsafe_allow_html=True)
                                     else:
                                         dias_restantes = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel).days
                                         st.markdown(f"<span style='color:#3B82F6;font-size:12px;'>Em producao — {dias_restantes} dias ate o prazo</span>", unsafe_allow_html=True)
@@ -1586,16 +1586,18 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                                         (row['id'],)
                                                     )
                                                     conn.commit()
-                                                    _limpar_cache_geral()
                                                 except Exception as e:
                                                     conn.rollback()
                                                     st.error(f"Erro: {e}")
                                                 finally:
                                                     liberar_conexao(conn)
+                                                carregar_micro.clear()
+                                                carregar_macro.clear()
+                                                carregar_fila_logistica.clear()
                                                 enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
                                                 st.session_state[f"modal_pronto_{row['id']}"] = False
                                                 st.toast(f"✅ {row['Cod_Lote']} concluido!")
-                                                time.sleep(0.3)
+                                                time.sleep(0.5)
                                                 st.rerun()
                                         with bt2:
                                             if st.button("Cancelar", key=f"cancel_total_{row['id']}", use_container_width=True):
@@ -1680,18 +1682,22 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                                                 (novo_status, int(row['id']))
                                                             )
                                                             conn.commit()
-                                                            _limpar_cache_geral()
-                                                            carregar_pecas_lote.clear()
                                                         except Exception as e:
                                                             conn.rollback()
                                                             st.error(f"Erro: {e}")
                                                         finally:
                                                             liberar_conexao(conn)
+                                                        # Limpa TODOS os caches explicitamente
+                                                        carregar_micro.clear()
+                                                        carregar_macro.clear()
+                                                        carregar_pecas_lote.clear()
+                                                        carregar_todas_pecas_obra.clear()
+                                                        carregar_fila_logistica.clear()
                                                         enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
                                                         st.session_state[f"modal_pronto_{row['id']}"] = False
                                                         emoji_t = "✅" if todas_zeradas else "🟠"
                                                         st.toast(f"{emoji_t} {row['Cod_Lote']} — {'Concluido!' if todas_zeradas else 'Envio parcial registrado!'}")
-                                                        time.sleep(0.3)
+                                                        time.sleep(0.5)
                                                         st.rerun()
                                             with bp2:
                                                 if st.button("Cancelar", key=f"cancel_parc2_{row['id']}", use_container_width=True):
