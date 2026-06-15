@@ -259,12 +259,14 @@ def inicializar_banco_de_dados():
                 qtd_total INTEGER DEFAULT 0,
                 qtd_enviada INTEGER DEFAULT 0,
                 saldo INTEGER DEFAULT 0,
+                m2_op_real REAL DEFAULT 0,
                 componentes_status TEXT DEFAULT 'Aguardando Projetista',
                 criado_em TIMESTAMP DEFAULT NOW()
             )
         """)
         # Coluna de m2 executado na etapa
         cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN IF NOT EXISTS m2_executado REAL DEFAULT 0")
+        cursor.execute("ALTER TABLE op_pecas ADD COLUMN IF NOT EXISTS m2_op_real REAL DEFAULT 0")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_lote ON op_pecas(lote_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_obra ON op_pecas(obra)")
 
@@ -796,7 +798,7 @@ def carregar_todas_pecas_obra(obra: str):
     return df
 
 def salvar_pecas_lote(lote_id: int, obra: str, cod_lote: str, num_op: str,
-                      pecas: list, componentes_status: str):
+                      pecas: list, componentes_status: str, m2_op_real: float):
     """Salva lista de peças vinculada ao lote. Substitui a lista anterior."""
     conn = conectar_banco()
     try:
@@ -807,27 +809,27 @@ def salvar_pecas_lote(lote_id: int, obra: str, cod_lote: str, num_op: str,
             cursor.execute("""
                 INSERT INTO op_pecas
                 (lote_id, obra, cod_lote, num_op, codigo, localizacao, medida,
-                 qtd_total, qtd_enviada, saldo, componentes_status)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s)
+                 qtd_total, qtd_enviada, saldo, m2_op_real, componentes_status)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s,%s)
             """, (
                 lote_id, obra, cod_lote, num_op,
                 p.get('codigo', '').strip().upper(),
                 p.get('localizacao', '').strip().upper(),
                 p.get('medida', '').strip().upper(),
-                qtd, qtd, componentes_status
+                qtd, qtd, float(m2_op_real), componentes_status
             ))
-        # Abate m2 da etapa
+        # Abate m2 REAL informado pelo usuário na etapa
         cursor.execute(
-            "SELECT EDT_Vinculado, M2_Item FROM itens_detalhado WHERE id=%s", (lote_id,)
+            "SELECT EDT_Vinculado FROM itens_detalhado WHERE id=%s", (lote_id,)
         )
         row_lote = cursor.fetchone()
         if row_lote:
-            edt, m2_lote = row_lote
+            edt = row_lote[0]
             cursor.execute("""
                 UPDATE cronograma_macro
                 SET m2_executado = COALESCE(m2_executado, 0) + %s
                 WHERE EDT = %s
-            """, (float(m2_lote), edt))
+            """, (float(m2_op_real), edt))
         conn.commit()
         carregar_pecas_lote.clear()
         carregar_todas_pecas_obra.clear()
@@ -1658,6 +1660,24 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         st.caption("Cole os dados abaixo — um item por linha em cada campo.")
                         st.info("Exemplo de Códigos:\nB24-01C\nB25-01C\nRF.JA.11/CNT-401")
 
+                        # m² REAL desta OP
+                        m2_op_real = st.number_input(
+                            "📐 m² real desta OP (informado pelo projetista):",
+                            min_value=0.0,
+                            value=float(row_lote.get('M2_Item', 0)),
+                            step=0.1,
+                            format="%.2f",
+                            key="m2_op_real_input",
+                            help="Este valor será abatido do saldo da etapa. Pode ser diferente do m² do fatiamento."
+                        )
+                        if not df_banco_macro.empty and edt_lote:
+                            fr_edt2 = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
+                            if not fr_edt2.empty:
+                                m2_exec_atual = float(fr_edt2.iloc[0].get('m2_executado', 0) or 0)
+                                m2_total_edt2 = float(fr_edt2.iloc[0].get('M2_Total_Tarefa', 0) or 0)
+                                saldo_apos = m2_total_edt2 - m2_exec_atual - m2_op_real
+                                st.caption(f"Saldo da etapa após lançamento: **{saldo_apos:.2f} m²**")
+
                         p1, p2, p3, p4 = st.columns(4)
                         with p1:
                             codigos_txt = st.text_area(
@@ -1716,7 +1736,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 salvar_pecas_lote(
                                     lote_id, row_lote['Obra_Vinculada'],
                                     row_lote['Cod_Lote'], row_lote['Num_OP'],
-                                    pecas_list, comp_status
+                                    pecas_list, comp_status, m2_op_real
                                 )
                                 st.toast(f"{len(pecas_list)} peça(s) salvas para {num_op_sel}!")
                                 time.sleep(0.3)
