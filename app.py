@@ -2699,6 +2699,57 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
             st.markdown("---")
 
+            # ── OPs FINALIZADAS — EMITIR ROMANEIO ─────────────────
+            with st.expander("✅ OPs Finalizadas — Emitir Romaneio", expanded=True):
+                df_conc_log = df_banco_micro[
+                    df_banco_micro['Status_Item'] == 'Concluido'
+                ].copy() if not df_banco_micro.empty else pd.DataFrame()
+
+                if obra_selecionada and not df_conc_log.empty:
+                    df_conc_log = df_conc_log[df_conc_log['Obra_Vinculada'] == obra_selecionada]
+
+                if df_conc_log.empty:
+                    st.info("Nenhuma OP finalizada ainda.")
+                else:
+                    for _, row_c in df_conc_log.iterrows():
+                        df_pecas_c = carregar_pecas_lote(int(row_c['id']))
+                        with st.container(border=True):
+                            cc1, cc2, cc3 = st.columns([4, 2, 2])
+                            with cc1:
+                                st.markdown(
+                                    f'<span class="badge-obra">{row_c["Obra_Vinculada"]}</span>&nbsp;'
+                                    f'<span class="badge-edt">{row_c["EDT_Vinculado"]}</span>&nbsp;'
+                                    f'<span class="badge-lote">{row_c["Cod_Lote"]}</span>',
+                                    unsafe_allow_html=True
+                                )
+                                num_op_c = row_c.get('Num_OP') or '—'
+                                st.markdown(f"**OP:** `{num_op_c}` &nbsp;|&nbsp; **{row_c['Tipo_Material']}**")
+                                st.caption(f"{row_c['M2_Item']:.2f} m² &nbsp;|&nbsp; {int(row_c['Qtd_Caixas'])} cx &nbsp;|&nbsp; {row_c['Romaneio_Chapas']}")
+                                if not df_pecas_c.empty:
+                                    st.caption(f"🔩 {len(df_pecas_c)} peça(s) | Total: {int(df_pecas_c['qtd_total'].sum())} un")
+                                else:
+                                    st.caption("⚠️ Sem peças lançadas")
+                            with cc2:
+                                end_r = st.text_input("Endereço:", key=f"end_rom_{row_c['id']}",
+                                                       placeholder="Endereço da obra")
+                            with cc3:
+                                st.write("")
+                                st.write("")
+                                if df_pecas_c.empty:
+                                    st.warning("Sem peças para o romaneio")
+                                else:
+                                    rom_bytes = gerar_romaneio_xlsx(
+                                        row_c, df_pecas_c, end_r,
+                                        st.session_state.usuario_nome
+                                    )
+                                    st.download_button(
+                                        label="🖨️ Emitir Romaneio",
+                                        data=rom_bytes,
+                                        file_name=f"Romaneio_{num_op_c}_{row_c['Cod_Lote']}.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key=f"dl_rom_{row_c['id']}"
+                                    )
+
             with st.expander("Fila Prioritaria — Aguardando Agendamento", expanded=True):
                 if df_log.empty or df_log[df_log['Status_Logistica'] == 'Aguardando Agendamento'].empty:
                     st.success("Todos os lotes ja agendados!")
@@ -2717,9 +2768,15 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         st.markdown(f"<div class='{css_bar}'>", unsafe_allow_html=True)
                         ci, cp, ca = st.columns([5, 3, 2])
                         with ci:
-                            st.markdown(f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>', unsafe_allow_html=True)
+                            num_op_ag = row.get('Num_OP') or 'S/OP'
+                            st.markdown(
+                                f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;'
+                                f'<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>&nbsp;'
+                                f'<span class="badge-edt">OP: {num_op_ag}</span>',
+                                unsafe_allow_html=True
+                            )
                             st.markdown(f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} cx` — {row['M2_Item']:.2f} m²")
-                            st.caption(f"Pavimentos: {row['Romaneio_Chapas']} | OP: {row.get('Num_OP') or 'S/OP'}")
+                            st.caption(f"Pavimentos: {row['Romaneio_Chapas']}")
                         with cp:
                             ptxt = pd.to_datetime(prazo_d).strftime('%d/%m/%Y') if prazo_valido(prazo_d) else "—"
                             st.caption("Prazo maximo despacho")
@@ -2732,7 +2789,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
                         if st.session_state.get(f"ag_open_{row['id']}", False):
                             with st.container(border=True):
-                                st.markdown(f"#### Agendar — Lote `{row['Cod_Lote']}` | {row['Obra_Vinculada']}")
+                                st.markdown(f"#### Agendar — `{num_op_ag}` | Lote `{row['Cod_Lote']}` | {row['Obra_Vinculada']}")
                                 fa1, fa2 = st.columns(2)
                                 with fa1:
                                     dt_env = st.date_input("Data envio:", format="DD/MM/YYYY", key=f"dt_env_{row['id']}",
