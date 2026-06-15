@@ -245,6 +245,29 @@ def inicializar_banco_de_dados():
                 UNIQUE(obra_id, periodo)
             )
         """)
+        # ── TABELA DE PEÇAS DAS OPs ────────────────────────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS op_pecas (
+                id SERIAL PRIMARY KEY,
+                lote_id INTEGER REFERENCES itens_detalhado(id) ON DELETE CASCADE,
+                obra TEXT,
+                cod_lote TEXT,
+                num_op TEXT,
+                codigo TEXT NOT NULL,
+                localizacao TEXT,
+                medida TEXT,
+                qtd_total INTEGER DEFAULT 0,
+                qtd_enviada INTEGER DEFAULT 0,
+                saldo INTEGER DEFAULT 0,
+                componentes_status TEXT DEFAULT 'Aguardando Projetista',
+                criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        # Coluna de m2 executado na etapa
+        cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN IF NOT EXISTS m2_executado REAL DEFAULT 0")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_lote ON op_pecas(lote_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_obra ON op_pecas(obra)")
+
         # ── ÍNDICES DE PERFORMANCE ──────────────────────────────────
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_itens_obra ON itens_detalhado(Obra_Vinculada)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_itens_status ON itens_detalhado(Status_Item)")
@@ -748,6 +771,205 @@ def atualizar_componente(comp_id, status, obs, usuario):
         liberar_conexao(conn)
 
 # ========================================================
+# FUNÇÕES DE OP_PECAS
+# ========================================================
+@st.cache_data(ttl=30)
+def carregar_pecas_lote(lote_id: int):
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            "SELECT * FROM op_pecas WHERE lote_id=%s ORDER BY id", conn, params=(lote_id,)
+        )
+    finally:
+        liberar_conexao(conn)
+    return df
+
+@st.cache_data(ttl=30)
+def carregar_todas_pecas_obra(obra: str):
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            "SELECT * FROM op_pecas WHERE obra=%s ORDER BY cod_lote, id", conn, params=(obra,)
+        )
+    finally:
+        liberar_conexao(conn)
+    return df
+
+def salvar_pecas_lote(lote_id: int, obra: str, cod_lote: str, num_op: str,
+                      pecas: list, componentes_status: str):
+    """Salva lista de peças vinculada ao lote. Substitui a lista anterior."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM op_pecas WHERE lote_id=%s", (lote_id,))
+        for p in pecas:
+            qtd = int(p.get('qtd', 0))
+            cursor.execute("""
+                INSERT INTO op_pecas
+                (lote_id, obra, cod_lote, num_op, codigo, localizacao, medida,
+                 qtd_total, qtd_enviada, saldo, componentes_status)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s)
+            """, (
+                lote_id, obra, cod_lote, num_op,
+                p.get('codigo', '').strip().upper(),
+                p.get('localizacao', '').strip().upper(),
+                p.get('medida', '').strip().upper(),
+                qtd, qtd, componentes_status
+            ))
+        # Abate m2 da etapa
+        cursor.execute(
+            "SELECT EDT_Vinculado, M2_Item FROM itens_detalhado WHERE id=%s", (lote_id,)
+        )
+        row_lote = cursor.fetchone()
+        if row_lote:
+            edt, m2_lote = row_lote
+            cursor.execute("""
+                UPDATE cronograma_macro
+                SET m2_executado = COALESCE(m2_executado, 0) + %s
+                WHERE EDT = %s
+            """, (float(m2_lote), edt))
+        conn.commit()
+        carregar_pecas_lote.clear()
+        carregar_todas_pecas_obra.clear()
+        _limpar_cache_geral()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar peças: {e}")
+    finally:
+        liberar_conexao(conn)
+
+def atualizar_componentes_status_pecas(lote_id: int, novo_status: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE op_pecas SET componentes_status=%s WHERE lote_id=%s",
+            (novo_status, lote_id)
+        )
+        conn.commit()
+        carregar_pecas_lote.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao atualizar status: {e}")
+    finally:
+        liberar_conexao(conn)
+
+def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: str) -> bytes:
+    """Gera o romaneio .xlsx com as peças do lote."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from io import BytesIO
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Romaneio"
+    ws.sheet_view.showGridLines = False
+    ws.page_setup.orientation = "portrait"
+
+    bd = Side(style='thin', color="000000")
+    borda = Border(left=bd, right=bd, top=bd, bottom=bd)
+    fill_cab = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    fill_sub = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+
+    ws.column_dimensions['A'].width = 18
+    ws.column_dimensions['B'].width = 20
+    ws.column_dimensions['C'].width = 20
+    ws.column_dimensions['D'].width = 14
+    ws.column_dimensions['E'].width = 14
+
+    # Cabeçalho
+    ws.merge_cells("A1:E1")
+    ws["A1"] = "PASSOLD SISTEMAS DE FACHADAS"
+    ws["A1"].font = Font(name="Arial", size=14, bold=True, color="FFFFFF")
+    ws["A1"].fill = fill_cab
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 30
+
+    ws.merge_cells("A2:E2")
+    ws["A2"] = "ROMANEIO DE DESPACHO"
+    ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+    ws["A2"].fill = fill_cab
+    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    # Informações do lote
+    infos = [
+        ("OP:", str(lote_row.get('Num_OP', '—'))),
+        ("Obra:", str(lote_row.get('Obra_Vinculada', '—'))),
+        ("Lote:", str(lote_row.get('Cod_Lote', '—'))),
+        ("Endereço:", str(endereco_obra)),
+        ("Digitado por:", str(digitado_por)),
+        ("Data:", datetime.now().strftime('%d/%m/%Y')),
+    ]
+    linha = 3
+    for label, valor in infos:
+        ws.cell(linha, 1, label).font = Font(name="Arial", size=11, bold=True)
+        ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=5)
+        ws.cell(linha, 2, valor).font = Font(name="Arial", size=11)
+        for c in range(1, 6):
+            ws.cell(linha, c).border = borda
+        linha += 1
+
+    linha += 1
+
+    # Cabeçalho da tabela de peças
+    titulos = ["CÓDIGO", "LOCALIZAÇÃO", "MEDIDA", "QTD TOTAL", "QTD ENVIADA"]
+    for col, titulo in enumerate(titulos, 1):
+        cel = ws.cell(linha, col, titulo)
+        cel.font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        cel.fill = fill_cab
+        cel.alignment = Alignment(horizontal="center", vertical="center")
+        cel.border = borda
+    linha += 1
+
+    # Peças
+    for i, (_, peca) in enumerate(pecas_df.iterrows()):
+        bg = fill_sub if i % 2 == 0 else PatternFill()
+        dados = [
+            peca.get('codigo', ''),
+            peca.get('localizacao', ''),
+            peca.get('medida', ''),
+            peca.get('qtd_total', 0),
+            peca.get('qtd_enviada', 0),
+        ]
+        for col, val in enumerate(dados, 1):
+            cel = ws.cell(linha, col, val)
+            cel.font = Font(name="Arial", size=11)
+            cel.alignment = Alignment(horizontal="center", vertical="center")
+            cel.border = borda
+            if i % 2 == 0:
+                cel.fill = fill_sub
+        linha += 1
+
+    # Totais
+    linha += 1
+    ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=3)
+    ws.cell(linha, 1, "TOTAL DE PEÇAS:").font = Font(name="Arial", size=11, bold=True)
+    ws.cell(linha, 4, int(pecas_df['qtd_total'].sum()) if not pecas_df.empty else 0).font = Font(name="Arial", size=11, bold=True)
+    for c in range(1, 6):
+        ws.cell(linha, c).border = borda
+
+    # Assinaturas
+    linha += 3
+    assinaturas = [
+        "Conferência Interna",
+        "Nome Motorista / Data",
+        "Recebedor na Obra / Data",
+        "Engenheiro Responsável",
+    ]
+    for ass in assinaturas:
+        ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=3)
+        ws.cell(linha, 1).border = Border(bottom=bd)
+        ws.cell(linha, 1, "").font = Font(name="Arial", size=11)
+        ws.cell(linha+1, 1, ass).font = Font(name="Arial", size=10, bold=True)
+        ws.cell(linha, 4, "____/____/______").font = Font(name="Arial", size=11)
+        linha += 3
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+# ========================================================
 # FUNÇÕES DO SISTEMA DE MEDIÇÃO — agora no banco
 # ========================================================
 @st.cache_data(ttl=30)
@@ -980,7 +1202,7 @@ if setor in ["Master", "Producao", "Diretoria", "Engenharia"]:
     abas_disponiveis.append("Painel da Producao - ACM")
 if setor in ["Master", "Producao", "Diretoria"]:
     abas_disponiveis.append("Painel TV — ACM")
-if setor in ["Master"]:
+if setor in ["Master", "PCP"]:
     abas_disponiveis.append("Liberar OPs da Semana")
 if setor in ["Master", "Diretoria"]:
     abas_disponiveis.append("Visao Macro")
@@ -1325,6 +1547,9 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     elif nome_aba == "Liberar OPs da Semana":
         with aba_objeto:
             st.header("Ordens de Producao — Liberacao Semanal")
+
+            # ── SEÇÃO 1: LOTES PENDENTES DO FATIAMENTO ────────────
+            st.markdown("### 📋 Seção 1 — Lotes Pendentes do Fatiamento")
             if obra_selecionada and not df_banco_micro.empty:
                 df_pend = df_banco_micro[
                     (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
@@ -1363,26 +1588,179 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             st.warning("Selecione pelo menos um item.")
                 else:
                     st.success("Todos os lotes ja foram liberados.")
+            else:
+                st.info("Nenhum lote pendente encontrado.")
 
-                st.markdown("---")
-                st.markdown("### 📦 Inserir Componentes por OP")
-                df_lib_ops = df_banco_micro[
-                    (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
-                    (df_banco_micro['Status_Item'] == "Liberado para Fabrica")
-                ].copy() if not df_banco_micro.empty else pd.DataFrame()
+            st.markdown("---")
 
-                if not df_lib_ops.empty:
-                    opcoes_ops = [
-                        f"{row['Num_OP']} — {row['Cod_Lote']} | {row['Tipo_Material']}"
-                        for _, row in df_lib_ops.iterrows() if row.get('Num_OP')
-                    ]
-                    if opcoes_ops:
-                        op_sel = st.selectbox("OP:", opcoes_ops, key="sel_op_comp")
-                        row_op = df_lib_ops[df_lib_ops['Num_OP'] == op_sel.split(" — ")[0].strip()].iloc[0]
+            # ── SEÇÃO 2: LANÇAR PEÇAS DA OP ───────────────────────
+            st.markdown("### 🔩 Seção 2 — Lançar Peças da OP")
+            st.caption("Vincule os códigos reais das peças ao lote já liberado.")
+
+            df_lib = df_banco_micro[
+                (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
+                (df_banco_micro['Status_Item'] == "Liberado para Fabrica")
+            ].copy() if obra_selecionada and not df_banco_micro.empty else pd.DataFrame()
+
+            if not df_lib.empty:
+                opcoes_lotes = [
+                    f"{row['Num_OP']} — {row['Cod_Lote']} | {row['Tipo_Material']} | {row['M2_Item']:.2f}m²"
+                    for _, row in df_lib.iterrows() if row.get('Num_OP')
+                ]
+                if opcoes_lotes:
+                    lote_sel_str = st.selectbox("Selecione o Lote / OP:", opcoes_lotes, key="sel_lote_pecas")
+                    num_op_sel   = lote_sel_str.split(" — ")[0].strip()
+                    row_lote     = df_lib[df_lib['Num_OP'] == num_op_sel].iloc[0]
+                    lote_id      = int(row_lote['id'])
+
+                    # Saldo da etapa
+                    edt_lote = row_lote.get('EDT_Vinculado', '')
+                    if not df_banco_macro.empty and edt_lote:
+                        fr_edt = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
+                        if not fr_edt.empty:
+                            m2_total_edt    = float(fr_edt.iloc[0].get('M2_Total_Tarefa', 0) or 0)
+                            m2_exec_edt     = float(fr_edt.iloc[0].get('m2_executado', 0) or 0)
+                            m2_saldo_edt    = m2_total_edt - m2_exec_edt
+                            se1, se2, se3   = st.columns(3)
+                            se1.metric("Etapa", edt_lote)
+                            se2.metric("m² Total da Etapa", f"{m2_total_edt:.2f} m²")
+                            se3.metric("Saldo da Etapa", f"{m2_saldo_edt:.2f} m²",
+                                       delta=f"-{row_lote['M2_Item']:.2f}m² este lote",
+                                       delta_color="inverse")
+
+                    # Peças já lançadas
+                    df_pecas_existentes = carregar_pecas_lote(lote_id)
+                    if not df_pecas_existentes.empty:
+                        st.success(f"✅ {len(df_pecas_existentes)} peça(s) já lançadas para este lote.")
+                        with st.expander("Ver peças lançadas", expanded=False):
+                            st.dataframe(
+                                df_pecas_existentes[['codigo', 'localizacao', 'medida', 'qtd_total', 'qtd_enviada', 'saldo']],
+                                hide_index=True, use_container_width=True
+                            )
+                        # Romaneio de despacho
+                        st.markdown("#### 📄 Romaneio de Despacho")
+                        end_obra = st.text_input("Endereço da Obra:", key="end_romaneio")
+                        dig_por  = st.text_input("Digitado por:", value=st.session_state.usuario_nome, key="dig_romaneio")
+                        if st.button("⬇️ Gerar Romaneio .xlsx", key="btn_romaneio"):
+                            xlsx_bytes = gerar_romaneio_xlsx(row_lote, df_pecas_existentes, end_obra, dig_por)
+                            st.download_button(
+                                label="📥 Baixar Romaneio",
+                                data=xlsx_bytes,
+                                file_name=f"Romaneio_{num_op_sel}_{row_lote['Cod_Lote']}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="dl_romaneio"
+                            )
+
+                    with st.expander(
+                        "➕ Lançar / Substituir Peças" if not df_pecas_existentes.empty else "➕ Lançar Peças",
+                        expanded=df_pecas_existentes.empty
+                    ):
+                        st.caption("Cole os dados abaixo — um item por linha em cada campo.")
+                        st.info("Exemplo de Códigos:\nB24-01C\nB25-01C\nRF.JA.11/CNT-401")
+
+                        p1, p2, p3, p4 = st.columns(4)
+                        with p1:
+                            codigos_txt = st.text_area(
+                                "Códigos (um por linha):",
+                                height=200,
+                                key="pecas_codigos",
+                                placeholder="B24-01C\nB25-01C\nRF.JA.11/CNT"
+                            )
+                        with p2:
+                            qtds_txt = st.text_area(
+                                "Quantidades (um por linha):",
+                                height=200,
+                                key="pecas_qtds",
+                                placeholder="3\n3\n1"
+                            )
+                        with p3:
+                            locs_txt = st.text_area(
+                                "Localização (um por linha):",
+                                height=200,
+                                key="pecas_locs",
+                                placeholder="Pav 27-37\nPav 27-37\n(opcional)"
+                            )
+                        with p4:
+                            medidas_txt = st.text_area(
+                                "Medidas (um por linha):",
+                                height=200,
+                                key="pecas_medidas",
+                                placeholder="550x390\n550x400\n(opcional)"
+                            )
+
+                        st.markdown("**Status dos componentes desta OP:**")
+                        comp_status = st.radio(
+                            "",
+                            ["Aguardando Projetista", "Componentes OK"],
+                            horizontal=True,
+                            key="comp_status_radio"
+                        )
+
+                        if st.button("💾 Salvar Peças", key="btn_salvar_pecas", type="primary"):
+                            codigos  = [l.strip() for l in codigos_txt.strip().split('\n') if l.strip()]
+                            qtds     = [l.strip() for l in qtds_txt.strip().split('\n') if l.strip()]
+                            locs     = [l.strip() for l in locs_txt.strip().split('\n')] if locs_txt.strip() else []
+                            medidas  = [l.strip() for l in medidas_txt.strip().split('\n')] if medidas_txt.strip() else []
+
+                            if not codigos:
+                                st.error("Informe pelo menos um código.")
+                            else:
+                                pecas_list = []
+                                for i, cod in enumerate(codigos):
+                                    pecas_list.append({
+                                        "codigo":      cod,
+                                        "qtd":         int(qtds[i]) if i < len(qtds) and qtds[i].isdigit() else 1,
+                                        "localizacao": locs[i] if i < len(locs) else "",
+                                        "medida":      medidas[i] if i < len(medidas) else "",
+                                    })
+                                salvar_pecas_lote(
+                                    lote_id, row_lote['Obra_Vinculada'],
+                                    row_lote['Cod_Lote'], row_lote['Num_OP'],
+                                    pecas_list, comp_status
+                                )
+                                st.toast(f"{len(pecas_list)} peça(s) salvas para {num_op_sel}!")
+                                time.sleep(0.3)
+                                st.rerun()
+                else:
+                    st.info("Nenhuma OP com número gerado ainda. Libere os lotes primeiro.")
+            else:
+                st.info("Nenhuma OP liberada para esta obra ainda.")
+
+            st.markdown("---")
+
+            # ── SEÇÃO 3: COMPONENTES POR OP ───────────────────────
+            st.markdown("### 📦 Seção 3 — Componentes por OP")
+            st.caption("Cadastre os componentes necessários para cada OP liberada.")
+
+            df_lib_ops = df_banco_micro[
+                (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
+                (df_banco_micro['Status_Item'] == "Liberado para Fabrica")
+            ].copy() if obra_selecionada and not df_banco_micro.empty else pd.DataFrame()
+
+            if not df_lib_ops.empty:
+                opcoes_ops = [
+                    f"{row['Num_OP']} — {row['Cod_Lote']} | {row['Tipo_Material']}"
+                    for _, row in df_lib_ops.iterrows() if row.get('Num_OP')
+                ]
+                if opcoes_ops:
+                    op_sel  = st.selectbox("OP:", opcoes_ops, key="sel_op_comp")
+                    row_op  = df_lib_ops[df_lib_ops['Num_OP'] == op_sel.split(" — ")[0].strip()].iloc[0]
+
+                    # Verificar status dos componentes via op_pecas
+                    df_pecas_op = carregar_pecas_lote(int(row_op['id']))
+                    comp_st = df_pecas_op.iloc[0]['componentes_status'] if not df_pecas_op.empty else "Aguardando Projetista"
+
+                    if comp_st == "Aguardando Projetista":
+                        st.warning("🟠 Componentes: **Aguardando Projetista** — cadastre as peças na Seção 2 primeiro e marque como 'Componentes OK'.")
+                    else:
                         comp_existentes = carregar_componentes_op(int(row_op['id']))
                         if not comp_existentes.empty:
                             st.success(f"✅ {len(comp_existentes)} componente(s) já cadastrado(s) para esta OP.")
-                        with st.expander("➕ Adicionar / Substituir lista de componentes", expanded=comp_existentes.empty):
+
+                        with st.expander(
+                            "➕ Adicionar / Substituir lista de componentes",
+                            expanded=comp_existentes.empty
+                        ):
                             st.caption("⚠️ Salvar substitui a lista anterior desta OP.")
                             num_itens = st.number_input("Quantos componentes?", min_value=1, max_value=30, value=3, key="num_comp")
                             componentes_input = []
@@ -1391,9 +1769,9 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 with c1:
                                     nome = st.text_input(f"Componente {idx+1}:", key=f"comp_nome_{idx}")
                                 with c2:
-                                    qtd = st.number_input(f"Qtd {idx+1}:", min_value=0.0, value=1.0, key=f"comp_qtd_{idx}")
+                                    qtd  = st.number_input(f"Qtd {idx+1}:", min_value=0.0, value=1.0, key=f"comp_qtd_{idx}")
                                 with c3:
-                                    und = st.selectbox(f"Un {idx+1}:", ["un", "kg", "m", "m²", "cx", "pç", "rolo"], key=f"comp_und_{idx}")
+                                    und  = st.selectbox(f"Un {idx+1}:", ["un", "kg", "m", "m²", "cx", "pç", "rolo"], key=f"comp_und_{idx}")
                                 if nome.strip():
                                     componentes_input.append({"nome": nome.strip(), "qtd": qtd, "unidade": und})
                             if st.button("💾 Salvar lista de componentes", key="btn_salvar_comp"):
@@ -1404,12 +1782,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     st.toast(f"Lista salva para {row_op['Num_OP']}!")
                                     time.sleep(0.3)
                                     st.rerun()
-                    else:
-                        st.info("Nenhuma OP com número gerado ainda.")
                 else:
-                    st.info("Nenhuma OP liberada para esta obra ainda.")
+                    st.info("Nenhuma OP com número gerado ainda.")
             else:
-                st.info("Nenhum lote pendente encontrado.")
+                st.info("Nenhuma OP liberada para esta obra ainda.")
 
     # ==================================================
     # VISAO MACRO
