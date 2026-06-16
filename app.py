@@ -2065,8 +2065,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 st.info("Nenhum lote pendente encontrado.")
 
             st.markdown("---")
-
-            # ── SEÇÃO 2: LANÇAR PEÇAS DA OP ───────────────────────
+# ── SEÇÃO 2: LANÇAR PEÇAS DA OP ───────────────────────
             st.markdown("### 🔩 Seção 2 — Lançar Peças da OP")
             st.caption("Vincule os códigos reais das peças ao lote já liberado.")
 
@@ -2087,8 +2086,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     lote_id      = int(row_lote['id'])
                     edt_lote     = row_lote.get('EDT_Vinculado', '')
 
-                    # Info da etapa em cards limpos
-                    if not df_banco_macro.empty and edt_lote:
+                    if not df_banco_macro.empty and edt_lote and edt_lote != 'AVULSO':
                         fr_edt = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
                         if not fr_edt.empty:
                             macro_row_sel   = fr_edt.iloc[0]
@@ -2108,12 +2106,13 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             num_proj_edt  = ""
                     else:
                         macro_row_sel = {}
-                        tipo_esc_edt  = "ACM"
+                        tipo_esc_edt  = row_lote.get('Tipo_Material', 'ACM')
                         num_proj_edt  = ""
+                        if edt_lote == 'AVULSO':
+                            st.info("OP Avulsa — sem vínculo com etapa do cronograma.")
 
                     st.markdown("---")
 
-                    # Peças já lançadas
                     df_pecas_existentes = carregar_pecas_lote(lote_id)
 
                     if not df_pecas_existentes.empty:
@@ -2131,7 +2130,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 hide_index=True, use_container_width=True
                             )
 
-                        # Gerar OP
                         st.markdown("#### 📄 Gerar Ordem de Produção")
                         with st.expander("Configurar e Gerar OP", expanded=False):
                             obs_op = st.text_area("Observações:", key="obs_op",
@@ -2161,7 +2159,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     "qtd_folhas": qtd_folhas,
                                     "material": "PERFIL EM ALUMINIO"
                                 })
-                            else:  # Terceirizada
+                            else:
                                 empresa = st.text_input("Empresa Responsável:", key="op_empresa")
                                 mat_terc = st.text_input("Material:", key="op_mat_terc")
                                 campos_extras.update({"empresa": empresa, "material": mat_terc})
@@ -2176,14 +2174,11 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     key="dl_op"
                                 )
 
-                    # Lançar/Substituir peças
                     with st.expander(
                         "✏️ Editar / Substituir Peças" if not df_pecas_existentes.empty else "➕ Lançar Peças",
                         expanded=df_pecas_existentes.empty
                     ):
                         st.caption("Cole os dados abaixo — um item por linha em cada campo.")
-
-                        # m² REAL
                         gm1, gm2 = st.columns([2, 3])
                         with gm1:
                             m2_op_real = st.number_input(
@@ -2196,11 +2191,11 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 help="Será abatido do saldo da etapa."
                             )
                         with gm2:
-                            if not df_banco_macro.empty and edt_lote:
+                            if not df_banco_macro.empty and edt_lote and edt_lote != 'AVULSO':
                                 fr2 = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
                                 if not fr2.empty:
-                                    m2_exec2  = float(fr2.iloc[0].get('m2_executado', 0) or 0)
-                                    m2_total2 = float(fr2.iloc[0].get('M2_Total_Tarefa', 0) or 0)
+                                    m2_exec2   = float(fr2.iloc[0].get('m2_executado', 0) or 0)
+                                    m2_total2  = float(fr2.iloc[0].get('M2_Total_Tarefa', 0) or 0)
                                     saldo_apos = m2_total2 - m2_exec2 - m2_op_real
                                     st.metric("Saldo após este lançamento", f"{saldo_apos:.2f} m²")
 
@@ -2230,7 +2225,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             qtds    = [l.strip() for l in qtds_txt.strip().split('\n') if l.strip()]
                             locs    = [l.strip() for l in locs_txt.strip().split('\n')] if locs_txt.strip() else []
                             medidas = [l.strip() for l in medidas_txt.strip().split('\n')] if medidas_txt.strip() else []
-
                             if not codigos:
                                 st.error("Informe pelo menos um código.")
                             else:
@@ -2248,14 +2242,133 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     pecas_list, comp_status, m2_op_real
                                 )
                                 registrar_auditoria(st.session_state.usuario_nome, "LANCAMENTO_PECAS",
-                                f"OP {row_lote['Num_OP']} — {len(pecas_list)} peça(s) — Obra: {obra_selecionada}")
-                            st.toast(f"{len(pecas_list)} peça(s) salvas!")
-                            time.sleep(0.3)
-                            st.rerun()
+                                    f"OP {row_lote['Num_OP']} — {len(pecas_list)} peça(s) — Obra: {obra_selecionada}")
+                                st.toast(f"{len(pecas_list)} peça(s) salvas!")
+                                time.sleep(0.3)
+                                st.rerun()
                 else:
                     st.info("Nenhuma OP com número gerado ainda. Libere os lotes primeiro.")
             else:
                 st.info("Nenhuma OP liberada para esta obra ainda.")
+
+            # ── OP AVULSA ──────────────────────────────────────────
+            st.markdown("---")
+            with st.expander("➕ Nova OP Avulsa — Material sem EDT", expanded=False):
+                st.caption("Para ancoragens, prisilias, corte de perfil e outros materiais de apoio.")
+                av1, av2, av3 = st.columns(3)
+                with av1:
+                    obras_disp = sorted(df_banco_micro['Obra_Vinculada'].dropna().unique().tolist()) if not df_banco_micro.empty else []
+                    if not df_banco_macro.empty:
+                        obras_disp = sorted(df_banco_macro['Obra'].dropna().unique().tolist())
+                    av_obra = st.selectbox("Obra:", obras_disp, key="av_obra")
+                with av2:
+                    av_escopo = st.selectbox("Tipo de Escopo:", ["ACM", "Esquadria", "Vidro", "Outro"], key="av_escopo")
+                with av3:
+                    av_projeto = st.text_input("Nº Projeto:", key="av_projeto", placeholder="Ex: 1068")
+
+                # Número da OP gerado automaticamente
+                if av_projeto.strip():
+                    conn_av = conectar_banco()
+                    try:
+                        cursor_av = conn_av.cursor()
+                        cursor_av.execute(
+                            "SELECT COUNT(*) FROM itens_detalhado WHERE EDT_Vinculado='AVULSO' AND Obra_Vinculada=%s AND Romaneio_Chapas LIKE %s",
+                            (av_obra, f"PRJ-{av_projeto.strip()}%")
+                        )
+                        count_av = cursor_av.fetchone()[0]
+                    except Exception:
+                        count_av = 0
+                    finally:
+                        liberar_conexao(conn_av)
+                    num_op_avulsa = f"OP-AVU-{av_projeto.strip()}-{str(count_av + 1).zfill(2)}"
+                    st.success(f"OP gerada: **{num_op_avulsa}**")
+                else:
+                    num_op_avulsa = ""
+                    st.caption("Informe o Nº do Projeto para gerar o número da OP.")
+
+                av_desc = st.text_input("Descrição do material:", key="av_desc",
+                                         placeholder="Ex: Ancoragem estrutural, Prisilia, Corte de perfil...")
+
+                # Campos dinâmicos por escopo
+                av4, av5 = st.columns(2)
+                if av_escopo == "ACM":
+                    with av4:
+                        av_qtd_cx = st.number_input("Qtd Caixas:", min_value=0, value=1, key="av_qtd_cx")
+                    with av5:
+                        av_m2 = st.number_input("m²:", min_value=0.0, value=0.0, step=0.1, key="av_m2")
+                    av_unidade = "cx"
+                    av_peso = 0.0
+                elif av_escopo in ["Esquadria", "Vidro"]:
+                    with av4:
+                        av_qtd_cx = st.number_input("Quantidade (un):", min_value=0, value=1, key="av_qtd_cx")
+                    with av5:
+                        av_peso = st.number_input("Peso (kg):", min_value=0.0, value=0.0, step=0.1, key="av_peso")
+                    av_m2 = 0.0
+                    av_unidade = "un"
+                else:
+                    with av4:
+                        av_unidade = st.selectbox("Unidade:", ["un", "kg", "m", "m²", "cx", "pç"], key="av_unidade")
+                    with av5:
+                        av_qtd_cx = st.number_input("Quantidade:", min_value=0, value=1, key="av_qtd_cx")
+                    av_m2  = 0.0
+                    av_peso = 0.0
+
+                av6, av7 = st.columns(2)
+                with av6:
+                    av_dt_ini = st.date_input("Entrada em produção:", value=datetime.now().date(),
+                                               format="DD/MM/YYYY", key="av_dt_ini")
+                with av7:
+                    av_dt_fim = st.date_input("Data limite:", value=(datetime.now() + timedelta(days=7)).date(),
+                                               format="DD/MM/YYYY", key="av_dt_fim")
+
+                av_pav     = st.text_input("Pavimentos / Destino:", key="av_pav", placeholder="Ex: Pav 10 ao 15")
+                av_destino = st.radio("Destino:", ["Envio para Obra", "Uso Interno"],
+                                       horizontal=True, key="av_destino")
+
+                if st.button("💾 Cadastrar OP Avulsa", key="btn_av", type="primary"):
+                    if not av_desc.strip():
+                        st.error("Informe a descrição do material.")
+                    elif not av_projeto.strip():
+                        st.error("Informe o número do projeto.")
+                    elif not num_op_avulsa:
+                        st.error("Número da OP não gerado. Informe o projeto.")
+                    else:
+                        conn_av2 = conectar_banco()
+                        try:
+                            cursor_av2 = conn_av2.cursor()
+                            cursor_av2.execute("""
+                                INSERT INTO itens_detalhado
+                                (Obra_Vinculada, EDT_Vinculado, Cod_Lote, Num_OP, Tipo_Material,
+                                 Qtd_Caixas, M2_Item, Data_Producao_Programada, Data_Limite_Obra,
+                                 Data_Despacho, Romaneio_Chapas, Status_Item, Dificuldade,
+                                 Fase_Produtiva, Enviado_Logistica)
+                                VALUES (%s,'AVULSO',%s,%s,%s,%s,%s,%s,%s,%s,%s,'Liberado para Fabrica',1,%s,%s)
+                            """, (
+                                av_obra,
+                                f"AVULSO-{av_projeto.strip()}",
+                                num_op_avulsa,
+                                av_desc.strip().upper(),
+                                int(av_qtd_cx),
+                                float(av_m2),
+                                av_dt_ini.strftime('%Y-%m-%d'),
+                                av_dt_fim.strftime('%Y-%m-%d'),
+                                av_dt_fim.strftime('%Y-%m-%d'),
+                                f"PRJ-{av_projeto.strip()} | {av_pav}",
+                                f"OP AVULSA — {av_escopo} | {'Envio para Obra' if av_destino == 'Envio para Obra' else 'Uso Interno'}",
+                                1 if av_destino == "Envio para Obra" else 0
+                            ))
+                            conn_av2.commit()
+                            _limpar_cache_geral()
+                        except Exception as e:
+                            conn_av2.rollback()
+                            st.error(f"Erro: {e}")
+                        finally:
+                            liberar_conexao(conn_av2)
+                        registrar_auditoria(st.session_state.usuario_nome, "OP_AVULSA",
+                            f"{num_op_avulsa} — {av_desc} — {av_obra} — {av_destino}")
+                        st.toast(f"OP Avulsa {num_op_avulsa} cadastrada!")
+                        time.sleep(0.5)
+                        st.rerun()
 
             st.markdown("---")
 
