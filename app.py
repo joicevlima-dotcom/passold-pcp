@@ -2067,206 +2067,195 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             st.markdown("---")
 # ── SEÇÃO 2: LANÇAR PEÇAS DA OP ───────────────────────
             st.markdown("### 🔩 Seção 2 — Lançar Peças da OP")
-            st.caption("Vincule os códigos reais das peças ao lote já liberado.")
 
-            df_lib = df_banco_micro[
-                (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
-                (df_banco_micro['Status_Item'].isin(["Liberado para Fabrica", "Parcialmente Concluido"]))
-            ].copy() if obra_selecionada and not df_banco_micro.empty else pd.DataFrame()
+            tab_op_fat, tab_op_avulsa = st.tabs(["📋 OPs do Fatiamento", "➕ OP Avulsa"])
 
-            if not df_lib.empty:
-                opcoes_lotes = [
-                    f"{row['Num_OP']} — {row['Cod_Lote']} | {row['Tipo_Material']} | {row['M2_Item']:.2f}m²"
-                    for _, row in df_lib.iterrows() if row.get('Num_OP')
-                ]
-                if opcoes_lotes:
-                    lote_sel_str = st.selectbox("Selecione o Lote / OP:", opcoes_lotes, key="sel_lote_pecas")
-                    num_op_sel   = lote_sel_str.split(" — ")[0].strip()
-                    row_lote     = df_lib[df_lib['Num_OP'] == num_op_sel].iloc[0]
-                    lote_id      = int(row_lote['id'])
-                    edt_lote     = row_lote.get('EDT_Vinculado', '')
+            # ── ABA 1: OPs DO FATIAMENTO ──────────────────────────
+            with tab_op_fat:
+                st.caption("Vincule os códigos reais das peças ao lote já liberado.")
 
-                    if not df_banco_macro.empty and edt_lote and edt_lote != 'AVULSO':
-                        fr_edt = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
-                        if not fr_edt.empty:
-                            macro_row_sel   = fr_edt.iloc[0]
-                            m2_total_edt    = float(macro_row_sel.get('M2_Total_Tarefa', 0) or 0)
-                            m2_exec_edt     = float(macro_row_sel.get('m2_executado', 0) or 0)
-                            m2_saldo_edt    = m2_total_edt - m2_exec_edt
-                            num_proj_edt    = str(macro_row_sel.get('Numero_Projeto', '') or '')
-                            tipo_esc_edt    = str(macro_row_sel.get('Tipo_Escopo', 'ACM') or 'ACM')
-                            se1, se2, se3, se4 = st.columns(4)
-                            se1.metric("Etapa", edt_lote)
-                            se2.metric("Projeto", num_proj_edt or "—")
-                            se3.metric("m² Total Etapa", f"{m2_total_edt:.2f}")
-                            se4.metric("Saldo Etapa", f"{m2_saldo_edt:.2f} m²")
+                df_lib = df_banco_micro[
+                    (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
+                    (df_banco_micro['Status_Item'].isin(["Liberado para Fabrica", "Parcialmente Concluido"]))
+                ].copy() if obra_selecionada and not df_banco_micro.empty else pd.DataFrame()
+
+                if not df_lib.empty:
+                    opcoes_lotes = [
+                        f"{row['Num_OP']} — {row['Cod_Lote']} | {row['Tipo_Material']} | {row['M2_Item']:.2f}m²"
+                        for _, row in df_lib.iterrows() if row.get('Num_OP')
+                    ]
+                    if opcoes_lotes:
+                        lote_sel_str = st.selectbox("Selecione o Lote / OP:", opcoes_lotes, key="sel_lote_pecas")
+                        num_op_sel   = lote_sel_str.split(" — ")[0].strip()
+                        row_lote     = df_lib[df_lib['Num_OP'] == num_op_sel].iloc[0]
+                        lote_id      = int(row_lote['id'])
+                        edt_lote     = row_lote.get('EDT_Vinculado', '')
+
+                        if not df_banco_macro.empty and edt_lote and edt_lote != 'AVULSO':
+                            fr_edt = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
+                            if not fr_edt.empty:
+                                macro_row_sel = fr_edt.iloc[0]
+                                m2_total_edt  = float(macro_row_sel.get('M2_Total_Tarefa', 0) or 0)
+                                m2_exec_edt   = float(macro_row_sel.get('m2_executado', 0) or 0)
+                                m2_saldo_edt  = m2_total_edt - m2_exec_edt
+                                num_proj_edt  = str(macro_row_sel.get('Numero_Projeto', '') or '')
+                                tipo_esc_edt  = str(macro_row_sel.get('Tipo_Escopo', 'ACM') or 'ACM')
+                                se1, se2, se3, se4 = st.columns(4)
+                                se1.metric("Etapa", edt_lote)
+                                se2.metric("Projeto", num_proj_edt or "—")
+                                se3.metric("m² Total Etapa", f"{m2_total_edt:.2f}")
+                                se4.metric("Saldo Etapa", f"{m2_saldo_edt:.2f} m²")
+                            else:
+                                macro_row_sel = {}
+                                tipo_esc_edt  = "ACM"
+                                num_proj_edt  = ""
                         else:
                             macro_row_sel = {}
-                            tipo_esc_edt  = "ACM"
+                            tipo_esc_edt  = row_lote.get('Tipo_Material', 'ACM')
                             num_proj_edt  = ""
-                    else:
-                        macro_row_sel = {}
-                        tipo_esc_edt  = row_lote.get('Tipo_Material', 'ACM')
-                        num_proj_edt  = ""
-                        if edt_lote == 'AVULSO':
-                            st.info("OP Avulsa — sem vínculo com etapa do cronograma.")
+                            if edt_lote == 'AVULSO':
+                                st.info("OP Avulsa — sem vínculo com etapa do cronograma.")
 
-                    st.markdown("---")
+                        st.markdown("---")
+                        df_pecas_existentes = carregar_pecas_lote(lote_id)
 
-                    df_pecas_existentes = carregar_pecas_lote(lote_id)
+                        if not df_pecas_existentes.empty:
+                            pc1, pc2 = st.columns([3, 1])
+                            with pc1:
+                                st.success(f"✅ {len(df_pecas_existentes)} peça(s) lançadas | "
+                                           f"Total: {int(df_pecas_existentes['qtd_total'].sum())} un | "
+                                           f"Saldo: {int(df_pecas_existentes['saldo'].sum())} un")
+                            with pc2:
+                                st.caption(f"Status comp.: **{df_pecas_existentes.iloc[0].get('componentes_status','—')}**")
 
-                    if not df_pecas_existentes.empty:
-                        pc1, pc2 = st.columns([3, 1])
-                        with pc1:
-                            st.success(f"✅ {len(df_pecas_existentes)} peça(s) lançadas | "
-                                       f"Total: {int(df_pecas_existentes['qtd_total'].sum())} un | "
-                                       f"Saldo: {int(df_pecas_existentes['saldo'].sum())} un")
-                        with pc2:
-                            st.caption(f"Status comp.: **{df_pecas_existentes.iloc[0].get('componentes_status','—')}**")
-
-                        with st.expander("📋 Ver peças lançadas", expanded=False):
-                            st.dataframe(
-                                df_pecas_existentes[['codigo', 'localizacao', 'medida', 'qtd_total', 'qtd_enviada', 'saldo']],
-                                hide_index=True, use_container_width=True
-                            )
-
-                        st.markdown("#### 📄 Gerar Ordem de Produção")
-                        with st.expander("Configurar e Gerar OP", expanded=False):
-                            obs_op = st.text_area("Observações:", key="obs_op",
-                                                   placeholder="Informações adicionais para a produção...")
-                            campos_extras = {"observacoes": obs_op, "material": row_lote.get('Tipo_Material', '')}
-
-                            if tipo_esc_edt.upper() == "ACM":
-                                gf1, gf2 = st.columns(2)
-                                with gf1:
-                                    qtd_folhas = st.text_input("Qtd Folhas Projeto:", key="op_folhas", placeholder="Ex: 2")
-                                with gf2:
-                                    area_real = st.number_input("Área Total (m²):", value=float(row_lote.get('M2_Item', 0)), key="op_area")
-                                campos_extras.update({
-                                    "qtd_folhas": qtd_folhas,
-                                    "area_total": area_real,
-                                    "dificuldade": row_lote.get('Dificuldade', '—'),
-                                    "material": row_lote.get('Tipo_Material', 'ACM')
-                                })
-                            elif "ESQUADRIA" in tipo_esc_edt.upper() or "VIDRO" in tipo_esc_edt.upper():
-                                gf1, gf2 = st.columns(2)
-                                with gf1:
-                                    peso_total = st.text_input("Peso Total (kg):", key="op_peso", placeholder="Ex: 67,08kg")
-                                with gf2:
-                                    qtd_folhas = st.text_input("Qtd Folhas Projeto:", key="op_folhas2", placeholder="Ex: 2")
-                                campos_extras.update({
-                                    "peso_total": peso_total,
-                                    "qtd_folhas": qtd_folhas,
-                                    "material": "PERFIL EM ALUMINIO"
-                                })
-                            else:
-                                empresa = st.text_input("Empresa Responsável:", key="op_empresa")
-                                mat_terc = st.text_input("Material:", key="op_mat_terc")
-                                campos_extras.update({"empresa": empresa, "material": mat_terc})
-
-                            if st.button("🖨️ Gerar OP", key="btn_gerar_op", type="primary"):
-                                op_bytes = gerar_op_xlsx(row_lote, df_pecas_existentes, macro_row_sel, campos_extras)
-                                st.download_button(
-                                    label="📥 Baixar Ordem de Produção",
-                                    data=op_bytes,
-                                    file_name=f"OP_{num_op_sel}_{row_lote['Cod_Lote']}.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    key="dl_op"
+                            with st.expander("📋 Ver peças lançadas", expanded=False):
+                                st.dataframe(
+                                    df_pecas_existentes[['codigo', 'localizacao', 'medida', 'qtd_total', 'qtd_enviada', 'saldo']],
+                                    hide_index=True, use_container_width=True
                                 )
 
-                    with st.expander(
-                        "✏️ Editar / Substituir Peças" if not df_pecas_existentes.empty else "➕ Lançar Peças",
-                        expanded=df_pecas_existentes.empty
-                    ):
-                        st.caption("Cole os dados abaixo — um item por linha em cada campo.")
-                        gm1, gm2 = st.columns([2, 3])
-                        with gm1:
-                            m2_op_real = st.number_input(
-                                "📐 m² real desta OP:",
-                                min_value=0.0,
-                                value=float(row_lote.get('M2_Item', 0)),
-                                step=0.1,
-                                format="%.2f",
-                                key="m2_op_real_input",
-                                help="Será abatido do saldo da etapa."
-                            )
-                        with gm2:
-                            if not df_banco_macro.empty and edt_lote and edt_lote != 'AVULSO':
-                                fr2 = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
-                                if not fr2.empty:
-                                    m2_exec2   = float(fr2.iloc[0].get('m2_executado', 0) or 0)
-                                    m2_total2  = float(fr2.iloc[0].get('M2_Total_Tarefa', 0) or 0)
-                                    saldo_apos = m2_total2 - m2_exec2 - m2_op_real
-                                    st.metric("Saldo após este lançamento", f"{saldo_apos:.2f} m²")
-
-                        p1, p2, p3, p4 = st.columns(4)
-                        with p1:
-                            codigos_txt = st.text_area("Códigos:", height=180, key="pecas_codigos",
-                                                        placeholder="B24-01C\nB25-01C\nRF.JA.11/CNT")
-                        with p2:
-                            qtds_txt = st.text_area("Quantidades:", height=180, key="pecas_qtds",
-                                                     placeholder="3\n3\n1")
-                        with p3:
-                            locs_txt = st.text_area("Localização:", height=180, key="pecas_locs",
-                                                     placeholder="Pav 27-37\nPav 27-37\n(opcional)")
-                        with p4:
-                            medidas_txt = st.text_area("Medidas:", height=180, key="pecas_medidas",
-                                                        placeholder="550x390\n550x400\n(opcional)")
-
-                        comp_status = st.radio(
-                            "Status dos componentes:",
-                            ["Aguardando Projetista", "Componentes OK"],
-                            horizontal=True,
-                            key="comp_status_radio"
-                        )
-
-                        if st.button("💾 Salvar Peças", key="btn_salvar_pecas", type="primary"):
-                            codigos = [l.strip() for l in codigos_txt.strip().split('\n') if l.strip()]
-                            qtds    = [l.strip() for l in qtds_txt.strip().split('\n') if l.strip()]
-                            locs    = [l.strip() for l in locs_txt.strip().split('\n')] if locs_txt.strip() else []
-                            medidas = [l.strip() for l in medidas_txt.strip().split('\n')] if medidas_txt.strip() else []
-                            if not codigos:
-                                st.error("Informe pelo menos um código.")
-                            else:
-                                pecas_list = []
-                                for i, cod in enumerate(codigos):
-                                    pecas_list.append({
-                                        "codigo":      cod,
-                                        "qtd":         int(qtds[i]) if i < len(qtds) and qtds[i].isdigit() else 1,
-                                        "localizacao": locs[i] if i < len(locs) else "",
-                                        "medida":      medidas[i] if i < len(medidas) else "",
+                            st.markdown("#### 📄 Gerar Ordem de Produção")
+                            with st.expander("Configurar e Gerar OP", expanded=False):
+                                obs_op = st.text_area("Observações:", key="obs_op",
+                                                       placeholder="Informações adicionais para a produção...")
+                                campos_extras = {"observacoes": obs_op, "material": row_lote.get('Tipo_Material', '')}
+                                if tipo_esc_edt.upper() == "ACM":
+                                    gf1, gf2 = st.columns(2)
+                                    with gf1:
+                                        qtd_folhas = st.text_input("Qtd Folhas Projeto:", key="op_folhas", placeholder="Ex: 2")
+                                    with gf2:
+                                        area_real = st.number_input("Área Total (m²):", value=float(row_lote.get('M2_Item', 0)), key="op_area")
+                                    campos_extras.update({
+                                        "qtd_folhas": qtd_folhas, "area_total": area_real,
+                                        "dificuldade": row_lote.get('Dificuldade', '—'),
+                                        "material": row_lote.get('Tipo_Material', 'ACM')
                                     })
-                                salvar_pecas_lote(
-                                    lote_id, row_lote['Obra_Vinculada'],
-                                    row_lote['Cod_Lote'], row_lote['Num_OP'],
-                                    pecas_list, comp_status, m2_op_real
-                                )
-                                registrar_auditoria(st.session_state.usuario_nome, "LANCAMENTO_PECAS",
-                                    f"OP {row_lote['Num_OP']} — {len(pecas_list)} peça(s) — Obra: {obra_selecionada}")
-                                st.toast(f"{len(pecas_list)} peça(s) salvas!")
-                                time.sleep(0.3)
-                                st.rerun()
-                else:
-                    st.info("Nenhuma OP com número gerado ainda. Libere os lotes primeiro.")
-            else:
-                st.info("Nenhuma OP liberada para esta obra ainda.")
+                                elif "ESQUADRIA" in tipo_esc_edt.upper() or "VIDRO" in tipo_esc_edt.upper():
+                                    gf1, gf2 = st.columns(2)
+                                    with gf1:
+                                        peso_total = st.text_input("Peso Total (kg):", key="op_peso", placeholder="Ex: 67,08kg")
+                                    with gf2:
+                                        qtd_folhas = st.text_input("Qtd Folhas Projeto:", key="op_folhas2", placeholder="Ex: 2")
+                                    campos_extras.update({
+                                        "peso_total": peso_total, "qtd_folhas": qtd_folhas,
+                                        "material": "PERFIL EM ALUMINIO"
+                                    })
+                                else:
+                                    empresa  = st.text_input("Empresa Responsável:", key="op_empresa")
+                                    mat_terc = st.text_input("Material:", key="op_mat_terc")
+                                    campos_extras.update({"empresa": empresa, "material": mat_terc})
+                                if st.button("🖨️ Gerar OP", key="btn_gerar_op", type="primary"):
+                                    op_bytes = gerar_op_xlsx(row_lote, df_pecas_existentes, macro_row_sel, campos_extras)
+                                    st.download_button(
+                                        label="📥 Baixar Ordem de Produção",
+                                        data=op_bytes,
+                                        file_name=f"OP_{num_op_sel}_{row_lote['Cod_Lote']}.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key="dl_op"
+                                    )
 
-            # ── OP AVULSA ──────────────────────────────────────────
-            st.markdown("---")
-            with st.expander("➕ Nova OP Avulsa — Material sem EDT", expanded=False):
+                        with st.expander(
+                            "✏️ Editar / Substituir Peças" if not df_pecas_existentes.empty else "➕ Lançar Peças",
+                            expanded=df_pecas_existentes.empty
+                        ):
+                            st.caption("Cole os dados abaixo — um item por linha em cada campo.")
+                            gm1, gm2 = st.columns([2, 3])
+                            with gm1:
+                                m2_op_real = st.number_input(
+                                    "📐 m² real desta OP:",
+                                    min_value=0.0, value=float(row_lote.get('M2_Item', 0)),
+                                    step=0.1, format="%.2f", key="m2_op_real_input",
+                                    help="Será abatido do saldo da etapa."
+                                )
+                            with gm2:
+                                if not df_banco_macro.empty and edt_lote and edt_lote != 'AVULSO':
+                                    fr2 = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
+                                    if not fr2.empty:
+                                        m2_exec2   = float(fr2.iloc[0].get('m2_executado', 0) or 0)
+                                        m2_total2  = float(fr2.iloc[0].get('M2_Total_Tarefa', 0) or 0)
+                                        saldo_apos = m2_total2 - m2_exec2 - m2_op_real
+                                        st.metric("Saldo após este lançamento", f"{saldo_apos:.2f} m²")
+                            p1, p2, p3, p4 = st.columns(4)
+                            with p1:
+                                codigos_txt = st.text_area("Códigos:", height=180, key="pecas_codigos",
+                                                            placeholder="B24-01C\nB25-01C\nRF.JA.11/CNT")
+                            with p2:
+                                qtds_txt = st.text_area("Quantidades:", height=180, key="pecas_qtds",
+                                                         placeholder="3\n3\n1")
+                            with p3:
+                                locs_txt = st.text_area("Localização:", height=180, key="pecas_locs",
+                                                         placeholder="Pav 27-37\nPav 27-37\n(opcional)")
+                            with p4:
+                                medidas_txt = st.text_area("Medidas:", height=180, key="pecas_medidas",
+                                                            placeholder="550x390\n550x400\n(opcional)")
+                            comp_status = st.radio(
+                                "Status dos componentes:",
+                                ["Aguardando Projetista", "Componentes OK"],
+                                horizontal=True, key="comp_status_radio"
+                            )
+                            if st.button("💾 Salvar Peças", key="btn_salvar_pecas", type="primary"):
+                                codigos = [l.strip() for l in codigos_txt.strip().split('\n') if l.strip()]
+                                qtds    = [l.strip() for l in qtds_txt.strip().split('\n') if l.strip()]
+                                locs    = [l.strip() for l in locs_txt.strip().split('\n')] if locs_txt.strip() else []
+                                medidas = [l.strip() for l in medidas_txt.strip().split('\n')] if medidas_txt.strip() else []
+                                if not codigos:
+                                    st.error("Informe pelo menos um código.")
+                                else:
+                                    pecas_list = []
+                                    for i, cod in enumerate(codigos):
+                                        pecas_list.append({
+                                            "codigo":      cod,
+                                            "qtd":         int(qtds[i]) if i < len(qtds) and qtds[i].isdigit() else 1,
+                                            "localizacao": locs[i] if i < len(locs) else "",
+                                            "medida":      medidas[i] if i < len(medidas) else "",
+                                        })
+                                    salvar_pecas_lote(
+                                        lote_id, row_lote['Obra_Vinculada'],
+                                        row_lote['Cod_Lote'], row_lote['Num_OP'],
+                                        pecas_list, comp_status, m2_op_real
+                                    )
+                                    registrar_auditoria(st.session_state.usuario_nome, "LANCAMENTO_PECAS",
+                                        f"OP {row_lote['Num_OP']} — {len(pecas_list)} peça(s) — Obra: {obra_selecionada}")
+                                    st.toast(f"{len(pecas_list)} peça(s) salvas!")
+                                    time.sleep(0.3)
+                                    st.rerun()
+                    else:
+                        st.info("Nenhuma OP com número gerado ainda. Libere os lotes primeiro.")
+                else:
+                    st.info("Nenhuma OP liberada para esta obra ainda.")
+
+            # ── ABA 2: OP AVULSA ──────────────────────────────────
+            with tab_op_avulsa:
                 st.caption("Para ancoragens, prisilias, corte de perfil e outros materiais de apoio.")
                 av1, av2, av3 = st.columns(3)
                 with av1:
-                    obras_disp = sorted(df_banco_micro['Obra_Vinculada'].dropna().unique().tolist()) if not df_banco_micro.empty else []
-                    if not df_banco_macro.empty:
-                        obras_disp = sorted(df_banco_macro['Obra'].dropna().unique().tolist())
+                    obras_disp = sorted(df_banco_macro['Obra'].dropna().unique().tolist()) if not df_banco_macro.empty else []
                     av_obra = st.selectbox("Obra:", obras_disp, key="av_obra")
                 with av2:
                     av_escopo = st.selectbox("Tipo de Escopo:", ["ACM", "Esquadria", "Vidro", "Outro"], key="av_escopo")
                 with av3:
                     av_projeto = st.text_input("Nº Projeto:", key="av_projeto", placeholder="Ex: 1068")
 
-                # Número da OP gerado automaticamente
                 if av_projeto.strip():
                     conn_av = conectar_banco()
                     try:
@@ -2281,22 +2270,19 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     finally:
                         liberar_conexao(conn_av)
                     num_op_avulsa = f"OP-AVU-{av_projeto.strip()}-{str(count_av + 1).zfill(2)}"
-                    st.success(f"OP gerada: **{num_op_avulsa}**")
+                    st.success(f"OP gerada automaticamente: **{num_op_avulsa}**")
                 else:
                     num_op_avulsa = ""
                     st.caption("Informe o Nº do Projeto para gerar o número da OP.")
 
                 av_desc = st.text_input("Descrição do material:", key="av_desc",
                                          placeholder="Ex: Ancoragem estrutural, Prisilia, Corte de perfil...")
-
-                # Campos dinâmicos por escopo
                 av4, av5 = st.columns(2)
                 if av_escopo == "ACM":
                     with av4:
                         av_qtd_cx = st.number_input("Qtd Caixas:", min_value=0, value=1, key="av_qtd_cx")
                     with av5:
                         av_m2 = st.number_input("m²:", min_value=0.0, value=0.0, step=0.1, key="av_m2")
-                    av_unidade = "cx"
                     av_peso = 0.0
                 elif av_escopo in ["Esquadria", "Vidro"]:
                     with av4:
@@ -2304,7 +2290,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     with av5:
                         av_peso = st.number_input("Peso (kg):", min_value=0.0, value=0.0, step=0.1, key="av_peso")
                     av_m2 = 0.0
-                    av_unidade = "un"
                 else:
                     with av4:
                         av_unidade = st.selectbox("Unidade:", ["un", "kg", "m", "m²", "cx", "pç"], key="av_unidade")
@@ -2331,7 +2316,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     elif not av_projeto.strip():
                         st.error("Informe o número do projeto.")
                     elif not num_op_avulsa:
-                        st.error("Número da OP não gerado. Informe o projeto.")
+                        st.error("Número da OP não gerado.")
                     else:
                         conn_av2 = conectar_banco()
                         try:
