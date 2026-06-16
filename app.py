@@ -2275,6 +2275,11 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     num_op_avulsa = ""
                     st.caption("Informe o Nº do Projeto para gerar o número da OP.")
 
+                # Lista de itens acumulados na sessão
+                if "av_itens" not in st.session_state:
+                    st.session_state.av_itens = []
+
+                st.markdown("**Itens da OP:**")
                 av_desc = st.text_input("Descrição do material:", key="av_desc",
                                          placeholder="Ex: Ancoragem estrutural, Prisilia, Corte de perfil...")
                 av4, av5 = st.columns(2)
@@ -2284,12 +2289,14 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     with av5:
                         av_m2 = st.number_input("m²:", min_value=0.0, value=0.0, step=0.1, key="av_m2")
                     av_peso = 0.0
+                    av_unidade = "cx"
                 elif av_escopo in ["Esquadria", "Vidro"]:
                     with av4:
                         av_qtd_cx = st.number_input("Quantidade (un):", min_value=0, value=1, key="av_qtd_cx")
                     with av5:
                         av_peso = st.number_input("Peso (kg):", min_value=0.0, value=0.0, step=0.1, key="av_peso")
                     av_m2 = 0.0
+                    av_unidade = "un"
                 else:
                     with av4:
                         av_unidade = st.selectbox("Unidade:", ["un", "kg", "m", "m²", "cx", "pç"], key="av_unidade")
@@ -2297,6 +2304,37 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         av_qtd_cx = st.number_input("Quantidade:", min_value=0, value=1, key="av_qtd_cx")
                     av_m2  = 0.0
                     av_peso = 0.0
+
+                if st.button("➕ Adicionar Item", key="btn_add_item"):
+                    if not av_desc.strip():
+                        st.error("Informe a descrição do material antes de adicionar.")
+                    else:
+                        st.session_state.av_itens.append({
+                            "desc": av_desc.strip().upper(),
+                            "qtd": int(av_qtd_cx),
+                            "m2": float(av_m2),
+                            "peso": float(av_peso),
+                            "unidade": av_unidade,
+                        })
+                        st.rerun()
+
+                if st.session_state.av_itens:
+                    st.markdown("**Itens adicionados:**")
+                    for i, item in enumerate(st.session_state.av_itens):
+                        col_desc, col_qtd, col_rem = st.columns([5, 2, 1])
+                        with col_desc:
+                            st.write(f"{i+1}. {item['desc']}")
+                        with col_qtd:
+                            if item['m2'] > 0:
+                                st.write(f"{item['qtd']} cx | {item['m2']} m²")
+                            elif item['peso'] > 0:
+                                st.write(f"{item['qtd']} {item['unidade']} | {item['peso']} kg")
+                            else:
+                                st.write(f"{item['qtd']} {item['unidade']}")
+                        with col_rem:
+                            if st.button("🗑", key=f"rem_item_{i}"):
+                                st.session_state.av_itens.pop(i)
+                                st.rerun()
 
                 av6, av7 = st.columns(2)
                 with av6:
@@ -2311,8 +2349,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                        horizontal=True, key="av_destino")
 
                 if st.button("💾 Cadastrar OP Avulsa", key="btn_av", type="primary"):
-                    if not av_desc.strip():
-                        st.error("Informe a descrição do material.")
+                    if not st.session_state.av_itens:
+                        st.error("Adicione ao menos um item antes de cadastrar.")
                     elif not av_projeto.strip():
                         st.error("Informe o número do projeto.")
                     elif not num_op_avulsa:
@@ -2321,27 +2359,28 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         conn_av2 = conectar_banco()
                         try:
                             cursor_av2 = conn_av2.cursor()
-                            cursor_av2.execute("""
-                                INSERT INTO itens_detalhado
-                                (Obra_Vinculada, EDT_Vinculado, Cod_Lote, Num_OP, Tipo_Material,
-                                 Qtd_Caixas, M2_Item, Data_Producao_Programada, Data_Limite_Obra,
-                                 Data_Despacho, Romaneio_Chapas, Status_Item, Dificuldade,
-                                 Fase_Produtiva, Enviado_Logistica)
-                                VALUES (%s,'AVULSO',%s,%s,%s,%s,%s,%s,%s,%s,%s,'Liberado para Fabrica',1,%s,%s)
-                            """, (
-                                av_obra,
-                                f"AVULSO-{av_projeto.strip()}",
-                                num_op_avulsa,
-                                av_desc.strip().upper(),
-                                int(av_qtd_cx),
-                                float(av_m2),
-                                av_dt_ini.strftime('%Y-%m-%d'),
-                                av_dt_fim.strftime('%Y-%m-%d'),
-                                av_dt_fim.strftime('%Y-%m-%d'),
-                                f"PRJ-{av_projeto.strip()} | {av_pav}",
-                                f"OP AVULSA — {av_escopo} | {'Envio para Obra' if av_destino == 'Envio para Obra' else 'Uso Interno'}",
-                                1 if av_destino == "Envio para Obra" else 0
-                            ))
+                            for item in st.session_state.av_itens:
+                                cursor_av2.execute("""
+                                    INSERT INTO itens_detalhado
+                                    (Obra_Vinculada, EDT_Vinculado, Cod_Lote, Num_OP, Tipo_Material,
+                                     Qtd_Caixas, M2_Item, Data_Producao_Programada, Data_Limite_Obra,
+                                     Data_Despacho, Romaneio_Chapas, Status_Item, Dificuldade,
+                                     Fase_Produtiva, Enviado_Logistica)
+                                    VALUES (%s,'AVULSO',%s,%s,%s,%s,%s,%s,%s,%s,%s,'Liberado para Fabrica',1,%s,%s)
+                                """, (
+                                    av_obra,
+                                    f"AVULSO-{av_projeto.strip()}",
+                                    num_op_avulsa,
+                                    item["desc"],
+                                    item["qtd"],
+                                    item["m2"],
+                                    av_dt_ini.strftime('%Y-%m-%d'),
+                                    av_dt_fim.strftime('%Y-%m-%d'),
+                                    av_dt_fim.strftime('%Y-%m-%d'),
+                                    f"PRJ-{av_projeto.strip()} | {av_pav}",
+                                    f"OP AVULSA — {av_escopo} | {'Envio para Obra' if av_destino == 'Envio para Obra' else 'Uso Interno'}",
+                                    1 if av_destino == "Envio para Obra" else 0
+                                ))
                             conn_av2.commit()
                             _limpar_cache_geral()
                         except Exception as e:
@@ -2350,8 +2389,9 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         finally:
                             liberar_conexao(conn_av2)
                         registrar_auditoria(st.session_state.usuario_nome, "OP_AVULSA",
-                            f"{num_op_avulsa} — {av_desc} — {av_obra} — {av_destino}")
-                        st.toast(f"OP Avulsa {num_op_avulsa} cadastrada!")
+                            f"{num_op_avulsa} — {len(st.session_state.av_itens)} itens — {av_obra} — {av_destino}")
+                        st.toast(f"OP Avulsa {num_op_avulsa} cadastrada com {len(st.session_state.av_itens)} item(ns)!")
+                        st.session_state.av_itens = []
                         time.sleep(0.5)
                         st.rerun()
 
