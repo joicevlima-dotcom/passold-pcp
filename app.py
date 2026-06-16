@@ -3646,7 +3646,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             """, unsafe_allow_html=True)
 
             # ── Filtros ──────────────────────────────────────────
-            rel_f1, rel_f2, rel_f3, rel_f4 = st.columns([2, 2, 2, 1])
+            rel_f1, rel_f2, rel_f3 = st.columns([2, 2, 2])
             obras_rel = ["Todas"] + sorted(df_banco_micro['Obra_Vinculada'].dropna().unique().tolist()) if not df_banco_micro.empty else ["Todas"]
             with rel_f1:
                 filtro_obra_rel = st.selectbox("Obra:", obras_rel, key="rel_obra")
@@ -3656,9 +3656,19 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             with rel_f3:
                 escopo_opcoes = ["Todos"] + sorted(df_banco_micro['Tipo_Material'].dropna().unique().tolist()) if not df_banco_micro.empty else ["Todos"]
                 filtro_escopo_rel = st.selectbox("Escopo / Material:", escopo_opcoes, key="rel_escopo")
+
+            rel_f4, rel_f5, rel_f6 = st.columns([2, 2, 2])
             with rel_f4:
-                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-                mostrar_concluidos = st.toggle("Ver concluídos", value=False, key="rel_concl")
+                rel_campo_data = st.selectbox(
+                    "Filtrar data por:", ["Entrada em Produção", "Data Limite"],
+                    key="rel_campo_data"
+                )
+            with rel_f5:
+                rel_dt_ini = st.date_input("De:", value=None, format="DD/MM/YYYY", key="rel_dt_ini")
+            with rel_f6:
+                rel_dt_fim = st.date_input("Até:", value=None, format="DD/MM/YYYY", key="rel_dt_fim")
+
+            mostrar_concluidos = st.toggle("Ver concluídos", value=False, key="rel_concl")
 
             # ── Montar dataframe filtrado ────────────────────────
             df_rel = df_banco_micro.copy() if not df_banco_micro.empty else pd.DataFrame()
@@ -3672,6 +3682,16 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     df_rel = df_rel[df_rel['Status_Item'] == filtro_status_rel]
                 if filtro_escopo_rel != "Todos":
                     df_rel = df_rel[df_rel['Tipo_Material'] == filtro_escopo_rel]
+                col_data_map = {
+                    "Entrada em Produção": "Data_Producao_Programada",
+                    "Data Limite": "Data_Limite_Obra"
+                }
+                col_dt_filtro = col_data_map[rel_campo_data]
+                df_rel[col_dt_filtro] = pd.to_datetime(df_rel[col_dt_filtro], errors='coerce')
+                if rel_dt_ini:
+                    df_rel = df_rel[df_rel[col_dt_filtro] >= pd.Timestamp(rel_dt_ini)]
+                if rel_dt_fim:
+                    df_rel = df_rel[df_rel[col_dt_filtro] <= pd.Timestamp(rel_dt_fim)]
 
             # ── KPIs ─────────────────────────────────────────────
             st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
@@ -3782,14 +3802,107 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
                 st.caption(f"Total de {len(df_tabela)} registros | Linhas em vermelho = prazo vencido")
 
-                # ── Exportar CSV ──────────────────────────────────
-                csv_bytes = df_tabela.to_csv(index=False).encode('utf-8-sig')
+                # ── Exportar Excel formatado ───────────────────────
+                import io
+                from openpyxl import Workbook
+                from openpyxl.styles import (PatternFill, Font, Alignment,
+                                              Border, Side, GradientFill)
+                from openpyxl.utils import get_column_letter
+
+                def gerar_excel_relatorio(df_exp, titulo_filtro="Todas as Obras"):
+                    wb = Workbook()
+                    ws = wb.active
+                    ws.title = "Relatório de Produção"
+
+                    # Paleta
+                    cor_header_dark = "0F172A"
+                    cor_header_accent = "EA580C"
+                    cor_sub = "1E293B"
+                    cor_linha_par = "F8FAFC"
+                    cor_linha_impar = "FFFFFF"
+                    cor_atrasado = "FEE2E2"
+                    cor_texto_branco = "FFFFFF"
+                    cor_texto_escuro = "1E293B"
+
+                    thin = Side(style='thin', color="E2E8F0")
+                    borda = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+                    # ── Linha 1: título geral ────────────────────
+                    ws.merge_cells("A1:I1")
+                    ws["A1"] = "PASSOLD — SISTEMAS DE FACHADAS"
+                    ws["A1"].font = Font(name="Calibri", bold=True, size=16, color=cor_texto_branco)
+                    ws["A1"].fill = PatternFill("solid", fgColor=cor_header_dark)
+                    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+                    ws.row_dimensions[1].height = 32
+
+                    # ── Linha 2: subtítulo ───────────────────────
+                    ws.merge_cells("A2:I2")
+                    ws["A2"] = f"Relatório Geral de Produção  |  Obra: {titulo_filtro}  |  Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+                    ws["A2"].font = Font(name="Calibri", size=10, color="94A3B8", italic=True)
+                    ws["A2"].fill = PatternFill("solid", fgColor=cor_sub)
+                    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+                    ws.row_dimensions[2].height = 20
+
+                    # ── Linha 3: espaço ──────────────────────────
+                    ws.row_dimensions[3].height = 6
+
+                    # ── Linha 4: cabeçalho das colunas ──────────
+                    cabecalhos = list(df_exp.columns)
+                    for col_idx, cab in enumerate(cabecalhos, start=1):
+                        cell = ws.cell(row=4, column=col_idx, value=cab.upper())
+                        cell.font = Font(name="Calibri", bold=True, size=10, color=cor_texto_branco)
+                        cell.fill = PatternFill("solid", fgColor=cor_header_accent)
+                        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                        cell.border = borda
+                    ws.row_dimensions[4].height = 22
+
+                    # ── Linhas de dados ──────────────────────────
+                    hoje_str = datetime.now().strftime('%d/%m/%Y')
+                    for row_idx, row_data in enumerate(df_exp.itertuples(index=False), start=5):
+                        is_par = (row_idx % 2 == 0)
+                        limite_val = str(row_data[7]) if len(row_data) > 7 else ""
+                        status_val = str(row_data[8]) if len(row_data) > 8 else ""
+                        atrasado = False
+                        try:
+                            lim_dt = datetime.strptime(limite_val, '%d/%m/%Y')
+                            atrasado = lim_dt < datetime.now() and status_val not in ['Concluído', 'Concluido']
+                        except Exception:
+                            pass
+
+                        bg = cor_atrasado if atrasado else (cor_linha_par if is_par else cor_linha_impar)
+                        for col_idx, valor in enumerate(row_data, start=1):
+                            cell = ws.cell(row=row_idx, column=col_idx, value=valor)
+                            cell.font = Font(name="Calibri", size=10, color=cor_texto_escuro)
+                            cell.fill = PatternFill("solid", fgColor=bg)
+                            cell.alignment = Alignment(horizontal="center", vertical="center")
+                            cell.border = borda
+                        ws.row_dimensions[row_idx].height = 18
+
+                    # ── Larguras automáticas ──────────────────────
+                    larguras = [14, 20, 18, 18, 10, 10, 14, 14, 20]
+                    for i, larg in enumerate(larguras, start=1):
+                        ws.column_dimensions[get_column_letter(i)].width = larg
+
+                    # ── Linha de rodapé ───────────────────────────
+                    ultima = ws.max_row + 2
+                    ws.merge_cells(f"A{ultima}:I{ultima}")
+                    ws[f"A{ultima}"] = f"Total de {len(df_exp)} registros  |  Linhas em vermelho = prazo vencido"
+                    ws[f"A{ultima}"].font = Font(name="Calibri", size=9, italic=True, color="64748B")
+                    ws[f"A{ultima}"].alignment = Alignment(horizontal="right")
+
+                    buf = io.BytesIO()
+                    wb.save(buf)
+                    buf.seek(0)
+                    return buf.getvalue()
+
+                titulo_filtro_excel = filtro_obra_rel if filtro_obra_rel != "Todas" else "Todas as Obras"
+                excel_bytes = gerar_excel_relatorio(df_tabela, titulo_filtro_excel)
                 st.download_button(
-                    label="Baixar relatório em CSV",
-                    data=csv_bytes,
-                    file_name=f"relatorio_producao_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                    mime="text/csv",
-                    key="dl_rel_csv"
+                    label="Baixar relatório em Excel",
+                    data=excel_bytes,
+                    file_name=f"relatorio_producao_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_rel_xlsx"
                 )
 
             # ── Seção: OPs Avulsas ────────────────────────────────
