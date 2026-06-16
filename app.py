@@ -14,6 +14,12 @@ from zoneinfo import ZoneInfo
 FUSO_BR = ZoneInfo('America/Sao_Paulo')
 HOJE_PROJETO = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
+# ── Constantes de segurança ─────────────────────────────
+MAX_TENTATIVAS_LOGIN  = 3
+BLOQUEIO_MINUTOS      = 15
+TIMEOUT_SESSAO_HORAS  = 8
+LIMITE_REGISTROS_LOAD = 2000   # máx de linhas carregadas de uma vez
+
 st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide")
 
 st.markdown("""
@@ -96,7 +102,68 @@ def verificar_senha(senha: str, hash_salvo: str) -> bool:
     try:
         return bcrypt.checkpw(senha.encode(), hash_salvo.encode())
     except Exception:
+        return 
+
+# ── Rate limiting de login ───────────────────────────────
+def _chave_bloqueio(usuario: str) -> str:
+    return f"login_attempts_{usuario}"
+
+def verificar_bloqueio(usuario: str) -> tuple:
+    """Retorna (bloqueado: bool, segundos_restantes: int)."""
+    chave = _chave_bloqueio(usuario)
+    dados = st.session_state.get(chave, {"tentativas": 0, "bloqueado_ate": None})
+    if dados["bloqueado_ate"] and datetime.now() < dados["bloqueado_ate"]:
+        restante = int((dados["bloqueado_ate"] - datetime.now()).total_seconds())
+        return True, restante
+    return False, 0
+
+def registrar_tentativa_falha(usuario: str):
+    chave = _chave_bloqueio(usuario)
+    dados = st.session_state.get(chave, {"tentativas": 0, "bloqueado_ate": None})
+    dados["tentativas"] += 1
+    if dados["tentativas"] >= MAX_TENTATIVAS_LOGIN:
+        dados["bloqueado_ate"] = datetime.now() + timedelta(minutes=BLOQUEIO_MINUTOS)
+        dados["tentativas"]    = 0
+    st.session_state[chave] = dados
+
+def resetar_tentativas(usuario: str):
+    st.session_state[_chave_bloqueio(usuario)] = {"tentativas": 0, "bloqueado_ate": None}
+
+def tentativas_restantes(usuario: str) -> int:
+    dados = st.session_state.get(_chave_bloqueio(usuario), {"tentativas": 0, "bloqueado_ate": None})
+    return MAX_TENTATIVAS_LOGIN - dados.get("tentativas", 0)
+
+# ── Timeout de sessão ────────────────────────────────────
+def registrar_atividade():
+    st.session_state["ultima_atividade"] = datetime.now()
+
+def verificar_timeout_sessao() -> bool:
+    """Retorna True se a sessão expirou por inatividade."""
+    ultima = st.session_state.get("ultima_atividade")
+    if ultima is None:
         return False
+    return (datetime.now() - ultima).total_seconds() > TIMEOUT_SESSAO_HORAS * 3600
+
+# ── Log de auditoria persistente ────────────────────────
+def registrar_auditoria(usuario: str, acao: str, detalhes: str = ""):
+    """Grava ação crítica no banco. Nunca quebra o app se falhar."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO auditoria_log (usuario, acao, detalhes, criado_em) VALUES (%s, %s, %s, %s)",
+            (usuario, acao, detalhes, datetime.now().strftime('%d/%m/%Y %H:%M:%S'))
+        )
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        liberar_conexao(conn)
+
+
 
 # ========================================================
 # INICIALIZAÇÃO DAS TABELAS
@@ -279,6 +346,18 @@ def inicializar_banco_de_dados():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_logistica_status ON logistica_envios(Status_Logistica)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_medicao_hist_obra ON medicao_historico(obra_id)")
 
+# ── Tabela de auditoria (nova) ──────────────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS auditoria_log (
+                id        SERIAL PRIMARY KEY,
+                usuario   TEXT,
+                acao      TEXT,
+                detalhes  TEXT,
+                criado_em TEXT
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_auditoria_usuario ON auditoria_log(usuario)")
+
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
             cursor.execute(
@@ -374,11 +453,17 @@ def carregar_macro():
 
 @st.cache_data(ttl=30)
 def carregar_micro():
+    """Lotes ativos + últimos 90 dias — evita carregar histórico inteiro."""
     conn = conectar_banco()
     try:
         with st.spinner("Carregando lotes..."):
             df = pd.read_sql_query(
-                "SELECT * FROM itens_detalhado ORDER BY Data_Producao_Programada ASC", conn
+                """SELECT * FROM itens_detalhado
+                   WHERE Status_Item != 'Concluido'
+                      OR Data_Producao_Programada >= NOW() - INTERVAL '90 days'
+                   ORDER BY Data_Producao_Programada ASC
+                   LIMIT %s""",
+                conn, params=(LIMITE_REGISTROS_LOAD,)
             )
     finally:
         liberar_conexao(conn)
@@ -393,6 +478,7 @@ def carregar_micro():
         'Tipo_Material': 'Tipo_Material', 'Qtd_Caixas': 'Qtd_Caixas', 'M2_Item': 'M2_Item',
         'Romaneio_Chapas': 'Romaneio_Chapas', 'Status_Item': 'Status_Item',
         'Fase_Produtiva': 'Fase_Produtiva', 'Enviado_Logistica': 'Enviado_Logistica',
+        'Updated_At': 'Updated_At',
     }
     return df.rename(columns=rename)
 
@@ -800,10 +886,16 @@ def carregar_todas_pecas_obra(obra: str):
 
 def salvar_pecas_lote(lote_id: int, obra: str, cod_lote: str, num_op: str,
                       pecas: list, componentes_status: str, m2_op_real: float):
-    """Salva lista de peças vinculada ao lote. Substitui a lista anterior."""
+    """Salva peças com lock otimista via updated_at."""
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
+        # Lock otimista: bloqueia a linha antes de escrever
+        cursor.execute("SELECT updated_at FROM itens_detalhado WHERE id=%s FOR UPDATE", (lote_id,))
+        if not cursor.fetchone():
+            st.error("Lote não encontrado. Recarregue a página.")
+            conn.rollback()
+            return
         cursor.execute("DELETE FROM op_pecas WHERE lote_id=%s", (lote_id,))
         for p in pecas:
             qtd = int(p.get('qtd', 0))
@@ -819,18 +911,15 @@ def salvar_pecas_lote(lote_id: int, obra: str, cod_lote: str, num_op: str,
                 p.get('medida', '').strip().upper(),
                 qtd, qtd, float(m2_op_real), componentes_status
             ))
-        # Abate m2 REAL informado pelo usuário na etapa
-        cursor.execute(
-            "SELECT EDT_Vinculado FROM itens_detalhado WHERE id=%s", (lote_id,)
-        )
+        # Atualiza timestamp — invalida edições concorrentes
+        cursor.execute("UPDATE itens_detalhado SET updated_at=NOW() WHERE id=%s", (lote_id,))
+        cursor.execute("SELECT EDT_Vinculado FROM itens_detalhado WHERE id=%s", (lote_id,))
         row_lote = cursor.fetchone()
         if row_lote:
-            edt = row_lote[0]
-            cursor.execute("""
-                UPDATE cronograma_macro
-                SET m2_executado = COALESCE(m2_executado, 0) + %s
-                WHERE EDT = %s
-            """, (float(m2_op_real), edt))
+            cursor.execute(
+                "UPDATE cronograma_macro SET m2_executado = COALESCE(m2_executado, 0) + %s WHERE EDT = %s",
+                (float(m2_op_real), row_lote[0])
+            )
         conn.commit()
         carregar_pecas_lote.clear()
         carregar_todas_pecas_obra.clear()
@@ -1299,10 +1388,22 @@ def blocos_semanais(df_input):
 # ========================================================
 # LOGIN
 # ========================================================
+# ========================================================
+# LOGIN
+# ========================================================
 if 'autenticado' not in st.session_state:
-    st.session_state.autenticado   = False
-    st.session_state.usuario_nome  = ""
-    st.session_state.usuario_setor = ""
+    st.session_state.autenticado      = False
+    st.session_state.usuario_nome     = ""
+    st.session_state.usuario_setor    = ""
+    st.session_state.ultima_atividade = None
+
+# ── Verificar timeout de sessão ──────────────────────────
+if st.session_state.autenticado and verificar_timeout_sessao():
+    st.session_state.autenticado      = False
+    st.session_state.usuario_nome     = ""
+    st.session_state.usuario_setor    = ""
+    st.session_state.ultima_atividade = None
+    st.warning(f"⏱️ Sessão encerrada por inatividade ({TIMEOUT_SESSAO_HORAS}h). Faça login novamente.")
 
 if not st.session_state.autenticado:
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -1319,29 +1420,64 @@ if not st.session_state.autenticado:
             st.markdown("<p style='text-align:center;font-size:16px;font-weight:600;color:#0F172A;margin-bottom:8px;'>Acesso ao Sistema</p>", unsafe_allow_html=True)
             user_input = st.text_input("Usuário:")
             pass_input = st.text_input("Senha:", type="password")
+
+            if user_input.strip():
+                bloqueado, seg_rest = verificar_bloqueio(user_input.strip())
+                restantes = tentativas_restantes(user_input.strip())
+                if bloqueado:
+                    minutos  = seg_rest // 60
+                    segundos = seg_rest % 60
+                    st.error(f"🔒 Conta bloqueada. Aguarde **{minutos}m {segundos}s** para tentar novamente.")
+                elif restantes < MAX_TENTATIVAS_LOGIN:
+                    st.warning(f"⚠️ {restantes} tentativa(s) restante(s) antes do bloqueio.")
+
             if st.button("Entrar", use_container_width=True):
-                with st.spinner("Verificando..."):
-                    dados = verificar_login(user_input.strip(), pass_input)
-                if dados:
-                    st.session_state.autenticado   = True
-                    st.session_state.usuario_nome  = dados[0]
-                    st.session_state.usuario_setor = dados[1]
-                    st.rerun()
+                usuario_limpo = user_input.strip()
+                bloqueado, seg_rest = verificar_bloqueio(usuario_limpo)
+                if bloqueado:
+                    st.error(f"🔒 Conta bloqueada. Aguarde {seg_rest // 60} minuto(s).")
                 else:
-                    st.error("Usuário ou senha inválidos.")
+                    with st.spinner("Verificando..."):
+                        dados = verificar_login(usuario_limpo, pass_input)
+                    if dados:
+                        resetar_tentativas(usuario_limpo)
+                        st.session_state.autenticado      = True
+                        st.session_state.usuario_nome     = dados[0]
+                        st.session_state.usuario_setor    = dados[1]
+                        st.session_state.ultima_atividade = datetime.now()
+                        registrar_auditoria(usuario_limpo, "LOGIN", f"Login bem-sucedido — {dados[1]}")
+                        st.rerun()
+                    else:
+                        registrar_tentativa_falha(usuario_limpo)
+                        restantes = tentativas_restantes(usuario_limpo)
+                        if restantes > 0:
+                            st.error(f"❌ Usuário ou senha inválidos. {restantes} tentativa(s) restante(s).")
+                        else:
+                            st.error(f"🔒 Muitas tentativas. Conta bloqueada por {BLOQUEIO_MINUTOS} minutos.")
     st.stop()
+    # Registrar atividade a cada interação
+registrar_atividade()
 
 # ========================================================
 # HEADER
 # ========================================================
+registrar_atividade()
+
 ch1, ch2 = st.columns([4, 1])
 with ch1:
     st.title("Passold Sistemas de Fachadas - Gestão Industrial")
-    st.caption(f"Usuário: **{st.session_state.usuario_nome}** | Setor: `{st.session_state.usuario_setor}`")
+    ultima_at  = st.session_state.get("ultima_atividade")
+    timeout_em = ultima_at + timedelta(hours=TIMEOUT_SESSAO_HORAS) if ultima_at else None
+    cap_txt    = f"Usuário: **{st.session_state.usuario_nome}** | Setor: `{st.session_state.usuario_setor}`"
+    if timeout_em:
+        cap_txt += f" | Sessão expira: {timeout_em.strftime('%H:%M')}"
+    st.caption(cap_txt)
 with ch2:
     st.write("")
     if st.button("Sair"):
-        st.session_state.autenticado = False
+        registrar_auditoria(st.session_state.usuario_nome, "LOGOUT", "Logout manual.")
+        st.session_state.autenticado      = False
+        st.session_state.ultima_atividade = None
         st.rerun()
 
 df_banco_macro = carregar_macro()
@@ -1878,6 +2014,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 st.error(f"Erro: {e}")
                             finally:
                                 liberar_conexao(conn)
+                            registrar_auditoria(st.session_state.usuario_nome, "LIBERAR_OPS",
+                                f"{len(ids_sel)} OP(s) liberadas — Obra: {obra_selecionada}")
                             st.toast("OPs liberadas!")
                             time.sleep(0.5)
                             st.rerun()
@@ -2071,9 +2209,11 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     row_lote['Cod_Lote'], row_lote['Num_OP'],
                                     pecas_list, comp_status, m2_op_real
                                 )
-                                st.toast(f"{len(pecas_list)} peça(s) salvas!")
-                                time.sleep(0.3)
-                                st.rerun()
+                                registrar_auditoria(st.session_state.usuario_nome, "LANCAMENTO_PECAS",
+                                f"OP {row_lote['Num_OP']} — {len(pecas_list)} peça(s) — Obra: {obra_selecionada}")
+                            st.toast(f"{len(pecas_list)} peça(s) salvas!")
+                            time.sleep(0.3)
+                            st.rerun()
                 else:
                     st.info("Nenhuma OP com número gerado ainda. Libere os lotes primeiro.")
             else:
@@ -2285,8 +2425,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             salvar_lotes_micro(lote)
                             prazo_eng = subtrair_dias_uteis(dt_inicio, 3)
                             atualizar_cronograma_macro_datas(edt_puro, prazo_eng, dt_inicio, dt_desp)
-                            st.session_state.lote_salvo_sucesso = True
-                            st.rerun()
+                            registrar_auditoria(st.session_state.usuario_nome, "GERAR_LOTE",
+                            f"Lote {cod_lote} — EDT {edt_puro} — {total_m2}m² — Obra: {obra_selecionada}")
+                        st.session_state.lote_salvo_sucesso = True
+                        st.rerun()
 
                 st.markdown("---")
                 st.markdown("### Lotes Gerados")
@@ -2339,6 +2481,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     lote_del = st.selectbox("Lote para excluir:", df_obra['Cod_Lote'].unique().tolist())
                     if st.button(f"Excluir {lote_del}"):
                         deletar_lotes_por_edt_lote(obra_selecionada, None, lote_del)
+                        registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_LOTE",
+                            f"Lote {lote_del} excluído — Obra: {obra_selecionada}")
                         st.toast(f"Lote {lote_del} removido!")
                         time.sleep(0.5)
                         st.rerun()
@@ -2399,6 +2543,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                   dt_fim.strftime('%Y-%m-%d'), num_projeto.strip()))
                             conn.commit()
                             _limpar_cache_geral()
+                            registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_OBRA",
+                                f"Obra: {nome_obra} | EDT: {edt_cod} | {m2_tot}m²")
                             st.toast("Frente registrada!")
                             time.sleep(0.4)
                             st.rerun()
@@ -2435,6 +2581,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             cursor.execute("DELETE FROM cronograma_macro WHERE EDT=%s", (edt_del,))
                             conn.commit()
                             _limpar_cache_geral()
+                            registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_FRENTE",
+                                f"EDT {edt_del} excluída — Obra: {obra_selecionada}")
                             st.toast(f"Frente {edt_del} removida!")
                             time.sleep(0.5)
                             st.rerun()
@@ -2802,6 +2950,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 with cb1:
                                     if st.button("Confirmar agendamento", key=f"conf_{row['id']}", use_container_width=True, type="primary"):
                                         agendar_envio(row['id'], dt_env, transp, veic, obs, st.session_state.usuario_nome)
+                                        registrar_auditoria(st.session_state.usuario_nome, "AGENDAR_ENVIO",
+                                            f"Lote {row['Cod_Lote']} — {transp} — {dt_env}")
                                         st.session_state[f"ag_open_{row['id']}"] = False
                                         st.toast(f"Agendado para {dt_env.strftime('%d/%m/%Y')}!")
                                         time.sleep(0.3)
@@ -2842,6 +2992,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             st.write("")
                             if st.button("Confirmar Despacho", key=f"des_{row['id']}", use_container_width=True, type="primary"):
                                 confirmar_despacho(row['id'], st.session_state.usuario_nome)
+                                registrar_auditoria(st.session_state.usuario_nome, "CONFIRMAR_DESPACHO",
+                                    f"Lote {row['Cod_Lote']} — Obra {row.get('Obra_Vinculada','—')}")
                                 st.toast("Despachado!")
                                 time.sleep(0.3)
                                 st.rerun()
@@ -3221,6 +3373,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     (nu, nn, ns, hash_senha(np))
                                 )
                                 conn.commit()
+                                registrar_auditoria(st.session_state.usuario_nome, "CRIAR_USUARIO",
+                                    f"Novo usuário: {nu} — Setor: {ns}")
                                 st.success(f"{nn} criado!")
                                 time.sleep(0.5)
                                 st.rerun()
@@ -3248,6 +3402,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             cursor = conn.cursor()
                             cursor.execute("DELETE FROM usuarios WHERE usuario=%s", (del_u,))
                             conn.commit()
+                            registrar_auditoria(st.session_state.usuario_nome, "REMOVER_USUARIO",
+                                f"Usuário removido: {del_u}")
                             st.toast("Removido!")
                             time.sleep(0.5)
                             st.rerun()
@@ -3257,15 +3413,141 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         finally:
                             liberar_conexao(conn)
 
+            # ── Log de Auditoria ──────────────────────────────
+            st.markdown("---")
+            st.markdown("### 📋 Log de Auditoria")
+            with st.expander("Ver registros de auditoria", expanded=False):
+                conn_aud = conectar_banco()
+                try:
+                    df_aud = pd.read_sql_query(
+                        "SELECT usuario, acao, detalhes, criado_em FROM auditoria_log ORDER BY id DESC LIMIT 200",
+                        conn_aud
+                    )
+                finally:
+                    liberar_conexao(conn_aud)
+                if df_aud.empty:
+                    st.info("Nenhum registro ainda.")
+                else:
+                    filtro_aud = st.selectbox(
+                        "Filtrar por ação:",
+                        ["Todas"] + sorted(df_aud["acao"].unique().tolist()),
+                        key="filtro_aud"
+                    )
+                    if filtro_aud != "Todas":
+                        df_aud = df_aud[df_aud["acao"] == filtro_aud]
+                    st.dataframe(df_aud, hide_index=True, use_container_width=True)
+                    st.caption(f"Exibindo últimos {len(df_aud)} registros.")
+
+            # ── Log de Auditoria ──────────────────────────────
+            st.markdown("---")
+            st.markdown("### 📋 Log de Auditoria")
+            with st.expander("Ver registros de auditoria", expanded=False):
+                conn_aud = conectar_banco()
+                try:
+                    df_aud = pd.read_sql_query(
+                        "SELECT usuario, acao, detalhes, criado_em FROM auditoria_log ORDER BY id DESC LIMIT 200",
+                        conn_aud
+                    )
+                finally:
+                    liberar_conexao(conn_aud)
+                if df_aud.empty:
+                    st.info("Nenhum registro ainda.")
+                else:
+                    filtro_aud = st.selectbox(
+                        "Filtrar por ação:",
+                        ["Todas"] + sorted(df_aud["acao"].unique().tolist()),
+                        key="filtro_aud"
+                    )
+                    if filtro_aud != "Todas":
+                        df_aud = df_aud[df_aud["acao"] == filtro_aud]
+                    st.dataframe(df_aud, hide_index=True, use_container_width=True)
+                    st.caption(f"Exibindo últimos {len(df_aud)} registros.")
+
+            # ── Log de Auditoria ──────────────────────────────
+            st.markdown("---")
+            st.markdown("### 📋 Log de Auditoria")
+            with st.expander("Ver registros de auditoria", expanded=False):
+                conn_aud = conectar_banco()
+                try:
+                    df_aud = pd.read_sql_query(
+                        "SELECT usuario, acao, detalhes, criado_em FROM auditoria_log ORDER BY id DESC LIMIT 200",
+                        conn_aud
+                    )
+                finally:
+                    liberar_conexao(conn_aud)
+                if df_aud.empty:
+                    st.info("Nenhum registro ainda.")
+                else:
+                    filtro_aud = st.selectbox(
+                        "Filtrar por ação:",
+                        ["Todas"] + sorted(df_aud["acao"].unique().tolist()),
+                        key="filtro_aud"
+                    )
+                    if filtro_aud != "Todas":
+                        df_aud = df_aud[df_aud["acao"] == filtro_aud]
+                    st.dataframe(df_aud, hide_index=True, use_container_width=True)
+                    st.caption(f"Exibindo últimos {len(df_aud)} registros.")
+
+            # ── Log de Auditoria ──────────────────────────────
+            st.markdown("---")
+            st.markdown("### 📋 Log de Auditoria")
+            with st.expander("Ver registros de auditoria", expanded=False):
+                conn_aud = conectar_banco()
+                try:
+                    df_aud = pd.read_sql_query(
+                        "SELECT usuario, acao, detalhes, criado_em FROM auditoria_log ORDER BY id DESC LIMIT 200",
+                        conn_aud
+                    )
+                finally:
+                    liberar_conexao(conn_aud)
+                if df_aud.empty:
+                    st.info("Nenhum registro ainda.")
+                else:
+                    filtro_aud = st.selectbox(
+                        "Filtrar por ação:",
+                        ["Todas"] + sorted(df_aud["acao"].unique().tolist()),
+                        key="filtro_aud"
+                    )
+                    if filtro_aud != "Todas":
+                        df_aud = df_aud[df_aud["acao"] == filtro_aud]
+                    st.dataframe(df_aud, hide_index=True, use_container_width=True)
+                    st.caption(f"Exibindo últimos {len(df_aud)} registros.")
+
+           # ── Log de Auditoria ──────────────────────────────
+            st.markdown("---")
+            st.markdown("### 📋 Log de Auditoria")
+            with st.expander("Ver registros de auditoria", expanded=False):
+                conn_aud = conectar_banco()
+                try:
+                    df_aud = pd.read_sql_query(
+                        "SELECT usuario, acao, detalhes, criado_em FROM auditoria_log ORDER BY id DESC LIMIT 200",
+                        conn_aud
+                    )
+                finally:
+                    liberar_conexao(conn_aud)
+                if df_aud.empty:
+                    st.info("Nenhum registro ainda.")
+                else:
+                    filtro_aud = st.selectbox(
+                        "Filtrar por ação:",
+                        ["Todas"] + sorted(df_aud["acao"].unique().tolist()),
+                        key="filtro_aud"
+                    )
+                    if filtro_aud != "Todas":
+                        df_aud = df_aud[df_aud["acao"] == filtro_aud]
+                    st.dataframe(df_aud, hide_index=True, use_container_width=True)
+                    st.caption(f"Exibindo últimos {len(df_aud)} registros.")
+
             st.markdown("---")
             st.markdown("### ⚠️ Reset Geral")
             st.error("Esta ação remove TODOS os dados permanentemente e não pode ser desfeita.")
             confirma_reset = st.text_input("Digite CONFIRMAR para habilitar o reset:")
             if confirma_reset == "CONFIRMAR":
                 if st.button("🗑️ Executar limpeza total", type="primary"):
-                    resetar_banco_dados_completo()
-                    st.toast("Sistema resetado!")
-                    time.sleep(1)
-                    st.rerun()
+                    sucesso = resetar_banco_dados_completo(st.session_state.usuario_nome)
+                    if sucesso:
+                        st.toast("Sistema resetado!")
+                        time.sleep(1)
+                        st.rerun()
             else:
                 st.caption("Digite CONFIRMAR no campo acima para liberar o botão de reset.")
