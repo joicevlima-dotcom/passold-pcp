@@ -3787,6 +3787,19 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 df_tabela = df_rel[cols_show].copy()
                 df_tabela.columns = ['Obra','OP','Material','EDT/Lote','Caixas','m²','Ini Prod.','Limite','Status']
 
+                # % de representação sobre o total filtrado
+                total_m2_rel  = df_tabela['m²'].sum()
+                total_cx_rel  = df_tabela['Caixas'].sum()
+                if total_m2_rel > 0:
+                    df_tabela['% m²'] = (df_tabela['m²'] / total_m2_rel * 100).round(1)
+                    base_pct = 'm²'
+                elif total_cx_rel > 0:
+                    df_tabela['% m²'] = (df_tabela['Caixas'] / total_cx_rel * 100).round(1)
+                    base_pct = 'Caixas'
+                else:
+                    df_tabela['% m²'] = 0.0
+                    base_pct = 'm²'
+
                 for col_dt in ['Ini Prod.','Limite']:
                     df_tabela[col_dt] = pd.to_datetime(df_tabela[col_dt], errors='coerce').dt.strftime('%d/%m/%Y')
 
@@ -3797,10 +3810,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         return ['background-color:#FEF2F2'] * len(row)
                     return [''] * len(row)
 
-                styled = df_tabela.style.apply(highlight_row, axis=1).format({'m²': '{:.2f}'})
+                styled = df_tabela.style.apply(highlight_row, axis=1).format({'m²': '{:.2f}', '% m²': '{:.1f}%'})
                 st.dataframe(styled, hide_index=True, use_container_width=True, height=420)
 
-                st.caption(f"Total de {len(df_tabela)} registros | Linhas em vermelho = prazo vencido")
+                st.caption(f"Total de {len(df_tabela)} registros | % calculada sobre {base_pct} do total filtrado | Linhas em vermelho = prazo vencido")
 
                 # ── Exportar Excel formatado ───────────────────────
                 import io
@@ -3828,7 +3841,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     borda = Border(left=thin, right=thin, top=thin, bottom=thin)
 
                     # ── Linha 1: título geral ────────────────────
-                    ws.merge_cells("A1:I1")
+                    ws.merge_cells("A1:J1")
                     ws["A1"] = "PASSOLD — SISTEMAS DE FACHADAS"
                     ws["A1"].font = Font(name="Calibri", bold=True, size=16, color=cor_texto_branco)
                     ws["A1"].fill = PatternFill("solid", fgColor=cor_header_dark)
@@ -3836,7 +3849,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     ws.row_dimensions[1].height = 32
 
                     # ── Linha 2: subtítulo ───────────────────────
-                    ws.merge_cells("A2:I2")
+                    ws.merge_cells("A2:J2")
                     ws["A2"] = f"Relatório Geral de Produção  |  Obra: {titulo_filtro}  |  Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
                     ws["A2"].font = Font(name="Calibri", size=10, color="94A3B8", italic=True)
                     ws["A2"].fill = PatternFill("solid", fgColor=cor_sub)
@@ -3879,13 +3892,13 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         ws.row_dimensions[row_idx].height = 18
 
                     # ── Larguras automáticas ──────────────────────
-                    larguras = [14, 20, 18, 18, 10, 10, 14, 14, 20]
+                    larguras = [14, 20, 18, 18, 10, 10, 14, 14, 20, 12]
                     for i, larg in enumerate(larguras, start=1):
                         ws.column_dimensions[get_column_letter(i)].width = larg
 
                     # ── Linha de rodapé ───────────────────────────
                     ultima = ws.max_row + 2
-                    ws.merge_cells(f"A{ultima}:I{ultima}")
+                    ws.merge_cells(f"A{ultima}:J{ultima}")
                     ws[f"A{ultima}"] = f"Total de {len(df_exp)} registros  |  Linhas em vermelho = prazo vencido"
                     ws[f"A{ultima}"].font = Font(name="Calibri", size=9, italic=True, color="64748B")
                     ws[f"A{ultima}"].alignment = Alignment(horizontal="right")
