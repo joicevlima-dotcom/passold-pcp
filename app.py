@@ -3413,30 +3413,6 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         finally:
                             liberar_conexao(conn)
 
-            # ── Log de Auditoria ──────────────────────────────
-            st.markdown("---")
-            st.markdown("### 📋 Log de Auditoria")
-            with st.expander("Ver registros de auditoria", expanded=False):
-                conn_aud = conectar_banco()
-                try:
-                    df_aud = pd.read_sql_query(
-                        "SELECT usuario, acao, detalhes, criado_em FROM auditoria_log ORDER BY id DESC LIMIT 200",
-                        conn_aud
-                    )
-                finally:
-                    liberar_conexao(conn_aud)
-                if df_aud.empty:
-                    st.info("Nenhum registro ainda.")
-                else:
-                    filtro_aud = st.selectbox(
-                    "Filtrar por ação:",
-                    ["Todas"] + sorted(df_aud["acao"].unique().tolist()),
-                    key="filtro_auditoria_log"
-                )
-                if filtro_aud != "Todas":
-                    df_aud = df_aud[df_aud["acao"] == filtro_aud]
-                    st.dataframe(df_aud, hide_index=True, use_container_width=True)
-                    st.caption(f"Exibindo últimos {len(df_aud)} registros.")
 
             # ── Log de Auditoria ──────────────────────────────
             st.markdown("---")
@@ -3463,82 +3439,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     st.dataframe(df_aud, hide_index=True, use_container_width=True)
                     st.caption(f"Exibindo últimos {len(df_aud)} registros.")
 
-            # ── Log de Auditoria ──────────────────────────────
-            st.markdown("---")
-            st.markdown("### 📋 Log de Auditoria")
-            with st.expander("Ver registros de auditoria", expanded=False):
-                conn_aud = conectar_banco()
-                try:
-                    df_aud = pd.read_sql_query(
-                        "SELECT usuario, acao, detalhes, criado_em FROM auditoria_log ORDER BY id DESC LIMIT 200",
-                        conn_aud
-                    )
-                finally:
-                    liberar_conexao(conn_aud)
-                if df_aud.empty:
-                    st.info("Nenhum registro ainda.")
-                else:
-                    filtro_aud = st.selectbox(
-                        "Filtrar por ação:",
-                        ["Todas"] + sorted(df_aud["acao"].unique().tolist()),
-                        key="filtro_aud"
-                    )
-                    if filtro_aud != "Todas":
-                        df_aud = df_aud[df_aud["acao"] == filtro_aud]
-                    st.dataframe(df_aud, hide_index=True, use_container_width=True)
-                    st.caption(f"Exibindo últimos {len(df_aud)} registros.")
-
-            # ── Log de Auditoria ──────────────────────────────
-            st.markdown("---")
-            st.markdown("### 📋 Log de Auditoria")
-            with st.expander("Ver registros de auditoria", expanded=False):
-                conn_aud = conectar_banco()
-                try:
-                    df_aud = pd.read_sql_query(
-                        "SELECT usuario, acao, detalhes, criado_em FROM auditoria_log ORDER BY id DESC LIMIT 200",
-                        conn_aud
-                    )
-                finally:
-                    liberar_conexao(conn_aud)
-                if df_aud.empty:
-                    st.info("Nenhum registro ainda.")
-                else:
-                    filtro_aud = st.selectbox(
-                        "Filtrar por ação:",
-                        ["Todas"] + sorted(df_aud["acao"].unique().tolist()),
-                        key="filtro_aud"
-                    )
-                    if filtro_aud != "Todas":
-                        df_aud = df_aud[df_aud["acao"] == filtro_aud]
-                    st.dataframe(df_aud, hide_index=True, use_container_width=True)
-                    st.caption(f"Exibindo últimos {len(df_aud)} registros.")
-
-           # ── Log de Auditoria ──────────────────────────────
-            st.markdown("---")
-            st.markdown("### 📋 Log de Auditoria")
-            with st.expander("Ver registros de auditoria", expanded=False):
-                conn_aud = conectar_banco()
-                try:
-                    df_aud = pd.read_sql_query(
-                        "SELECT usuario, acao, detalhes, criado_em FROM auditoria_log ORDER BY id DESC LIMIT 200",
-                        conn_aud
-                    )
-                finally:
-                    liberar_conexao(conn_aud)
-                if df_aud.empty:
-                    st.info("Nenhum registro ainda.")
-                else:
-                    filtro_aud = st.selectbox(
-                        "Filtrar por ação:",
-                        ["Todas"] + sorted(df_aud["acao"].unique().tolist()),
-                        key="filtro_aud"
-                    )
-                    if filtro_aud != "Todas":
-                        df_aud = df_aud[df_aud["acao"] == filtro_aud]
-                    st.dataframe(df_aud, hide_index=True, use_container_width=True)
-                    st.caption(f"Exibindo últimos {len(df_aud)} registros.")
-
-            st.markdown("---")
+                    st.markdown("---")
             st.markdown("### ⚠️ Reset Geral")
             st.error("Esta ação remove TODOS os dados permanentemente e não pode ser desfeita.")
             confirma_reset = st.text_input("Digite CONFIRMAR para habilitar o reset:")
