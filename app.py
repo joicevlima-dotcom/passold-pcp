@@ -3429,12 +3429,12 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     st.info("Nenhum registro ainda.")
                 else:
                     filtro_aud = st.selectbox(
-                        "Filtrar por ação:",
-                        ["Todas"] + sorted(df_aud["acao"].unique().tolist()),
-                        key="filtro_aud"
-                    )
-                    if filtro_aud != "Todas":
-                        df_aud = df_aud[df_aud["acao"] == filtro_aud]
+                    "Filtrar por ação:",
+                    ["Todas"] + sorted(df_aud["acao"].unique().tolist()),
+                    key="filtro_auditoria_log"
+                )
+                if filtro_aud != "Todas":
+                    df_aud = df_aud[df_aud["acao"] == filtro_aud]
                     st.dataframe(df_aud, hide_index=True, use_container_width=True)
                     st.caption(f"Exibindo últimos {len(df_aud)} registros.")
 
