@@ -1534,7 +1534,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             )
             obra_tv = st.selectbox("Filtrar por obra:", obras_tv, key="sb_obra_tv")
 
-            st.markdown("### 📋 Previsão de Entrada em Produção")
+            st.markdown("### Previsão de Entrada em Produção")
             st.caption("Lotes planejados no Vincular Datas — ainda não liberados oficialmente.")
             df_prev = df_banco_micro.copy() if not df_banco_micro.empty else pd.DataFrame()
             if obra_tv != "Todas as obras" and not df_prev.empty:
@@ -1546,7 +1546,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 blocos_semanais(df_prev_pend)
 
             st.markdown("---")
-            st.markdown("### 📆 Calendário de Produção — OPs Liberadas")
+            st.markdown("### Calendário de Produção — OPs Liberadas")
             st.caption("Apenas lotes liberados oficialmente na aba 'Liberar OPs da Semana'.")
             if not df_banco_micro.empty:
                 df_base = df_banco_micro[df_banco_micro['Status_Item'].isin(["Liberado para Fabrica", "Parcialmente Concluido"])].copy()
@@ -1982,7 +1982,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             st.header("Ordens de Producao — Liberacao Semanal")
 
             # ── SEÇÃO 1: LOTES PENDENTES DO FATIAMENTO ────────────
-            st.markdown("### 📋 Seção 1 — Lotes Pendentes do Fatiamento")
+            st.markdown("###  Seção 1 — Lotes Pendentes do Fatiamento")
 
             if not df_banco_micro.empty:
                 # Filtro 1 — Escopo
@@ -2066,9 +2066,9 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
             st.markdown("---")
 # ── SEÇÃO 2: LANÇAR PEÇAS DA OP ───────────────────────
-            st.markdown("### 🔩 Seção 2 — Lançar Peças da OP")
+            st.markdown("### Seção 2 — Lançar Peças da OP")
 
-            tab_op_fat, tab_op_avulsa = st.tabs(["📋 OPs do Fatiamento", "➕ OP Avulsa"])
+            tab_op_fat, tab_op_avulsa = st.tabs([" OPs do Fatiamento", "➕ OP Avulsa"])
 
             # ── ABA 1: OPs DO FATIAMENTO ──────────────────────────
             with tab_op_fat:
