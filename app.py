@@ -1983,15 +1983,53 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
             # ── SEÇÃO 1: LOTES PENDENTES DO FATIAMENTO ────────────
             st.markdown("### 📋 Seção 1 — Lotes Pendentes do Fatiamento")
-            if obra_selecionada and not df_banco_micro.empty:
-                df_pend = df_banco_micro[
-                    (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
-                    (df_banco_micro['Status_Item'] == "Pendente")
-                ].copy()
+
+            if not df_banco_micro.empty:
+                # Filtro 1 — Escopo
+                escopos_disp = sorted(df_banco_micro['Tipo_Material'].dropna().unique().tolist())
+                # Tenta detectar escopos pelo Tipo_Escopo do macro
+                if not df_banco_macro.empty and 'Tipo_Escopo' in df_banco_macro.columns:
+                    escopos_disp = sorted(df_banco_macro['Tipo_Escopo'].dropna().unique().tolist())
+
+                col_esc, col_obra = st.columns(2)
+                with col_esc:
+                    escopo_filtro = st.selectbox(
+                        "Tipo de Escopo:",
+                        ["Todos"] + escopos_disp,
+                        key="sec1_escopo"
+                    )
+                # Filtro 2 — Obra (baseado no escopo selecionado)
+                if escopo_filtro != "Todos" and not df_banco_macro.empty:
+                    obras_escopo = sorted(
+                        df_banco_macro[df_banco_macro['Tipo_Escopo'] == escopo_filtro]['Obra']
+                        .dropna().unique().tolist()
+                    )
+                else:
+                    obras_escopo = sorted(df_banco_micro['Obra_Vinculada'].dropna().unique().tolist())
+
+                with col_obra:
+                    obra_filtro_sec1 = st.selectbox(
+                        "Obra:",
+                        ["Todas"] + obras_escopo,
+                        key="sec1_obra"
+                    )
+
+                # Aplicar filtros
+                df_pend = df_banco_micro[df_banco_micro['Status_Item'] == "Pendente"].copy()
+
+                if escopo_filtro != "Todos" and not df_banco_macro.empty:
+                    edts_escopo = df_banco_macro[df_banco_macro['Tipo_Escopo'] == escopo_filtro]['EDT'].tolist()
+                    df_pend = df_pend[df_pend['EDT_Vinculado'].isin(edts_escopo)]
+
+                if obra_filtro_sec1 != "Todas":
+                    df_pend = df_pend[df_pend['Obra_Vinculada'] == obra_filtro_sec1]
+
                 if not df_pend.empty:
+                    st.caption(f"{len(df_pend)} lote(s) pendente(s) encontrado(s)")
                     df_pend['Selecionar'] = False
-                    cols_exib = [c for c in ['id', 'Cod_Lote', 'Tipo_Material', 'Qtd_Caixas', 'M2_Item',
-                                             'Fase_Produtiva', 'Data_Producao_Programada', 'Romaneio_Chapas', 'Selecionar']
+                    cols_exib = [c for c in ['id', 'Obra_Vinculada', 'EDT_Vinculado', 'Cod_Lote',
+                                             'Tipo_Material', 'Qtd_Caixas', 'M2_Item',
+                                             'Data_Producao_Programada', 'Romaneio_Chapas', 'Selecionar']
                                  if c in df_pend.columns]
                     df_ed = st.data_editor(df_pend[cols_exib], hide_index=True, use_container_width=True,
                                            disabled=[c for c in cols_exib if c != 'Selecionar'])
@@ -2015,14 +2053,14 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             finally:
                                 liberar_conexao(conn)
                             registrar_auditoria(st.session_state.usuario_nome, "LIBERAR_OPS",
-                                f"{len(ids_sel)} OP(s) liberadas — Obra: {obra_selecionada}")
+                                f"{len(ids_sel)} OP(s) liberadas — Escopo: {escopo_filtro} — Obra: {obra_filtro_sec1}")
                             st.toast("OPs liberadas!")
                             time.sleep(0.5)
                             st.rerun()
                         else:
                             st.warning("Selecione pelo menos um item.")
                 else:
-                    st.success("Todos os lotes ja foram liberados.")
+                    st.success("Nenhum lote pendente para este filtro!")
             else:
                 st.info("Nenhum lote pendente encontrado.")
 
