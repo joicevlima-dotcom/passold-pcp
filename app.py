@@ -1515,6 +1515,8 @@ if setor in ["Master", "Almoxarifado"]:
     abas_disponiveis.append("Almoxarifado")
 if setor in ["Master", "Medicao"]:
     abas_disponiveis.append("Sistema de Medicao")
+if setor in ["Master", "Diretoria", "PCP"]:
+    abas_disponiveis.append("Relatorio Geral")
 if setor in ["Master"]:
     abas_disponiveis.append("Configuracoes")
 
@@ -3615,7 +3617,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     st.dataframe(df_aud, hide_index=True, use_container_width=True)
                     st.caption(f"Exibindo últimos {len(df_aud)} registros.")
 
-                    st.markdown("---")
+            st.markdown("---")
             st.markdown("### ⚠️ Reset Geral")
             st.error("Esta ação remove TODOS os dados permanentemente e não pode ser desfeita.")
             confirma_reset = st.text_input("Digite CONFIRMAR para habilitar o reset:")
@@ -3628,3 +3630,183 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         st.rerun()
             else:
                 st.caption("Digite CONFIRMAR no campo acima para liberar o botão de reset.")
+
+    # ==================================================
+    # RELATORIO GERAL
+    # ==================================================
+    if nome_aba == "Relatorio Geral":
+        with aba_objeto:
+            st.markdown("""
+            <div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;">
+                <div style="background:linear-gradient(135deg,#0F172A,#334155);padding:14px 20px;border-radius:10px;flex:1;">
+                    <span style="color:#EA580C;font-weight:800;font-size:1.4rem;letter-spacing:-0.02em;">Relatório Geral de Produção</span>
+                    <span style="color:#94A3B8;font-size:0.85rem;margin-left:16px;">Todas as OPs ativas, envios parciais e status em tempo real</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # ── Filtros ──────────────────────────────────────────
+            rel_f1, rel_f2, rel_f3, rel_f4 = st.columns([2, 2, 2, 1])
+            obras_rel = ["Todas"] + sorted(df_banco_micro['Obra_Vinculada'].dropna().unique().tolist()) if not df_banco_micro.empty else ["Todas"]
+            with rel_f1:
+                filtro_obra_rel = st.selectbox("Obra:", obras_rel, key="rel_obra")
+            with rel_f2:
+                status_opcoes = ["Todos", "Liberado para Fabrica", "Em Producao", "Aguardando Expedicao", "Enviado Parcial", "Concluido"]
+                filtro_status_rel = st.selectbox("Status:", status_opcoes, key="rel_status")
+            with rel_f3:
+                escopo_opcoes = ["Todos"] + sorted(df_banco_micro['Tipo_Material'].dropna().unique().tolist()) if not df_banco_micro.empty else ["Todos"]
+                filtro_escopo_rel = st.selectbox("Escopo / Material:", escopo_opcoes, key="rel_escopo")
+            with rel_f4:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                mostrar_concluidos = st.toggle("Ver concluídos", value=False, key="rel_concl")
+
+            # ── Montar dataframe filtrado ────────────────────────
+            df_rel = df_banco_micro.copy() if not df_banco_micro.empty else pd.DataFrame()
+
+            if not df_rel.empty:
+                if not mostrar_concluidos:
+                    df_rel = df_rel[df_rel['Status_Item'] != 'Concluido']
+                if filtro_obra_rel != "Todas":
+                    df_rel = df_rel[df_rel['Obra_Vinculada'] == filtro_obra_rel]
+                if filtro_status_rel != "Todos":
+                    df_rel = df_rel[df_rel['Status_Item'] == filtro_status_rel]
+                if filtro_escopo_rel != "Todos":
+                    df_rel = df_rel[df_rel['Tipo_Material'] == filtro_escopo_rel]
+
+            # ── KPIs ─────────────────────────────────────────────
+            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+            if not df_rel.empty:
+                total_ops     = df_rel['Num_OP'].nunique()
+                total_m2      = df_rel['M2_Item'].sum()
+                total_cx      = df_rel['Qtd_Caixas'].sum()
+                ops_atrasadas = df_rel[
+                    (pd.to_datetime(df_rel['Data_Limite_Obra'], errors='coerce') < pd.Timestamp.now()) &
+                    (~df_rel['Status_Item'].isin(['Concluido']))
+                ]['Num_OP'].nunique()
+                enviadas_parcial = df_rel[df_rel['Status_Item'].str.contains('Parcial|parcial', na=False)]['Num_OP'].nunique()
+
+                k1, k2, k3, k4, k5 = st.columns(5)
+                k1.metric("Total de OPs", total_ops)
+                k2.metric("Total m²", f"{total_m2:,.1f}")
+                k3.metric("Total Caixas", int(total_cx))
+                k4.metric("OPs Atrasadas", ops_atrasadas, delta=f"-{ops_atrasadas}" if ops_atrasadas > 0 else None, delta_color="inverse")
+                k5.metric("Envio Parcial", enviadas_parcial)
+            else:
+                st.info("Nenhum dado disponível para os filtros selecionados.")
+
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+            if not df_rel.empty:
+                # ── Gráfico: m² por obra ──────────────────────────
+                col_g1, col_g2 = st.columns(2)
+                with col_g1:
+                    df_m2_obra = df_rel.groupby('Obra_Vinculada')['M2_Item'].sum().reset_index()
+                    df_m2_obra.columns = ['Obra', 'm²']
+                    df_m2_obra = df_m2_obra.sort_values('m²', ascending=False)
+                    fig_m2 = px.bar(
+                        df_m2_obra, x='Obra', y='m²',
+                        title='m² em Produção por Obra',
+                        color='m²',
+                        color_continuous_scale=[[0,'#334155'],[1,'#EA580C']],
+                        text_auto='.1f'
+                    )
+                    fig_m2.update_layout(
+                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                        font_family='Inter', title_font_size=14, showlegend=False,
+                        coloraxis_showscale=False,
+                        margin=dict(l=10,r=10,t=40,b=10),
+                        xaxis=dict(tickfont=dict(size=11)),
+                    )
+                    fig_m2.update_traces(textfont_size=11, textposition='outside')
+                    st.plotly_chart(fig_m2, use_container_width=True)
+
+                with col_g2:
+                    df_status_cnt = df_rel.groupby('Status_Item')['Num_OP'].nunique().reset_index()
+                    df_status_cnt.columns = ['Status', 'OPs']
+                    cores_status = {
+                        'Liberado para Fabrica': '#334155',
+                        'Em Producao': '#2563EB',
+                        'Aguardando Expedicao': '#D97706',
+                        'Enviado Parcial': '#EA580C',
+                        'Concluido': '#059669',
+                    }
+                    fig_status = px.pie(
+                        df_status_cnt, names='Status', values='OPs',
+                        title='Distribuição por Status',
+                        color='Status',
+                        color_discrete_map=cores_status,
+                        hole=0.45
+                    )
+                    fig_status.update_layout(
+                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                        font_family='Inter', title_font_size=14,
+                        margin=dict(l=10,r=10,t=40,b=10),
+                        legend=dict(font=dict(size=11))
+                    )
+                    fig_status.update_traces(textinfo='value+percent', textfont_size=11)
+                    st.plotly_chart(fig_status, use_container_width=True)
+
+                # ── Tabela detalhada ──────────────────────────────
+                st.markdown("---")
+                st.markdown("#### Detalhamento por OP")
+
+                def badge_status(s):
+                    cores = {
+                        'Liberado para Fabrica': ('background:#EFF6FF;color:#1D4ED8', 'Lib. Fábrica'),
+                        'Em Producao':           ('background:#DBEAFE;color:#1D4ED8', 'Em Produção'),
+                        'Aguardando Expedicao':  ('background:#FEF3C7;color:#92400E', 'Ag. Expedição'),
+                        'Enviado Parcial':       ('background:#FFF7ED;color:#C2410C', 'Env. Parcial'),
+                        'Concluido':             ('background:#ECFDF5;color:#065F46', 'Concluído'),
+                    }
+                    estilo, label = cores.get(s, ('background:#F1F5F9;color:#334155', s))
+                    return f'<span style="{estilo};padding:3px 9px;border-radius:5px;font-size:11px;font-weight:700">{label}</span>'
+
+                hoje_ts = pd.Timestamp.now().normalize()
+                cols_show = ['Obra_Vinculada','Num_OP','Tipo_Material','EDT_Vinculado',
+                             'Qtd_Caixas','M2_Item','Data_Producao_Programada','Data_Limite_Obra','Status_Item']
+                df_tabela = df_rel[cols_show].copy()
+                df_tabela.columns = ['Obra','OP','Material','EDT/Lote','Caixas','m²','Ini Prod.','Limite','Status']
+
+                for col_dt in ['Ini Prod.','Limite']:
+                    df_tabela[col_dt] = pd.to_datetime(df_tabela[col_dt], errors='coerce').dt.strftime('%d/%m/%Y')
+
+                # Highlight atraso
+                def highlight_row(row):
+                    limite = pd.to_datetime(row['Limite'], format='%d/%m/%Y', errors='coerce')
+                    if pd.notna(limite) and limite < hoje_ts and row['Status'] not in ['Concluído']:
+                        return ['background-color:#FEF2F2'] * len(row)
+                    return [''] * len(row)
+
+                styled = df_tabela.style.apply(highlight_row, axis=1).format({'m²': '{:.2f}'})
+                st.dataframe(styled, hide_index=True, use_container_width=True, height=420)
+
+                st.caption(f"Total de {len(df_tabela)} registros | Linhas em vermelho = prazo vencido")
+
+                # ── Exportar CSV ──────────────────────────────────
+                csv_bytes = df_tabela.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="Baixar relatório em CSV",
+                    data=csv_bytes,
+                    file_name=f"relatorio_producao_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv",
+                    key="dl_rel_csv"
+                )
+
+            # ── Seção: OPs Avulsas ────────────────────────────────
+            st.markdown("---")
+            with st.expander("OPs Avulsas cadastradas", expanded=False):
+                df_avulsas = df_banco_micro[df_banco_micro['EDT_Vinculado'].str.startswith('AVULSO', na=False)].copy() if not df_banco_micro.empty else pd.DataFrame()
+                if filtro_obra_rel != "Todas" and not df_avulsas.empty:
+                    df_avulsas = df_avulsas[df_avulsas['Obra_Vinculada'] == filtro_obra_rel]
+                if df_avulsas.empty:
+                    st.info("Nenhuma OP avulsa encontrada.")
+                else:
+                    cols_av = ['Obra_Vinculada','Num_OP','Tipo_Material','Qtd_Caixas','M2_Item',
+                               'Data_Producao_Programada','Data_Limite_Obra','Status_Item','Romaneio_Chapas']
+                    df_avulsas = df_avulsas[cols_av].copy()
+                    df_avulsas.columns = ['Obra','OP','Material','Caixas','m²','Ini Prod.','Limite','Status','Detalhes']
+                    for col_dt in ['Ini Prod.','Limite']:
+                        df_avulsas[col_dt] = pd.to_datetime(df_avulsas[col_dt], errors='coerce').dt.strftime('%d/%m/%Y')
+                    st.dataframe(df_avulsas.style.format({'m²': '{:.2f}'}), hide_index=True, use_container_width=True)
+                    st.caption(f"{len(df_avulsas)} OP(s) avulsa(s) encontrada(s).")
+
