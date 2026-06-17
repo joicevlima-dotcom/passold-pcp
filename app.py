@@ -1512,7 +1512,7 @@ if not st.session_state.autenticado:
         PCP & Controle Operacional
         </p>
         """, unsafe_allow_html=True)
-        with st.container(border=True):
+        with st.form("form_login", border=True):
             st.markdown("<p style='text-align:center;font-size:16px;font-weight:600;color:#0F172A;margin-bottom:8px;'>Acesso ao Sistema</p>", unsafe_allow_html=True)
             user_input = st.text_input("Usuário:")
             pass_input = st.text_input("Senha:", type="password")
@@ -1527,7 +1527,7 @@ if not st.session_state.autenticado:
                 elif restantes < MAX_TENTATIVAS_LOGIN:
                     st.warning(f"⚠️ {restantes} tentativa(s) restante(s) antes do bloqueio.")
 
-            if st.button("Entrar", use_container_width=True):
+            if st.form_submit_button("Entrar", use_container_width=True):
                 usuario_limpo = user_input.strip()
                 bloqueado, seg_rest = verificar_bloqueio(usuario_limpo)
                 if bloqueado:
