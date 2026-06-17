@@ -790,12 +790,13 @@ def resetar_banco_dados_completo(usuario=None):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
-        for tabela in ['cronograma_macro', 'itens_detalhado', 'solicitacoes_prazo', 'logistica_envios',
+        for tabela in ['componentes_op', 'cronograma_macro', 'itens_detalhado', 'solicitacoes_prazo', 'logistica_envios',
                        'medicao_historico', 'medicao_subdivisoes', 'medicao_servicos', 'medicao_obras']:
             cursor.execute(f"DELETE FROM {tabela}")
         conn.commit()
         _limpar_cache_geral()
         carregar_medicao_obras.clear()
+        carregar_componentes_op.clear()
         return True
     except Exception as e:
         conn.rollback()
