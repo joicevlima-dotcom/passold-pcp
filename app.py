@@ -215,6 +215,8 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Data_Despacho DATE")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Peso_Kg REAL DEFAULT 0.0")
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS em_parada BOOLEAN DEFAULT FALSE")
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS motivo_parada TEXT")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS usuarios (
                 id SERIAL PRIMARY KEY,
@@ -802,6 +804,24 @@ def resetar_banco_dados_completo(usuario=None):
     except Exception as e:
         conn.rollback()
         st.error(f"Erro no reset: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
+def salvar_parada_op(item_id, em_parada: bool, motivo: str, usuario: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE itens_detalhado SET em_parada=%s, motivo_parada=%s WHERE id=%s",
+            (em_parada, motivo if em_parada else None, item_id)
+        )
+        conn.commit()
+        carregar_micro.clear()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao registrar parada: {e}")
         return False
     finally:
         liberar_conexao(conn)
@@ -1686,7 +1706,11 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     st.caption(f"Periodo: {dt_i} a {dt_f} &nbsp;|&nbsp; {row['Romaneio_Chapas']}")
                                     op_txt = row['Num_OP'] if row.get('Num_OP') else "Aguardando OP"
                                     st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {row.get('Fase_Produtiva', '—')}")
-                                    if eh_parcial:
+                                    em_parada_op = bool(row.get('Em_Parada', False))
+                                    motivo_op    = row.get('Motivo_Parada') or ''
+                                    if em_parada_op:
+                                        st.markdown(f"<span style='color:#DC2626;font-size:12px;font-weight:700;'>⛔ EM PARADA — {motivo_op}</span>", unsafe_allow_html=True)
+                                    elif eh_parcial:
                                         st.markdown("<span style='color:#D97706;font-size:12px;font-weight:700;'>🟠 Envio parcial registrado — ainda há peças pendentes</span>", unsafe_allow_html=True)
                                     elif pode_concluir:
                                         st.markdown("<span style='color:#EA580C;font-size:12px;font-weight:600;'>Ultima semana — liberado para concluir</span>", unsafe_allow_html=True)
@@ -1694,12 +1718,22 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                         dias_restantes = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel).days
                                         st.markdown(f"<span style='color:#3B82F6;font-size:12px;'>Em producao — {dias_restantes} dias ate o prazo</span>", unsafe_allow_html=True)
                                 with ca:
+                                    if setor in ["Producao", "Master"]:
+                                        if em_parada_op:
+                                            if st.button("▶ Retomar", key=f"retomar_{row['id']}", use_container_width=True):
+                                                salvar_parada_op(row['id'], False, '', st.session_state.usuario_nome)
+                                                st.toast("OP retomada!")
+                                                st.rerun()
+                                        else:
+                                            if st.button("⏸ Parada", key=f"parada_{row['id']}", use_container_width=True):
+                                                st.session_state[f"modal_parada_{row['id']}"] = not st.session_state.get(f"modal_parada_{row['id']}", False)
+                                                st.rerun()
                                     if pode_concluir:
                                         st.write("")
                                         if st.button("✅ Pronto", key=f"baixa_{row['id']}", type="primary", use_container_width=True):
                                             st.session_state[f"modal_pronto_{row['id']}"] = not st.session_state.get(f"modal_pronto_{row['id']}", False)
                                             st.rerun()
-                                    else:
+                                    elif setor not in ["Producao", "Master"]:
                                         st.markdown("<div style='text-align:center;color:#94A3B8;font-size:12px;padding:8px;'>Em producao</div>", unsafe_allow_html=True)
 
                             # ── MODAL EM LARGURA TOTAL ─────────────────────────
@@ -1852,6 +1886,32 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                                 if st.button("Cancelar", key=f"cancel_parc2_{row['id']}", use_container_width=True):
                                                     st.session_state[f"modal_pronto_{row['id']}"] = False
                                                     st.rerun()
+
+                            # ── MODAL PARADA ───────────────────────────────────
+                            if st.session_state.get(f"modal_parada_{row['id']}", False):
+                                with st.container(border=True):
+                                    st.markdown(f"#### ⛔ Registrar Parada — `{row['Cod_Lote']}` | {row['Obra_Vinculada']}")
+                                    motivo_inp = st.text_input(
+                                        "Motivo da parada:",
+                                        placeholder="Ex: Falta de material, aguardando chapa...",
+                                        key=f"motivo_inp_{row['id']}"
+                                    )
+                                    pb1, pb2, _ = st.columns([2, 2, 4])
+                                    with pb1:
+                                        if st.button("⛔ Confirmar Parada", key=f"conf_parada_{row['id']}", type="primary", use_container_width=True):
+                                            if not motivo_inp.strip():
+                                                st.error("Digite o motivo da parada.")
+                                            else:
+                                                salvar_parada_op(row['id'], True, motivo_inp.strip(), st.session_state.usuario_nome)
+                                                st.session_state[f"modal_parada_{row['id']}"] = False
+                                                st.toast(f"⛔ Parada registrada em {row['Cod_Lote']}!")
+                                                time.sleep(0.5)
+                                                st.rerun()
+                                    with pb2:
+                                        if st.button("Cancelar", key=f"cancel_parada_{row['id']}", use_container_width=True):
+                                            st.session_state[f"modal_parada_{row['id']}"] = False
+                                            st.rerun()
+
                 else:
                     st.info("Nenhuma OP liberada para este filtro ainda.")
             else:
@@ -2139,7 +2199,11 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     st.caption(f"Periodo: {dt_i} a {dt_f} &nbsp;|&nbsp; {row['Romaneio_Chapas']}")
                                     op_txt = row['Num_OP'] if row.get('Num_OP') else "Aguardando OP"
                                     st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {row.get('Fase_Produtiva', '—')}")
-                                    if eh_parcial:
+                                    em_parada_esq = bool(row.get('Em_Parada', False))
+                                    motivo_esq    = row.get('Motivo_Parada') or ''
+                                    if em_parada_esq:
+                                        st.markdown(f"<span style='color:#DC2626;font-size:12px;font-weight:700;'>⛔ EM PARADA — {motivo_esq}</span>", unsafe_allow_html=True)
+                                    elif eh_parcial:
                                         st.markdown("<span style='color:#D97706;font-size:12px;font-weight:700;'>Envio parcial registrado — ainda há peças pendentes</span>", unsafe_allow_html=True)
                                     elif pode_concluir:
                                         st.markdown("<span style='color:#EA580C;font-size:12px;font-weight:600;'>Ultima semana — liberado para concluir</span>", unsafe_allow_html=True)
@@ -2147,12 +2211,22 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                         dias_rest = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel_esq).days
                                         st.markdown(f"<span style='color:#3B82F6;font-size:12px;'>Em producao — {dias_rest} dias ate o prazo</span>", unsafe_allow_html=True)
                                 with ca:
+                                    if setor in ["Producao", "Master"]:
+                                        if em_parada_esq:
+                                            if st.button("▶ Retomar", key=f"esq_retomar_{row['id']}", use_container_width=True):
+                                                salvar_parada_op(row['id'], False, '', st.session_state.usuario_nome)
+                                                st.toast("OP retomada!")
+                                                st.rerun()
+                                        else:
+                                            if st.button("⏸ Parada", key=f"esq_parada_{row['id']}", use_container_width=True):
+                                                st.session_state[f"esq_modal_parada_{row['id']}"] = not st.session_state.get(f"esq_modal_parada_{row['id']}", False)
+                                                st.rerun()
                                     if pode_concluir:
                                         st.write("")
                                         if st.button("✅ Pronto", key=f"esq_baixa_{row['id']}", type="primary", use_container_width=True):
                                             st.session_state[f"esq_modal_{row['id']}"] = not st.session_state.get(f"esq_modal_{row['id']}", False)
                                             st.rerun()
-                                    else:
+                                    elif setor not in ["Producao", "Master"]:
                                         st.markdown("<div style='text-align:center;color:#94A3B8;font-size:12px;padding:8px;'>Em producao</div>", unsafe_allow_html=True)
 
                             if st.session_state.get(f"esq_modal_{row['id']}", False):
@@ -2238,6 +2312,32 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                             with b2:
                                                 if st.button("Cancelar", key=f"esq_cancel_parc2_{row['id']}", use_container_width=True):
                                                     st.session_state[f"esq_modal_{row['id']}"] = False; st.rerun()
+
+                            # ── MODAL PARADA ESQUADRIAS ────────────────────────
+                            if st.session_state.get(f"esq_modal_parada_{row['id']}", False):
+                                with st.container(border=True):
+                                    st.markdown(f"#### ⛔ Registrar Parada — `{row['Cod_Lote']}` | {row['Obra_Vinculada']}")
+                                    motivo_esq_inp = st.text_input(
+                                        "Motivo da parada:",
+                                        placeholder="Ex: Falta de material, aguardando perfil...",
+                                        key=f"esq_motivo_inp_{row['id']}"
+                                    )
+                                    epb1, epb2, _ = st.columns([2, 2, 4])
+                                    with epb1:
+                                        if st.button("⛔ Confirmar Parada", key=f"esq_conf_parada_{row['id']}", type="primary", use_container_width=True):
+                                            if not motivo_esq_inp.strip():
+                                                st.error("Digite o motivo da parada.")
+                                            else:
+                                                salvar_parada_op(row['id'], True, motivo_esq_inp.strip(), st.session_state.usuario_nome)
+                                                st.session_state[f"esq_modal_parada_{row['id']}"] = False
+                                                st.toast(f"⛔ Parada registrada em {row['Cod_Lote']}!")
+                                                time.sleep(0.5)
+                                                st.rerun()
+                                    with epb2:
+                                        if st.button("Cancelar", key=f"esq_cancel_parada_{row['id']}", use_container_width=True):
+                                            st.session_state[f"esq_modal_parada_{row['id']}"] = False
+                                            st.rerun()
+
                 else:
                     st.info("Nenhum lote de Esquadrias/Vidro liberado para produção.")
             else:
@@ -4152,9 +4252,18 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
                 hoje_ts = pd.Timestamp.now().normalize()
                 cols_show = ['Obra_Vinculada','Num_OP','Tipo_Material','EDT_Vinculado',
-                             'Qtd_Caixas','M2_Item','Data_Producao_Programada','Data_Limite_Obra','Status_Item']
-                df_tabela = df_rel[cols_show].copy()
-                df_tabela.columns = ['Obra','OP','Material','EDT/Lote','Caixas','m²','Ini Prod.','Limite','Status']
+                             'Qtd_Caixas','M2_Item','Data_Producao_Programada','Data_Limite_Obra','Status_Item',
+                             'Em_Parada','Motivo_Parada']
+                cols_show_exist = [c for c in cols_show if c in df_rel.columns]
+                df_tabela = df_rel[cols_show_exist].copy()
+                col_names = ['Obra','OP','Material','EDT/Lote','Caixas','m²','Ini Prod.','Limite','Status']
+                if 'Em_Parada' in df_tabela.columns:
+                    df_tabela['Situacao'] = df_tabela.apply(
+                        lambda r: f"⛔ PARADA — {r.get('Motivo_Parada','')}" if r.get('Em_Parada') else '', axis=1
+                    )
+                    df_tabela = df_tabela.drop(columns=['Em_Parada','Motivo_Parada'], errors='ignore')
+                    col_names = col_names + ['Situacao']
+                df_tabela.columns = col_names
 
                 # % de representação sobre o total filtrado
                 total_m2_rel  = df_tabela['m²'].sum()
