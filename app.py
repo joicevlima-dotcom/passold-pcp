@@ -218,6 +218,17 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS em_parada BOOLEAN DEFAULT FALSE")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS motivo_parada TEXT")
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS arquivos_op (
+                id SERIAL PRIMARY KEY,
+                item_id INTEGER REFERENCES itens_detalhado(id) ON DELETE CASCADE,
+                nome_arquivo TEXT NOT NULL,
+                tipo_arquivo TEXT,
+                conteudo BYTEA NOT NULL,
+                enviado_por TEXT,
+                enviado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS usuarios (
                 id SERIAL PRIMARY KEY,
                 usuario TEXT UNIQUE,
@@ -792,7 +803,7 @@ def resetar_banco_dados_completo(usuario=None):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
-        for tabela in ['componentes_op', 'cronograma_macro', 'itens_detalhado', 'solicitacoes_prazo', 'logistica_envios',
+        for tabela in ['arquivos_op', 'componentes_op', 'cronograma_macro', 'itens_detalhado', 'solicitacoes_prazo', 'logistica_envios',
                        'medicao_historico', 'medicao_subdivisoes', 'medicao_servicos', 'medicao_obras']:
             cursor.execute(f"DELETE FROM {tabela}")
         conn.commit()
@@ -804,6 +815,64 @@ def resetar_banco_dados_completo(usuario=None):
     except Exception as e:
         conn.rollback()
         st.error(f"Erro no reset: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
+def salvar_arquivo_op(item_id: int, nome: str, tipo: str, conteudo: bytes, usuario: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO arquivos_op (item_id, nome_arquivo, tipo_arquivo, conteudo, enviado_por) VALUES (%s,%s,%s,%s,%s)",
+            (item_id, nome, tipo, conteudo, usuario)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar arquivo: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
+def carregar_arquivos_op(item_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, nome_arquivo, tipo_arquivo, enviado_por, enviado_em FROM arquivos_op WHERE item_id=%s ORDER BY enviado_em DESC",
+            (item_id,)
+        )
+        rows = cursor.fetchall()
+        return rows  # lista de (id, nome, tipo, enviado_por, enviado_em)
+    except Exception:
+        return []
+    finally:
+        liberar_conexao(conn)
+
+def carregar_conteudo_arquivo(arquivo_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT nome_arquivo, tipo_arquivo, conteudo FROM arquivos_op WHERE id=%s", (arquivo_id,))
+        row = cursor.fetchone()
+        return row  # (nome, tipo, bytes)
+    except Exception:
+        return None
+    finally:
+        liberar_conexao(conn)
+
+def deletar_arquivo_op(arquivo_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM arquivos_op WHERE id=%s", (arquivo_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao deletar arquivo: {e}")
         return False
     finally:
         liberar_conexao(conn)
@@ -1736,6 +1805,23 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     elif setor not in ["Producao", "Master"]:
                                         st.markdown("<div style='text-align:center;color:#94A3B8;font-size:12px;padding:8px;'>Em producao</div>", unsafe_allow_html=True)
 
+                            # ── ARQUIVOS DA OP ────────────────────────────────
+                            arqs_op = carregar_arquivos_op(int(row['id']))
+                            if arqs_op:
+                                with st.expander(f"📎 {len(arqs_op)} arquivo(s) anexado(s)", expanded=False):
+                                    for arq in arqs_op:
+                                        arq_id, arq_nome, arq_tipo, arq_enviado_por, _ = arq
+                                        ca1, ca2 = st.columns([5, 1])
+                                        ca1.markdown(f"📄 **{arq_nome}**  \n<small style='color:#94A3B8'>{arq_enviado_por}</small>", unsafe_allow_html=True)
+                                        conteudo_arq = carregar_conteudo_arquivo(arq_id)
+                                        if conteudo_arq:
+                                            _, _, bytes_arq = conteudo_arq
+                                            ca2.download_button(
+                                                "⬇️", data=bytes(bytes_arq),
+                                                file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
+                                                key=f"acm_dl_{arq_id}"
+                                            )
+
                             # ── MODAL EM LARGURA TOTAL ─────────────────────────
                             if st.session_state.get(f"modal_pronto_{row['id']}", False):
                                 with st.container(border=True):
@@ -1999,8 +2085,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         prazo_fmt = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y') if prazo_valido(row['Data_Limite_Obra']) else '—'
                         op_txt    = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
                         with cols_urg[i % 3]:
+                            arqs_tv_urg = carregar_arquivos_op(int(row['id']))
+                            clipe_badge = f"<div style='margin-top:8px;font-size:12px;color:#475569;'>📎 {len(arqs_tv_urg)} arquivo(s)</div>" if arqs_tv_urg else ""
                             st.markdown(f"""
-                            <div style='border:2px solid {cfg["border"]};background:{cfg["bg"]};border-radius:10px;padding:18px 20px;margin-bottom:12px;box-shadow:0 4px 12px rgba(0,0,0,0.10);'>
+                            <div style='border:2px solid {cfg["border"]};background:{cfg["bg"]};border-radius:10px;padding:18px 20px;margin-bottom:4px;box-shadow:0 4px 12px rgba(0,0,0,0.10);'>
                                 <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;'>
                                     <span style='font-size:11px;font-weight:700;color:{cfg["tag_color"]};border:1px solid {cfg["border"]};padding:2px 8px;border-radius:4px;'>{cfg["tag"]}</span>
                                     <span style='font-size:11px;color:#64748B;font-weight:600;'>{dias_txt}</span>
@@ -2013,15 +2101,28 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;'>Status</div><div style='font-size:13px;font-weight:700;color:{ec};'>{em} {row["Status_Item"]}</div></div>
                                     <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;'>Prazo</div><div style='font-size:15px;font-weight:700;color:{cfg["tag_color"]};'>{prazo_fmt}</div></div>
                                 </div>
+                                {clipe_badge}
                             </div>
                             """, unsafe_allow_html=True)
+                            if arqs_tv_urg:
+                                with st.expander("📂 Ver arquivos", expanded=False):
+                                    for arq in arqs_tv_urg:
+                                        arq_id, arq_nome, arq_tipo, _, _ = arq
+                                        conteudo_arq = carregar_conteudo_arquivo(arq_id)
+                                        if conteudo_arq:
+                                            _, _, bytes_arq = conteudo_arq
+                                            st.download_button(
+                                                f"⬇️ {arq_nome}", data=bytes(bytes_arq),
+                                                file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
+                                                key=f"tv_urg_dl_{arq_id}"
+                                            )
 
                 if not demais.empty:
                     st.markdown("---")
                     st.markdown("<span style='font-size:15px;font-weight:700;color:#334155;'>📋 Demais lotes em andamento</span>", unsafe_allow_html=True)
                     st.markdown("<br>", unsafe_allow_html=True)
-                    hc = st.columns([2, 3, 2, 2, 2])
-                    for col_h, label in zip(hc, ["OP", "OBRA / MATERIAL", "M²", "STATUS", "PRAZO"]):
+                    hc = st.columns([2, 3, 2, 2, 2, 1])
+                    for col_h, label in zip(hc, ["OP", "OBRA / MATERIAL", "M²", "STATUS", "PRAZO", ""]):
                         col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
                     st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
                     for _, row in demais.iterrows():
@@ -2032,13 +2133,30 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         dias      = row['_dias_restantes']
                         dias_txt  = f"+{dias}d" if dias < 9999 else "—"
                         op_txt    = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
-                        rc = st.columns([2, 3, 2, 2, 2])
+                        arqs_tv   = carregar_arquivos_op(int(row['id']))
+                        rc = st.columns([2, 3, 2, 2, 2, 1])
                         rc[0].markdown(f"<span style='font-size:13px;font-weight:600;color:#1E293B;'>{op_txt}</span>", unsafe_allow_html=True)
                         rc[1].markdown(f"<span style='font-size:13px;font-weight:700;color:#0F172A;'>{row['Obra_Vinculada']}</span><br><span style='font-size:11px;color:#64748B;'>{row['Tipo_Material']}</span>", unsafe_allow_html=True)
                         rc[2].markdown(f"<span style='font-size:14px;font-weight:700;color:#1E293B;'>{row['M2_Item']:.2f}</span>", unsafe_allow_html=True)
                         rc[3].markdown(f"<span style='background:{ebg};color:{ec};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{em} {row['Status_Item']}</span>", unsafe_allow_html=True)
                         rc[4].markdown(f"<span style='font-size:13px;font-weight:700;color:{cfg['tag_color']};'>{prazo_fmt}</span><br><span style='font-size:11px;color:#94A3B8;'>{dias_txt}</span>", unsafe_allow_html=True)
+                        if arqs_tv:
+                            if rc[5].button(f"📎 {len(arqs_tv)}", key=f"tv_arq_btn_{row['id']}"):
+                                st.session_state[f"tv_arq_open_{row['id']}"] = not st.session_state.get(f"tv_arq_open_{row['id']}", False)
                         st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
+                        if arqs_tv and st.session_state.get(f"tv_arq_open_{row['id']}", False):
+                            with st.container(border=True):
+                                st.markdown(f"**📂 Arquivos — {op_txt}**")
+                                for arq in arqs_tv:
+                                    arq_id, arq_nome, arq_tipo, arq_enviado_por, _ = arq
+                                    conteudo_arq = carregar_conteudo_arquivo(arq_id)
+                                    if conteudo_arq:
+                                        _, _, bytes_arq = conteudo_arq
+                                        st.download_button(
+                                            f"⬇️ {arq_nome}", data=bytes(bytes_arq),
+                                            file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
+                                            key=f"tv_dl_{arq_id}"
+                                        )
 
             progress_val = (30 - segundos_restantes) / 30
             st.markdown("<br>", unsafe_allow_html=True)
@@ -2702,6 +2820,57 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     st.toast(f"{len(pecas_list)} peça(s) salvas!")
                                     time.sleep(0.3)
                                     st.rerun()
+
+                        # ── SEÇÃO: ARQUIVOS DA OP ─────────────────────────────
+                        st.markdown("---")
+                        arqs_existentes = carregar_arquivos_op(lote_id)
+                        label_arq = f"📎 Arquivos da OP ({len(arqs_existentes)})" if arqs_existentes else "📎 Arquivos da OP"
+                        with st.expander(label_arq, expanded=False):
+                            if setor in ["Master", "PCP", "Engenharia", "Producao"]:
+                                uploaded = st.file_uploader(
+                                    "Anexar arquivo (PDF, Excel, imagem):",
+                                    type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg"],
+                                    key=f"upload_arq_{lote_id}"
+                                )
+                                if uploaded is not None:
+                                    if st.button("💾 Salvar arquivo", key=f"btn_salvar_arq_{lote_id}", type="primary"):
+                                        ok = salvar_arquivo_op(
+                                            lote_id,
+                                            uploaded.name,
+                                            uploaded.type or "",
+                                            uploaded.read(),
+                                            st.session_state.usuario_nome
+                                        )
+                                        if ok:
+                                            st.toast(f"✅ {uploaded.name} salvo!")
+                                            time.sleep(0.3)
+                                            st.rerun()
+
+                            if arqs_existentes:
+                                st.markdown("**Arquivos anexados:**")
+                                for arq in arqs_existentes:
+                                    arq_id, arq_nome, arq_tipo, arq_enviado_por, arq_enviado_em = arq
+                                    col_a, col_b, col_c = st.columns([4, 2, 1])
+                                    col_a.markdown(f"📄 **{arq_nome}**")
+                                    col_b.caption(f"{arq_enviado_por} — {pd.to_datetime(arq_enviado_em).strftime('%d/%m/%Y %H:%M')}")
+                                    with col_c:
+                                        conteudo_arq = carregar_conteudo_arquivo(arq_id)
+                                        if conteudo_arq:
+                                            _, _, bytes_arq = conteudo_arq
+                                            st.download_button(
+                                                "⬇️", data=bytes(bytes_arq),
+                                                file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
+                                                key=f"dl_arq_{arq_id}"
+                                            )
+                                    if setor in ["Master", "PCP"]:
+                                        if st.button("🗑️ Remover", key=f"del_arq_{arq_id}"):
+                                            deletar_arquivo_op(arq_id)
+                                            st.toast("Arquivo removido.")
+                                            time.sleep(0.3)
+                                            st.rerun()
+                            else:
+                                st.caption("Nenhum arquivo anexado ainda.")
+
                     else:
                         st.info("Nenhuma OP com número gerado ainda. Libere os lotes primeiro.")
                 else:
