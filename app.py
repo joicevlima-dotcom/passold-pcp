@@ -797,6 +797,7 @@ def resetar_banco_dados_completo(usuario=None):
         _limpar_cache_geral()
         carregar_medicao_obras.clear()
         carregar_componentes_op.clear()
+        carregar_todas_ops_com_componentes.clear()
         return True
     except Exception as e:
         conn.rollback()
