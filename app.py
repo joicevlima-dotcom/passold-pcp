@@ -786,7 +786,7 @@ def verificar_login(usuario, senha):
     finally:
         liberar_conexao(conn)
 
-def resetar_banco_dados_completo():
+def resetar_banco_dados_completo(usuario=None):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
@@ -796,9 +796,11 @@ def resetar_banco_dados_completo():
         conn.commit()
         _limpar_cache_geral()
         carregar_medicao_obras.clear()
+        return True
     except Exception as e:
         conn.rollback()
         st.error(f"Erro no reset: {e}")
+        return False
     finally:
         liberar_conexao(conn)
 
