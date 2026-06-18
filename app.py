@@ -349,6 +349,7 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN IF NOT EXISTS m2_executado REAL DEFAULT 0")
         cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN IF NOT EXISTS Numero_Projeto TEXT DEFAULT ''")
         cursor.execute("ALTER TABLE op_pecas ADD COLUMN IF NOT EXISTS m2_op_real REAL DEFAULT 0")
+        cursor.execute("ALTER TABLE op_pecas ADD COLUMN IF NOT EXISTS descricao TEXT DEFAULT ''")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_lote ON op_pecas(lote_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_obra ON op_pecas(obra)")
 
@@ -895,6 +896,62 @@ def salvar_parada_op(item_id, em_parada: bool, motivo: str, usuario: str):
     finally:
         liberar_conexao(conn)
 
+def _parse_qtd_unidade(parte: str):
+    """Extrai quantidade e unidade de strings como '1pç', '2 pç', '3un'."""
+    import re
+    parte = parte.strip()
+    m = re.match(r'^(\d+(?:[.,]\d+)?)\s*([a-zA-Zç²]+)', parte)
+    if m:
+        qtd_str = m.group(1).replace(',', '.')
+        und = m.group(2).lower().strip()
+        return float(qtd_str), und
+    return 1.0, "pç"
+
+def parse_romaneio(texto: str) -> list:
+    """Converte texto de romaneio colado em lista de peças para op_pecas.
+
+    Formato esperado por linha:
+      REF - COD_PERFIL - DESCRIÇÃO - MEDIDA - ÂNGULOS - QTD
+    ou variações com menos campos (mínimo 3 partes separadas por ' - ').
+
+    Retorna lista de dicts com: codigo, descricao, medida, localizacao, qtd.
+    """
+    pecas = []
+    for linha in texto.splitlines():
+        linha = linha.strip()
+        if not linha:
+            continue
+        partes = [p.strip() for p in linha.split(" - ")]
+        if len(partes) < 3:
+            continue
+        qtd_raw = partes[-1]
+        qtd, _ = _parse_qtd_unidade(qtd_raw)
+        codigo = partes[0]
+        if len(partes) >= 6:
+            # REF - COD - DESC - MEDIDA - ANGULOS - QTD
+            descricao = f"{partes[1]} - {partes[2]}"
+            medida    = f"{partes[3]} {partes[4]}"
+        elif len(partes) == 5:
+            # REF - COD - DESC - MEDIDA - QTD
+            descricao = f"{partes[1]} - {partes[2]}"
+            medida    = partes[3]
+        elif len(partes) == 4:
+            # REF - DESC - MEDIDA - QTD
+            descricao = partes[1]
+            medida    = partes[2]
+        else:
+            # REF - DESC - QTD
+            descricao = partes[1]
+            medida    = ""
+        pecas.append({
+            "codigo":     codigo,
+            "descricao":  descricao,
+            "medida":     medida,
+            "localizacao": "",
+            "qtd":        int(qtd),
+        })
+    return pecas
+
 def salvar_componentes(item_id, obra, cod_lote, num_op, componentes: list):
     conn = conectar_banco()
     try:
@@ -997,12 +1054,13 @@ def salvar_pecas_lote(lote_id: int, obra: str, cod_lote: str, num_op: str,
             qtd = int(p.get('qtd', 0))
             cursor.execute("""
                 INSERT INTO op_pecas
-                (lote_id, obra, cod_lote, num_op, codigo, localizacao, medida,
+                (lote_id, obra, cod_lote, num_op, codigo, descricao, localizacao, medida,
                  qtd_total, qtd_enviada, saldo, m2_op_real, componentes_status)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s,%s)
             """, (
                 lote_id, obra, cod_lote, num_op,
                 p.get('codigo', '').strip().upper(),
+                p.get('descricao', '').strip(),
                 p.get('localizacao', '').strip().upper(),
                 p.get('medida', '').strip().upper(),
                 qtd, qtd, float(m2_op_real), componentes_status
@@ -2710,8 +2768,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 st.caption(f"Status comp.: **{df_pecas_existentes.iloc[0].get('componentes_status','—')}**")
 
                             with st.expander("📋 Ver peças lançadas", expanded=False):
+                                cols_peca = [c for c in ['codigo', 'descricao', 'localizacao', 'medida', 'qtd_total', 'qtd_enviada', 'saldo']
+                                             if c in df_pecas_existentes.columns]
                                 st.dataframe(
-                                    df_pecas_existentes[['codigo', 'localizacao', 'medida', 'qtd_total', 'qtd_enviada', 'saldo']],
+                                    df_pecas_existentes[cols_peca],
                                     hide_index=True, use_container_width=True
                                 )
 
@@ -2776,50 +2836,90 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                         m2_total2  = float(fr2.iloc[0].get('M2_Total_Tarefa', 0) or 0)
                                         saldo_apos = m2_total2 - m2_exec2 - m2_op_real
                                         st.metric("Saldo após este lançamento", f"{saldo_apos:.2f} m²")
-                            p1, p2, p3, p4 = st.columns(4)
-                            with p1:
-                                codigos_txt = st.text_area("Códigos:", height=180, key="pecas_codigos",
-                                                            placeholder="B24-01C\nB25-01C\nRF.JA.11/CNT")
-                            with p2:
-                                qtds_txt = st.text_area("Quantidades:", height=180, key="pecas_qtds",
-                                                         placeholder="3\n3\n1")
-                            with p3:
-                                locs_txt = st.text_area("Localização:", height=180, key="pecas_locs",
-                                                         placeholder="Pav 27-37\nPav 27-37\n(opcional)")
-                            with p4:
-                                medidas_txt = st.text_area("Medidas:", height=180, key="pecas_medidas",
-                                                            placeholder="550x390\n550x400\n(opcional)")
-                            comp_status = st.radio(
-                                "Status dos componentes:",
-                                ["Aguardando Projetista", "Componentes OK"],
-                                horizontal=True, key="comp_status_radio"
-                            )
-                            if st.button("💾 Salvar Peças", key="btn_salvar_pecas", type="primary"):
-                                codigos = [l.strip() for l in codigos_txt.strip().split('\n') if l.strip()]
-                                qtds    = [l.strip() for l in qtds_txt.strip().split('\n') if l.strip()]
-                                locs    = [l.strip() for l in locs_txt.strip().split('\n')] if locs_txt.strip() else []
-                                medidas = [l.strip() for l in medidas_txt.strip().split('\n')] if medidas_txt.strip() else []
-                                if not codigos:
-                                    st.error("Informe pelo menos um código.")
-                                else:
-                                    pecas_list = []
-                                    for i, cod in enumerate(codigos):
-                                        pecas_list.append({
-                                            "codigo":      cod,
-                                            "qtd":         int(qtds[i]) if i < len(qtds) and qtds[i].isdigit() else 1,
-                                            "localizacao": locs[i] if i < len(locs) else "",
-                                            "medida":      medidas[i] if i < len(medidas) else "",
-                                        })
+
+                            tab_rom, tab_manual = st.tabs(["📋 Colar Romaneio", "✏️ Manual"])
+
+                            with tab_rom:
+                                st.caption("Cole o romaneio — uma peça por linha: `REF - COD - Descrição - Medida - Ângulos - Qtd`")
+                                txt_rom = st.text_area(
+                                    "Romaneio:",
+                                    height=220,
+                                    placeholder="JA19.AP402 - CT016 - Cantoneira 25x25 Preto Fosco - 3120mm - 90/90 - 1pç\nJA22 - MM035 - Luva da Coluna Central - 4450mm - 90/90 - 2pç",
+                                    key="sec2_romaneio_txt"
+                                )
+                                pecas_rom = parse_romaneio(txt_rom) if txt_rom.strip() else []
+                                if pecas_rom:
+                                    st.success(f"**{len(pecas_rom)} peça(s) reconhecida(s):**")
+                                    st.dataframe(
+                                        pd.DataFrame(pecas_rom).rename(columns={
+                                            "codigo": "Código", "descricao": "Descrição",
+                                            "medida": "Medida", "localizacao": "Localização", "qtd": "Qtd"
+                                        }),
+                                        use_container_width=True, hide_index=True
+                                    )
+                                comp_status_rom = st.radio(
+                                    "Status dos componentes:",
+                                    ["Aguardando Projetista", "Componentes OK"],
+                                    horizontal=True, key="comp_status_rom"
+                                )
+                                if st.button("💾 Salvar Romaneio", key="btn_salvar_rom", type="primary", disabled=not pecas_rom):
                                     salvar_pecas_lote(
                                         lote_id, row_lote['Obra_Vinculada'],
                                         row_lote['Cod_Lote'], row_lote['Num_OP'],
-                                        pecas_list, comp_status, m2_op_real
+                                        pecas_rom, comp_status_rom, m2_op_real
                                     )
                                     registrar_auditoria(st.session_state.usuario_nome, "LANCAMENTO_PECAS",
-                                        f"OP {row_lote['Num_OP']} — {len(pecas_list)} peça(s) — Obra: {obra_selecionada}")
-                                    st.toast(f"{len(pecas_list)} peça(s) salvas!")
+                                        f"OP {row_lote['Num_OP']} — {len(pecas_rom)} peça(s) via romaneio — Obra: {obra_selecionada}")
+                                    st.toast(f"{len(pecas_rom)} peça(s) salvas!")
                                     time.sleep(0.3)
                                     st.rerun()
+
+                            with tab_manual:
+                                p1, p2, p3, p4 = st.columns(4)
+                                with p1:
+                                    codigos_txt = st.text_area("Códigos:", height=180, key="pecas_codigos",
+                                                                placeholder="B24-01C\nB25-01C\nRF.JA.11/CNT")
+                                with p2:
+                                    qtds_txt = st.text_area("Quantidades:", height=180, key="pecas_qtds",
+                                                             placeholder="3\n3\n1")
+                                with p3:
+                                    locs_txt = st.text_area("Localização:", height=180, key="pecas_locs",
+                                                             placeholder="Pav 27-37\nPav 27-37\n(opcional)")
+                                with p4:
+                                    medidas_txt = st.text_area("Medidas:", height=180, key="pecas_medidas",
+                                                                placeholder="550x390\n550x400\n(opcional)")
+                                comp_status = st.radio(
+                                    "Status dos componentes:",
+                                    ["Aguardando Projetista", "Componentes OK"],
+                                    horizontal=True, key="comp_status_radio"
+                                )
+                                if st.button("💾 Salvar Peças", key="btn_salvar_pecas", type="primary"):
+                                    codigos = [l.strip() for l in codigos_txt.strip().split('\n') if l.strip()]
+                                    qtds    = [l.strip() for l in qtds_txt.strip().split('\n') if l.strip()]
+                                    locs    = [l.strip() for l in locs_txt.strip().split('\n')] if locs_txt.strip() else []
+                                    medidas = [l.strip() for l in medidas_txt.strip().split('\n')] if medidas_txt.strip() else []
+                                    if not codigos:
+                                        st.error("Informe pelo menos um código.")
+                                    else:
+                                        pecas_list = []
+                                        for i, cod in enumerate(codigos):
+                                            pecas_list.append({
+                                                "codigo":      cod,
+                                                "descricao":   "",
+                                                "qtd":         int(qtds[i]) if i < len(qtds) and qtds[i].isdigit() else 1,
+                                                "localizacao": locs[i] if i < len(locs) else "",
+                                                "medida":      medidas[i] if i < len(medidas) else "",
+                                            })
+                                        salvar_pecas_lote(
+                                            lote_id, row_lote['Obra_Vinculada'],
+                                            row_lote['Cod_Lote'], row_lote['Num_OP'],
+                                            pecas_list, comp_status, m2_op_real
+                                        )
+                                        registrar_auditoria(st.session_state.usuario_nome, "LANCAMENTO_PECAS",
+                                            f"OP {row_lote['Num_OP']} — {len(pecas_list)} peça(s) — Obra: {obra_selecionada}")
+                                        st.toast(f"{len(pecas_list)} peça(s) salvas!")
+                                        time.sleep(0.3)
+                                        st.rerun()
 
                         # ── SEÇÃO: ARQUIVOS DA OP ─────────────────────────────
                         st.markdown("---")
@@ -3064,26 +3164,48 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             expanded=comp_existentes.empty
                         ):
                             st.caption("⚠️ Salvar substitui a lista anterior desta OP.")
-                            num_itens = st.number_input("Quantos componentes?", min_value=1, max_value=30, value=3, key="num_comp")
-                            componentes_input = []
-                            for idx in range(int(num_itens)):
-                                c1, c2, c3 = st.columns([4, 2, 2])
-                                with c1:
-                                    nome = st.text_input(f"Componente {idx+1}:", key=f"comp_nome_{idx}")
-                                with c2:
-                                    qtd  = st.number_input(f"Qtd {idx+1}:", min_value=0.0, value=1.0, key=f"comp_qtd_{idx}")
-                                with c3:
-                                    und  = st.selectbox(f"Un {idx+1}:", ["un", "kg", "m", "m²", "cx", "pç", "rolo"], key=f"comp_und_{idx}")
-                                if nome.strip():
-                                    componentes_input.append({"nome": nome.strip(), "qtd": qtd, "unidade": und})
-                            if st.button("💾 Salvar lista de componentes", key="btn_salvar_comp"):
-                                if not componentes_input:
-                                    st.error("Preencha pelo menos um componente.")
-                                else:
-                                    salvar_componentes(int(row_op['id']), row_op['Obra_Vinculada'], row_op['Cod_Lote'], row_op['Num_OP'], componentes_input)
-                                    st.toast(f"Lista salva para {row_op['Num_OP']}!")
+                            aba_manual, aba_romaneio = st.tabs(["✏️ Manual", "📋 Colar Romaneio"])
+
+                            with aba_romaneio:
+                                st.caption("Cole o romaneio completo abaixo — uma peça por linha no formato: `Ref - Cód - Descrição - Medida - Ângulos - Qtd`")
+                                texto_romaneio = st.text_area(
+                                    "Romaneio:",
+                                    height=250,
+                                    placeholder="JA19.AP402 - CT016 - Cantoneira 25x25 Preto Fosco - 3120mm - 90/90 - 1pç\nJA22 - MM035 - Luva da Coluna Central - 4450mm - 90/90 - 2pç",
+                                    key="txt_romaneio_paste"
+                                )
+                                parsed = parse_romaneio(texto_romaneio) if texto_romaneio.strip() else []
+                                if parsed:
+                                    st.success(f"**{len(parsed)} linha(s) reconhecida(s):**")
+                                    df_prev_romaneio = pd.DataFrame(parsed).rename(columns={"nome": "Componente", "qtd": "Qtd", "unidade": "Un"})
+                                    st.dataframe(df_prev_romaneio, use_container_width=True, hide_index=True)
+                                if st.button("💾 Salvar romaneio", key="btn_salvar_romaneio", disabled=not parsed):
+                                    salvar_componentes(int(row_op['id']), row_op['Obra_Vinculada'], row_op['Cod_Lote'], row_op['Num_OP'], parsed)
+                                    st.toast(f"Romaneio salvo para {row_op['Num_OP']} ({len(parsed)} itens)!")
                                     time.sleep(0.3)
                                     st.rerun()
+
+                            with aba_manual:
+                                num_itens = st.number_input("Quantos componentes?", min_value=1, max_value=30, value=3, key="num_comp")
+                                componentes_input = []
+                                for idx in range(int(num_itens)):
+                                    c1, c2, c3 = st.columns([4, 2, 2])
+                                    with c1:
+                                        nome = st.text_input(f"Componente {idx+1}:", key=f"comp_nome_{idx}")
+                                    with c2:
+                                        qtd  = st.number_input(f"Qtd {idx+1}:", min_value=0.0, value=1.0, key=f"comp_qtd_{idx}")
+                                    with c3:
+                                        und  = st.selectbox(f"Un {idx+1}:", ["un", "kg", "m", "m²", "cx", "pç", "rolo"], key=f"comp_und_{idx}")
+                                    if nome.strip():
+                                        componentes_input.append({"nome": nome.strip(), "qtd": qtd, "unidade": und})
+                                if st.button("💾 Salvar lista de componentes", key="btn_salvar_comp"):
+                                    if not componentes_input:
+                                        st.error("Preencha pelo menos um componente.")
+                                    else:
+                                        salvar_componentes(int(row_op['id']), row_op['Obra_Vinculada'], row_op['Cod_Lote'], row_op['Num_OP'], componentes_input)
+                                        st.toast(f"Lista salva para {row_op['Num_OP']}!")
+                                        time.sleep(0.3)
+                                        st.rerun()
                 else:
                     st.info("Nenhuma OP com número gerado ainda.")
             else:
