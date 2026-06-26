@@ -3788,8 +3788,9 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     frente      = st.text_input("Frente Macro:", value=st.session_state.mem_frente)
                     tarefa      = st.text_input("Nome da Tarefa:", value=st.session_state.mem_tarefa)
                 with co2:
-                    edt_cod = st.text_input("Codigo EDT (unico):")
+                    edt_cod = st.text_input("Codigo EDT (base, sem a subdivisao):")
                     subdiv  = st.text_input("Subdivisao / Balancim:").upper()
+                    st.caption("O EDT salvo será o código base + a subdivisão, garantindo que cada subdivisão tenha um identificador único mesmo dentro da mesma etapa.")
                     m2_tot  = st.number_input("Metragem (m²):", min_value=0.1, value=100.0)
                 cd1, cd2 = st.columns(2)
                 with cd1:
@@ -3805,6 +3806,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         st.session_state.mem_tarefa = tarefa
                         st.session_state.mem_dt_ini = dt_ini
                         st.session_state.mem_dt_fim = dt_fim
+                        edt_final = f"{edt_cod.strip()} [{subdiv.strip()}]"
                         conn = conectar_banco()
                         try:
                             cursor = conn.cursor()
@@ -3814,19 +3816,19 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                  M2_Total_Tarefa, Inicio_Previsto, Termino_Obra, Status,
                                  Status_Engenharia, Numero_Projeto)
                                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente','Aguardando Medicao In Loco',%s)
-                            """, (nome_obra, edt_cod, escopo, frente, subdiv, tarefa,
+                            """, (nome_obra, edt_final, escopo, frente, subdiv, tarefa,
                                   float(m2_tot), dt_ini.strftime('%Y-%m-%d'),
                                   dt_fim.strftime('%Y-%m-%d'), num_projeto.strip()))
                             conn.commit()
                             _limpar_cache_geral()
                             registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_OBRA",
-                                f"Obra: {nome_obra} | EDT: {edt_cod} | {m2_tot}m²")
+                                f"Obra: {nome_obra} | EDT: {edt_final} | {m2_tot}m²")
                             st.toast("Frente registrada!")
                             time.sleep(0.4)
                             st.rerun()
                         except Exception as e:
                             conn.rollback()
-                            st.error(f"EDT '{edt_cod}' ja existe ou erro: {e}")
+                            st.error(f"EDT '{edt_final}' ja existe ou erro: {e}")
                         finally:
                             liberar_conexao(conn)
 
