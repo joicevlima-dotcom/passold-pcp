@@ -2822,54 +2822,39 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         else:
                             st.caption("Nenhum arquivo anexado.")
 
-                        if setor in ["Master", "PCP"]:
-                            st.markdown("**Vincular ao fluxo de produção:**")
-                            edts_disp_v = sorted(
-                                df_banco_macro[df_banco_macro['Obra'] == sol['obra']]['EDT'].dropna().unique().tolist()
-                            ) if not df_banco_macro.empty else []
-                            col_v1, col_v2, col_v3 = st.columns(3)
-                            with col_v1:
-                                if edts_disp_v:
-                                    v_edt = st.selectbox("EDT:", edts_disp_v, key=f"v_edt_{sol_id}")
-                                else:
-                                    v_edt = st.text_input("EDT:", key=f"v_edt_{sol_id}")
-                            with col_v2:
-                                v_lote = st.text_input("Cod. Lote:", key=f"v_lote_{sol_id}")
-                            with col_v3:
-                                v_data = st.date_input("Data Produção Programada:", key=f"v_data_{sol_id}")
-
-                            if st.button("✅ Confirmar e enviar ao fluxo de lotes", key=f"btn_confirmar_sol_{sol_id}", type="primary"):
-                                if not v_lote.strip():
-                                    st.error("Informe o Código do Lote.")
-                                else:
-                                    conn_v = conectar_banco()
-                                    novo_item_id = None
-                                    try:
-                                        cursor_v = conn_v.cursor()
-                                        cursor_v.execute(
-                                            """INSERT INTO itens_detalhado
-                                               (Obra_Vinculada, EDT_Vinculado, Cod_Lote, Tipo_Material, Qtd_Caixas,
-                                                Data_Producao_Programada, Status_Item)
-                                               VALUES (%s,%s,%s,%s,%s,%s,'Pendente') RETURNING id""",
-                                            (sol['obra'], v_edt, v_lote.strip(), sol['tipo_material'],
-                                             int(sol['quantidade']), v_data)
-                                        )
-                                        novo_item_id = cursor_v.fetchone()[0]
-                                        conn_v.commit()
-                                    except Exception as e:
-                                        conn_v.rollback()
-                                        st.error(f"Erro ao criar lote: {e}")
-                                    finally:
-                                        liberar_conexao(conn_v)
-                                    if novo_item_id:
-                                        confirmar_vinculacao_solicitacao(sol_id, novo_item_id, st.session_state.usuario_nome)
-                                        registrar_auditoria(st.session_state.usuario_nome, "VINCULAR_SOLICITACAO_OP",
-                                            f"Solicitação #{sol_id} vinculada ao lote {novo_item_id} — Obra: {sol['obra']}")
-                                        _limpar_cache_geral()
-                                        carregar_solicitacoes_op.clear()
-                                        st.toast("Solicitação vinculada ao fluxo de produção!")
-                                        time.sleep(0.4)
-                                        st.rerun()
+                        if setor == "Master":
+                            st.caption("Ao aceitar, esta solicitação entra direto na lista de Lotes Pendentes (Seção 1) — o EDT e o Cód. do Lote podem ser ajustados ali mesmo.")
+                            if st.button("✅ Aceitar e enviar para Lotes Pendentes", key=f"btn_confirmar_sol_{sol_id}", type="primary"):
+                                conn_v = conectar_banco()
+                                novo_item_id = None
+                                try:
+                                    cursor_v = conn_v.cursor()
+                                    cursor_v.execute(
+                                        """INSERT INTO itens_detalhado
+                                           (Obra_Vinculada, EDT_Vinculado, Cod_Lote, Tipo_Material, Qtd_Caixas,
+                                            Data_Producao_Programada, Status_Item)
+                                           VALUES (%s,%s,%s,%s,%s,%s,'Pendente') RETURNING id""",
+                                        (sol['obra'], '', f"SOL-{sol_id:04d}", sol['tipo_material'],
+                                         int(sol['quantidade']), datetime.now().date())
+                                    )
+                                    novo_item_id = cursor_v.fetchone()[0]
+                                    conn_v.commit()
+                                except Exception as e:
+                                    conn_v.rollback()
+                                    st.error(f"Erro ao criar lote: {e}")
+                                finally:
+                                    liberar_conexao(conn_v)
+                                if novo_item_id:
+                                    confirmar_vinculacao_solicitacao(sol_id, novo_item_id, st.session_state.usuario_nome)
+                                    registrar_auditoria(st.session_state.usuario_nome, "VINCULAR_SOLICITACAO_OP",
+                                        f"Solicitação #{sol_id} vinculada ao lote {novo_item_id} — Obra: {sol['obra']}")
+                                    _limpar_cache_geral()
+                                    carregar_solicitacoes_op.clear()
+                                    st.toast("Solicitação enviada para Lotes Pendentes!")
+                                    time.sleep(0.4)
+                                    st.rerun()
+                        else:
+                            st.caption("⏳ Aguardando o Master aceitar esta solicitação.")
 
             st.markdown("---")
 
@@ -2924,7 +2909,36 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                              'Data_Producao_Programada', 'Romaneio_Chapas', 'Selecionar']
                                  if c in df_pend.columns]
                     df_ed = st.data_editor(df_pend[cols_exib], hide_index=True, use_container_width=True,
-                                           disabled=[c for c in cols_exib if c != 'Selecionar'])
+                                           disabled=[c for c in cols_exib if c not in ('Selecionar', 'EDT_Vinculado', 'Cod_Lote')],
+                                           key="editor_lotes_pendentes")
+
+                    if st.button("💾 Salvar EDT/Lote editados"):
+                        alterados = 0
+                        conn_upd = conectar_banco()
+                        try:
+                            cursor_upd = conn_upd.cursor()
+                            for _, row_ed in df_ed.iterrows():
+                                row_orig = df_pend.loc[df_pend['id'] == row_ed['id']].iloc[0]
+                                if row_ed['EDT_Vinculado'] != row_orig['EDT_Vinculado'] or row_ed['Cod_Lote'] != row_orig['Cod_Lote']:
+                                    cursor_upd.execute(
+                                        "UPDATE itens_detalhado SET EDT_Vinculado=%s, Cod_Lote=%s WHERE id=%s",
+                                        (row_ed['EDT_Vinculado'], row_ed['Cod_Lote'], int(row_ed['id']))
+                                    )
+                                    alterados += 1
+                            conn_upd.commit()
+                        except Exception as e:
+                            conn_upd.rollback()
+                            st.error(f"Erro ao salvar: {e}")
+                        finally:
+                            liberar_conexao(conn_upd)
+                        if alterados:
+                            _limpar_cache_geral()
+                            st.toast(f"{alterados} lote(s) atualizado(s)!")
+                            time.sleep(0.3)
+                            st.rerun()
+                        else:
+                            st.info("Nenhuma alteração detectada.")
+
                     ids_sel = df_ed[df_ed['Selecionar'] == True]['id'].tolist()
                     prefixo = st.text_input("Prefixo da OP:", value=f"OP-{datetime.now().strftime('%Y')}-")
                     if st.button("Liberar para producao"):
