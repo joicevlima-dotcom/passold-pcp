@@ -530,6 +530,31 @@ def carregar_micro():
     }
     return df.rename(columns=rename)
 
+@st.cache_data(ttl=60)
+def carregar_micro_completo():
+    """Histórico completo (sem corte de 90 dias) — usado no Relatório Geral."""
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            "SELECT * FROM itens_detalhado ORDER BY Data_Producao_Programada ASC", conn
+        )
+    finally:
+        liberar_conexao(conn)
+    for col in ['data_producao_programada', 'data_limite_obra', 'data_despacho']:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+    df.columns = [c.replace('_', ' ').title().replace(' ', '_') if c != 'id' else c for c in df.columns]
+    rename = {
+        'Data_Producao_Programada': 'Data_Producao_Programada', 'Data_Limite_Obra': 'Data_Limite_Obra',
+        'Data_Despacho': 'Data_Despacho', 'Edt_Vinculado': 'EDT_Vinculado',
+        'Obra_Vinculada': 'Obra_Vinculada', 'Cod_Lote': 'Cod_Lote', 'Num_Op': 'Num_OP',
+        'Tipo_Material': 'Tipo_Material', 'Qtd_Caixas': 'Qtd_Caixas', 'M2_Item': 'M2_Item',
+        'Romaneio_Chapas': 'Romaneio_Chapas', 'Status_Item': 'Status_Item',
+        'Fase_Produtiva': 'Fase_Produtiva', 'Enviado_Logistica': 'Enviado_Logistica',
+        'Updated_At': 'Updated_At', 'Peso_Kg': 'Peso_Kg',
+    }
+    return df.rename(columns=rename)
+
 @st.cache_data(ttl=30)
 def carregar_micro_por_obra(obra: str):
     conn = conectar_banco()
@@ -622,6 +647,7 @@ def carregar_solicitacoes_op():
 def _limpar_cache_geral():
     carregar_macro.clear()
     carregar_micro.clear()
+    carregar_micro_completo.clear()
     carregar_fila_logistica.clear()
     carregar_solicitacoes.clear()
     carregar_solicitacoes_op.clear()
@@ -846,14 +872,17 @@ def resetar_banco_dados_completo(usuario=None):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
-        for tabela in ['arquivos_op', 'componentes_op', 'cronograma_macro', 'itens_detalhado', 'solicitacoes_prazo', 'logistica_envios',
-                       'medicao_historico', 'medicao_subdivisoes', 'medicao_servicos', 'medicao_obras']:
+        for tabela in ['arquivos_op', 'arquivos_solicitacao_op', 'solicitacoes_op', 'op_pecas', 'componentes_op',
+                       'cronograma_macro', 'itens_detalhado', 'solicitacoes_prazo', 'logistica_envios',
+                       'medicao_historico', 'medicao_subdivisoes', 'medicao_servicos', 'medicao_obras', 'auditoria_log']:
             cursor.execute(f"DELETE FROM {tabela}")
         conn.commit()
         _limpar_cache_geral()
         carregar_medicao_obras.clear()
         carregar_componentes_op.clear()
         carregar_todas_ops_com_componentes.clear()
+        carregar_pecas_lote.clear()
+        carregar_todas_pecas_obra.clear()
         return True
     except Exception as e:
         conn.rollback()
@@ -1173,6 +1202,9 @@ def salvar_pecas_lote(lote_id: int, obra: str, cod_lote: str, num_op: str,
             st.error("Lote não encontrado. Recarregue a página.")
             conn.rollback()
             return
+        cursor.execute("SELECT COALESCE(m2_op_real, 0) FROM op_pecas WHERE lote_id=%s LIMIT 1", (lote_id,))
+        row_m2_antigo = cursor.fetchone()
+        m2_antigo = float(row_m2_antigo[0]) if row_m2_antigo else 0.0
         cursor.execute("DELETE FROM op_pecas WHERE lote_id=%s", (lote_id,))
         for p in pecas:
             qtd = int(p.get('qtd', 0))
@@ -1195,8 +1227,8 @@ def salvar_pecas_lote(lote_id: int, obra: str, cod_lote: str, num_op: str,
         row_lote = cursor.fetchone()
         if row_lote:
             cursor.execute(
-                "UPDATE cronograma_macro SET m2_executado = COALESCE(m2_executado, 0) + %s WHERE EDT = %s",
-                (float(m2_op_real), row_lote[0])
+                "UPDATE cronograma_macro SET m2_executado = COALESCE(m2_executado, 0) - %s + %s WHERE EDT = %s",
+                (m2_antigo, float(m2_op_real), row_lote[0])
             )
         conn.commit()
         carregar_pecas_lote.clear()
@@ -1649,8 +1681,10 @@ def blocos_semanais(df_input):
         n_lotes   = len(lotes_sem)
         with st.expander(f"📅 {sem_row['Periodo']}  —  {n_lotes} lote(s)  |  {total_m2:.2f} m²", expanded=False):
             for _, lrow in lotes_sem.iterrows():
-                dt_ini = pd.to_datetime(lrow['Data_Producao_Programada']).strftime('%d/%m/%Y')
-                dt_fim = pd.to_datetime(lrow['Data_Limite_Obra']).strftime('%d/%m/%Y')
+                _dt_ini = pd.to_datetime(lrow['Data_Producao_Programada'])
+                _dt_fim = pd.to_datetime(lrow['Data_Limite_Obra'])
+                dt_ini = _dt_ini.strftime('%d/%m/%Y') if pd.notna(_dt_ini) else '—'
+                dt_fim = _dt_fim.strftime('%d/%m/%Y') if pd.notna(_dt_fim) else '—'
                 st.markdown(
                     f'<span class="badge-obra">{lrow["Obra_Vinculada"]}</span>&nbsp;'
                     f'<span class="badge-edt">{lrow["EDT_Vinculado"]}</span>&nbsp;'
@@ -2036,6 +2070,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                                         "UPDATE itens_detalhado SET Status_Item='Concluido' WHERE id=%s",
                                                         (row['id'],)
                                                     )
+                                                    cursor.execute(
+                                                        "UPDATE op_pecas SET qtd_enviada=qtd_total, saldo=0 WHERE lote_id=%s",
+                                                        (row['id'],)
+                                                    )
                                                     conn.commit()
                                                 except Exception as e:
                                                     conn.rollback()
@@ -2045,6 +2083,8 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                                 carregar_micro.clear()
                                                 carregar_macro.clear()
                                                 carregar_fila_logistica.clear()
+                                                carregar_pecas_lote.clear()
+                                                carregar_todas_pecas_obra.clear()
                                                 enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
                                                 st.session_state[f"modal_pronto_{row['id']}"] = False
                                                 st.toast(f"✅ {row['Cod_Lote']} concluido!")
@@ -2554,12 +2594,14 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                                 try:
                                                     cursor = conn.cursor()
                                                     cursor.execute("UPDATE itens_detalhado SET Status_Item='Concluido' WHERE id=%s", (row['id'],))
+                                                    cursor.execute("UPDATE op_pecas SET qtd_enviada=qtd_total, saldo=0 WHERE lote_id=%s", (row['id'],))
                                                     conn.commit()
                                                 except Exception as e:
                                                     conn.rollback(); st.error(f"Erro: {e}")
                                                 finally:
                                                     liberar_conexao(conn)
                                                 carregar_micro.clear(); carregar_macro.clear(); carregar_fila_logistica.clear()
+                                                carregar_pecas_lote.clear(); carregar_todas_pecas_obra.clear()
                                                 enviar_para_logistica(row, limite_desp_esq if prazo_valido(limite_desp_esq) else pd.NaT)
                                                 st.session_state[f"esq_modal_{row['id']}"] = False
                                                 st.toast(f"✅ {row['Cod_Lote']} concluido!")
@@ -2582,22 +2624,39 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                             th3.markdown("**Medida**"); th4.markdown("**Saldo**"); th5.markdown("**Enviar agora**")
                                             st.markdown("<hr style='margin:4px 0;'>", unsafe_allow_html=True)
                                             for _, peca in df_pecas_esq.iterrows():
+                                                saldo_peca_esq = int(peca.get('saldo', 0))
+                                                if saldo_peca_esq <= 0:
+                                                    pc1, pc2, pc3, pc4, pc5 = st.columns([3, 2, 2, 1, 2])
+                                                    pc1.markdown(f"~~{peca['codigo']}~~")
+                                                    pc5.markdown("✅ enviado")
+                                                    continue
                                                 p1,p2,p3,p4,p5 = st.columns([3,2,2,1,2])
                                                 p1.write(peca.get('codigo','—')); p2.write(peca.get('localizacao','—'))
-                                                p3.write(peca.get('medida','—')); p4.write(int(peca.get('quantidade',0)))
+                                                p3.write(peca.get('medida','—')); p4.write(saldo_peca_esq)
                                                 qtd_env = p5.number_input("", min_value=0,
-                                                    max_value=int(peca.get('quantidade',0)),
-                                                    value=int(peca.get('quantidade',0)),
+                                                    max_value=saldo_peca_esq,
+                                                    value=saldo_peca_esq,
                                                     key=f"esq_env_{row['id']}_{peca['id']}", label_visibility="collapsed")
-                                                pecas_envio_esq.append({"peca_id": peca['id'], "qtd": qtd_env, "saldo": int(peca.get('quantidade',0))})
+                                                if qtd_env > 0:
+                                                    pecas_envio_esq.append({"peca_id": int(peca['id']), "qtd": qtd_env, "saldo": saldo_peca_esq})
                                             st.markdown("---")
                                             b1,b2,_ = st.columns([2,2,4])
                                             with b1:
-                                                if st.button("✅ Confirmar Parcial", key=f"esq_conf_parc_{row['id']}", type="primary", use_container_width=True):
+                                                if st.button("✅ Confirmar Parcial", key=f"esq_conf_parc_{row['id']}", type="primary", use_container_width=True, disabled=not pecas_envio_esq):
                                                     conn = conectar_banco()
                                                     try:
                                                         cursor = conn.cursor()
-                                                        todas_concluidas = all(p['qtd'] >= p['saldo'] for p in pecas_envio_esq)
+                                                        todas_concluidas = True
+                                                        for p in pecas_envio_esq:
+                                                            novo_saldo_esq = p['saldo'] - p['qtd']
+                                                            if novo_saldo_esq > 0:
+                                                                todas_concluidas = False
+                                                            cursor.execute("""
+                                                                UPDATE op_pecas
+                                                                SET qtd_enviada = qtd_enviada + %s,
+                                                                    saldo = saldo - %s
+                                                                WHERE id=%s
+                                                            """, (p['qtd'], p['qtd'], p['peca_id']))
                                                         novo_status = 'Concluido' if todas_concluidas else 'Parcialmente Concluido'
                                                         cursor.execute("UPDATE itens_detalhado SET Status_Item=%s WHERE id=%s", (novo_status, row['id']))
                                                         conn.commit()
@@ -2606,6 +2665,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                                     finally:
                                                         liberar_conexao(conn)
                                                     carregar_micro.clear(); carregar_macro.clear(); carregar_fila_logistica.clear()
+                                                    carregar_pecas_lote.clear(); carregar_todas_pecas_obra.clear()
                                                     enviar_para_logistica(row, limite_desp_esq if prazo_valido(limite_desp_esq) else pd.NaT)
                                                     st.session_state[f"esq_modal_{row['id']}"] = False
                                                     st.toast(f"Envio parcial de {row['Cod_Lote']} registrado!"); time.sleep(0.5); st.rerun()
@@ -2829,13 +2889,16 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                 novo_item_id = None
                                 try:
                                     cursor_v = conn_v.cursor()
+                                    data_padrao = datetime.now().date()
                                     cursor_v.execute(
                                         """INSERT INTO itens_detalhado
                                            (Obra_Vinculada, EDT_Vinculado, Cod_Lote, Tipo_Material, Qtd_Caixas,
-                                            Data_Producao_Programada, Status_Item)
-                                           VALUES (%s,%s,%s,%s,%s,%s,'Pendente') RETURNING id""",
+                                            M2_Item, Peso_Kg, Romaneio_Chapas, Dificuldade,
+                                            Data_Producao_Programada, Data_Limite_Obra, Status_Item)
+                                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente') RETURNING id""",
                                         (sol['obra'], '', f"SOL-{sol_id:04d}", sol['tipo_material'],
-                                         int(sol['quantidade']), datetime.now().date())
+                                         int(sol['quantidade']), 0.0, 0.0, '', 3,
+                                         data_padrao, data_padrao)
                                     )
                                     novo_item_id = cursor_v.fetchone()[0]
                                     conn_v.commit()
@@ -3441,7 +3504,15 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     placeholder="JA19.AP402 - CT016 - Cantoneira 25x25 Preto Fosco - 3120mm - 90/90 - 1pç\nJA22 - MM035 - Luva da Coluna Central - 4450mm - 90/90 - 2pç",
                                     key="txt_romaneio_paste"
                                 )
-                                parsed = parse_romaneio(texto_romaneio) if texto_romaneio.strip() else []
+                                pecas_romaneio_comp = parse_romaneio(texto_romaneio) if texto_romaneio.strip() else []
+                                parsed = [
+                                    {
+                                        "nome": f"{p['codigo']} - {p['descricao']}".strip(' -'),
+                                        "qtd": p['qtd'],
+                                        "unidade": "pç",
+                                    }
+                                    for p in pecas_romaneio_comp
+                                ]
                                 if parsed:
                                     st.success(f"**{len(parsed)} linha(s) reconhecida(s):**")
                                     df_prev_romaneio = pd.DataFrame(parsed).rename(columns={"nome": "Componente", "qtd": "Qtd", "unidade": "Un"})
@@ -4054,9 +4125,10 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
             # ── OPs FINALIZADAS — EMITIR ROMANEIO ─────────────────
             with st.expander("✅ OPs Finalizadas — Emitir Romaneio", expanded=True):
-                df_conc_log = df_banco_micro[
-                    df_banco_micro['Status_Item'] == 'Concluido'
-                ].copy() if not df_banco_micro.empty else pd.DataFrame()
+                df_micro_completo_log = carregar_micro_completo()
+                df_conc_log = df_micro_completo_log[
+                    df_micro_completo_log['Status_Item'] == 'Concluido'
+                ].copy() if not df_micro_completo_log.empty else pd.DataFrame()
 
                 if obra_selecionada and not df_conc_log.empty:
                     df_conc_log = df_conc_log[df_conc_log['Obra_Vinculada'] == obra_selecionada]
@@ -4672,16 +4744,18 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             </div>
             """, unsafe_allow_html=True)
 
+            df_banco_micro_rel = carregar_micro_completo()
+
             # ── Filtros ──────────────────────────────────────────
             rel_f1, rel_f2, rel_f3 = st.columns([2, 2, 2])
-            obras_rel = ["Todas"] + sorted(df_banco_micro['Obra_Vinculada'].dropna().unique().tolist()) if not df_banco_micro.empty else ["Todas"]
+            obras_rel = ["Todas"] + sorted(df_banco_micro_rel['Obra_Vinculada'].dropna().unique().tolist()) if not df_banco_micro_rel.empty else ["Todas"]
             with rel_f1:
                 filtro_obra_rel = st.selectbox("Obra:", obras_rel, key="rel_obra")
             with rel_f2:
                 status_opcoes = ["Todos", "Liberado para Fabrica", "Em Producao", "Aguardando Expedicao", "Enviado Parcial", "Concluido"]
                 filtro_status_rel = st.selectbox("Status:", status_opcoes, key="rel_status")
             with rel_f3:
-                escopo_opcoes = ["Todos"] + sorted(df_banco_micro['Tipo_Material'].dropna().unique().tolist()) if not df_banco_micro.empty else ["Todos"]
+                escopo_opcoes = ["Todos"] + sorted(df_banco_micro_rel['Tipo_Material'].dropna().unique().tolist()) if not df_banco_micro_rel.empty else ["Todos"]
                 filtro_escopo_rel = st.selectbox("Escopo / Material:", escopo_opcoes, key="rel_escopo")
 
             rel_f4, rel_f5, rel_f6 = st.columns([2, 2, 2])
@@ -4698,7 +4772,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             mostrar_concluidos = st.toggle("Ver concluídos", value=False, key="rel_concl")
 
             # ── Montar dataframe filtrado ────────────────────────
-            df_rel = df_banco_micro.copy() if not df_banco_micro.empty else pd.DataFrame()
+            df_rel = df_banco_micro_rel.copy() if not df_banco_micro_rel.empty else pd.DataFrame()
 
             if not df_rel.empty:
                 if not mostrar_concluidos:
@@ -4957,7 +5031,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             # ── Seção: OPs Avulsas ────────────────────────────────
             st.markdown("---")
             with st.expander("OPs Avulsas cadastradas", expanded=False):
-                df_avulsas = df_banco_micro[df_banco_micro['EDT_Vinculado'].str.startswith('AVULSO', na=False)].copy() if not df_banco_micro.empty else pd.DataFrame()
+                df_avulsas = df_banco_micro_rel[df_banco_micro_rel['EDT_Vinculado'].str.startswith('AVULSO', na=False)].copy() if not df_banco_micro_rel.empty else pd.DataFrame()
                 if filtro_obra_rel != "Todas" and not df_avulsas.empty:
                     df_avulsas = df_avulsas[df_avulsas['Obra_Vinculada'] == filtro_obra_rel]
                 if df_avulsas.empty:
