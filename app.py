@@ -353,6 +353,38 @@ def inicializar_banco_de_dados():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_lote ON op_pecas(lote_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_obra ON op_pecas(obra)")
 
+        # ── TABELA DE SOLICITAÇÕES DE OP (PCP → Master) ────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS solicitacoes_op (
+                id SERIAL PRIMARY KEY,
+                obra TEXT,
+                numero_projeto TEXT,
+                tipo_material TEXT,
+                descricao TEXT,
+                quantidade REAL DEFAULT 0,
+                observacao TEXT,
+                status TEXT DEFAULT 'Aguardando Vinculacao',
+                solicitado_por TEXT,
+                criado_em TIMESTAMP DEFAULT NOW(),
+                item_id INTEGER REFERENCES itens_detalhado(id),
+                vinculado_por TEXT,
+                vinculado_em TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS arquivos_solicitacao_op (
+                id SERIAL PRIMARY KEY,
+                solicitacao_id INTEGER REFERENCES solicitacoes_op(id) ON DELETE CASCADE,
+                nome_arquivo TEXT NOT NULL,
+                tipo_arquivo TEXT,
+                conteudo BYTEA NOT NULL,
+                enviado_por TEXT,
+                enviado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_solicitacoes_op_status ON solicitacoes_op(status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_arquivos_solicitacao_solicitacao ON arquivos_solicitacao_op(solicitacao_id)")
+
         # ── ÍNDICES DE PERFORMANCE ──────────────────────────────────
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_itens_obra ON itens_detalhado(Obra_Vinculada)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_itens_status ON itens_detalhado(Status_Item)")
@@ -578,11 +610,21 @@ def carregar_solicitacoes():
         liberar_conexao(conn)
     return df
 
+@st.cache_data(ttl=15)
+def carregar_solicitacoes_op():
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query("SELECT * FROM solicitacoes_op ORDER BY criado_em DESC", conn)
+    finally:
+        liberar_conexao(conn)
+    return df
+
 def _limpar_cache_geral():
     carregar_macro.clear()
     carregar_micro.clear()
     carregar_fila_logistica.clear()
     carregar_solicitacoes.clear()
+    carregar_solicitacoes_op.clear()
     try:
         carregar_macro_por_obra.clear()
         carregar_micro_por_obra.clear()
@@ -874,6 +916,88 @@ def deletar_arquivo_op(arquivo_id: int):
     except Exception as e:
         conn.rollback()
         st.error(f"Erro ao deletar arquivo: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
+def salvar_solicitacao_op(obra: str, numero_projeto: str, tipo_material: str, descricao: str,
+                           quantidade: float, observacao: str, usuario: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT INTO solicitacoes_op
+               (obra, numero_projeto, tipo_material, descricao, quantidade, observacao, solicitado_por)
+               VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (obra, numero_projeto, tipo_material, descricao, quantidade, observacao, usuario)
+        )
+        novo_id = cursor.fetchone()[0]
+        conn.commit()
+        return novo_id
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar solicitação: {e}")
+        return None
+    finally:
+        liberar_conexao(conn)
+
+def salvar_arquivo_solicitacao(solicitacao_id: int, nome: str, tipo: str, conteudo: bytes, usuario: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO arquivos_solicitacao_op (solicitacao_id, nome_arquivo, tipo_arquivo, conteudo, enviado_por) VALUES (%s,%s,%s,%s,%s)",
+            (solicitacao_id, nome, tipo, conteudo, usuario)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar arquivo: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
+def carregar_arquivos_solicitacao(solicitacao_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, nome_arquivo, tipo_arquivo, enviado_por, enviado_em FROM arquivos_solicitacao_op WHERE solicitacao_id=%s ORDER BY enviado_em DESC",
+            (solicitacao_id,)
+        )
+        return cursor.fetchall()
+    except Exception:
+        return []
+    finally:
+        liberar_conexao(conn)
+
+def carregar_conteudo_arquivo_solicitacao(arquivo_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT nome_arquivo, tipo_arquivo, conteudo FROM arquivos_solicitacao_op WHERE id=%s", (arquivo_id,))
+        return cursor.fetchone()
+    except Exception:
+        return None
+    finally:
+        liberar_conexao(conn)
+
+def confirmar_vinculacao_solicitacao(solicitacao_id: int, item_id: int, usuario: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """UPDATE solicitacoes_op
+               SET status='Vinculada', item_id=%s, vinculado_por=%s, vinculado_em=NOW()
+               WHERE id=%s""",
+            (item_id, usuario, solicitacao_id)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao confirmar vinculação: {e}")
         return False
     finally:
         liberar_conexao(conn)
@@ -2619,6 +2743,135 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     elif nome_aba == "Liberar OPs da Semana":
         with aba_objeto:
             st.header("Ordens de Producao — Liberacao Semanal")
+
+            # ── SEÇÃO 0: ADICIONAR OP PARA LIBERAÇÃO — PCP ────────
+            st.markdown("### 📋 Adicionar OP para Liberação — PCP")
+
+            with st.expander("➕ Nova solicitação de OP", expanded=False):
+                with st.form("form_solicitacao_op", clear_on_submit=True):
+                    obras_disp_sol = sorted(df_banco_macro['Obra'].dropna().unique().tolist()) if not df_banco_macro.empty else []
+                    col_s1, col_s2 = st.columns(2)
+                    with col_s1:
+                        sol_obra = st.selectbox("Obra:", obras_disp_sol, key="sol_obra")
+                        sol_projeto = st.text_input("Número do Projeto:", key="sol_projeto")
+                        sol_tipo_material = st.text_input("Tipo de Material:", key="sol_tipo_material")
+                    with col_s2:
+                        sol_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="sol_qtd")
+                        sol_anexos = st.file_uploader(
+                            "Anexos (PDF, imagem, DWG):",
+                            type=["pdf", "png", "jpg", "jpeg", "dwg"],
+                            accept_multiple_files=True, key="sol_anexos"
+                        )
+                    sol_descricao = st.text_area("Descrição/Especificação:", key="sol_descricao")
+                    sol_obs = st.text_area("Observação:", key="sol_obs")
+                    enviar_sol = st.form_submit_button("📤 Enviar solicitação", type="primary")
+                    if enviar_sol:
+                        if not sol_obra or not sol_tipo_material.strip() or not sol_descricao.strip():
+                            st.error("Preencha Obra, Tipo de Material e Descrição.")
+                        else:
+                            novo_sol_id = salvar_solicitacao_op(
+                                sol_obra, sol_projeto.strip(), sol_tipo_material.strip(),
+                                sol_descricao.strip(), float(sol_qtd), sol_obs.strip(),
+                                st.session_state.usuario_nome
+                            )
+                            if novo_sol_id:
+                                for arq_sol in (sol_anexos or []):
+                                    salvar_arquivo_solicitacao(
+                                        novo_sol_id, arq_sol.name, arq_sol.type or "",
+                                        arq_sol.read(), st.session_state.usuario_nome
+                                    )
+                                registrar_auditoria(st.session_state.usuario_nome, "SOLICITAR_OP",
+                                    f"Solicitação #{novo_sol_id} — Obra: {sol_obra} — Material: {sol_tipo_material.strip()}")
+                                carregar_solicitacoes_op.clear()
+                                st.toast("Solicitação enviada!")
+                                time.sleep(0.3)
+                                st.rerun()
+
+            df_sol = carregar_solicitacoes_op()
+            df_sol_pend = df_sol[df_sol['status'] == 'Aguardando Vinculacao'] if not df_sol.empty else df_sol
+
+            if df_sol_pend.empty:
+                st.caption("Nenhuma solicitação aguardando vinculação.")
+            else:
+                st.caption(f"{len(df_sol_pend)} solicitação(ões) aguardando vinculação")
+                for _, sol in df_sol_pend.iterrows():
+                    sol_id = int(sol['id'])
+                    with st.expander(f"🗂️ #{sol_id} — {sol['obra']} — {sol['tipo_material']} (Proj. {sol['numero_projeto'] or '-'})"):
+                        st.write(f"**Descrição:** {sol['descricao']}")
+                        st.write(f"**Quantidade:** {sol['quantidade']}")
+                        if sol['observacao']:
+                            st.write(f"**Observação:** {sol['observacao']}")
+                        st.caption(f"Solicitado por {sol['solicitado_por']} em {pd.to_datetime(sol['criado_em']).strftime('%d/%m/%Y %H:%M')}")
+
+                        arqs_sol = carregar_arquivos_solicitacao(sol_id)
+                        if arqs_sol:
+                            st.markdown("**Arquivos anexados:**")
+                            for arq_s in arqs_sol:
+                                arq_s_id, arq_s_nome, arq_s_tipo, arq_s_por, arq_s_em = arq_s
+                                col_sa, col_sb = st.columns([4, 1])
+                                col_sa.markdown(f"📄 **{arq_s_nome}** — {arq_s_por}")
+                                with col_sb:
+                                    conteudo_sol = carregar_conteudo_arquivo_solicitacao(arq_s_id)
+                                    if conteudo_sol:
+                                        _, _, bytes_sol = conteudo_sol
+                                        st.download_button(
+                                            "⬇️", data=bytes(bytes_sol), file_name=arq_s_nome,
+                                            mime=arq_s_tipo or "application/octet-stream",
+                                            key=f"dl_sol_arq_{arq_s_id}"
+                                        )
+                        else:
+                            st.caption("Nenhum arquivo anexado.")
+
+                        if setor in ["Master", "PCP"]:
+                            st.markdown("**Vincular ao fluxo de produção:**")
+                            edts_disp_v = sorted(
+                                df_banco_macro[df_banco_macro['Obra'] == sol['obra']]['EDT'].dropna().unique().tolist()
+                            ) if not df_banco_macro.empty else []
+                            col_v1, col_v2, col_v3 = st.columns(3)
+                            with col_v1:
+                                if edts_disp_v:
+                                    v_edt = st.selectbox("EDT:", edts_disp_v, key=f"v_edt_{sol_id}")
+                                else:
+                                    v_edt = st.text_input("EDT:", key=f"v_edt_{sol_id}")
+                            with col_v2:
+                                v_lote = st.text_input("Cod. Lote:", key=f"v_lote_{sol_id}")
+                            with col_v3:
+                                v_data = st.date_input("Data Produção Programada:", key=f"v_data_{sol_id}")
+
+                            if st.button("✅ Confirmar e enviar ao fluxo de lotes", key=f"btn_confirmar_sol_{sol_id}", type="primary"):
+                                if not v_lote.strip():
+                                    st.error("Informe o Código do Lote.")
+                                else:
+                                    conn_v = conectar_banco()
+                                    novo_item_id = None
+                                    try:
+                                        cursor_v = conn_v.cursor()
+                                        cursor_v.execute(
+                                            """INSERT INTO itens_detalhado
+                                               (Obra_Vinculada, EDT_Vinculado, Cod_Lote, Tipo_Material, Qtd_Caixas,
+                                                Data_Producao_Programada, Status_Item)
+                                               VALUES (%s,%s,%s,%s,%s,%s,'Pendente') RETURNING id""",
+                                            (sol['obra'], v_edt, v_lote.strip(), sol['tipo_material'],
+                                             int(sol['quantidade']), v_data)
+                                        )
+                                        novo_item_id = cursor_v.fetchone()[0]
+                                        conn_v.commit()
+                                    except Exception as e:
+                                        conn_v.rollback()
+                                        st.error(f"Erro ao criar lote: {e}")
+                                    finally:
+                                        liberar_conexao(conn_v)
+                                    if novo_item_id:
+                                        confirmar_vinculacao_solicitacao(sol_id, novo_item_id, st.session_state.usuario_nome)
+                                        registrar_auditoria(st.session_state.usuario_nome, "VINCULAR_SOLICITACAO_OP",
+                                            f"Solicitação #{sol_id} vinculada ao lote {novo_item_id} — Obra: {sol['obra']}")
+                                        _limpar_cache_geral()
+                                        carregar_solicitacoes_op.clear()
+                                        st.toast("Solicitação vinculada ao fluxo de produção!")
+                                        time.sleep(0.4)
+                                        st.rerun()
+
+            st.markdown("---")
 
             # ── SEÇÃO 1: LOTES PENDENTES DO FATIAMENTO ────────────
             st.markdown("###  Seção 1 — Lotes Pendentes do Fatiamento")
