@@ -3614,7 +3614,13 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
                 st.markdown("---")
                 st.subheader("Gantt — Ocupacao da Fabrica")
-                df_gantt = df_dir.groupby(['Obra_Vinculada', 'EDT_Vinculado', 'Romaneio_Chapas']).agg(
+                col_fg, _ = st.columns([2, 3])
+                with col_fg:
+                    filtro_gantt = st.selectbox("🔍 Obra:", obras_macro, key="filtro_gantt")
+                df_gantt_base = df_banco_micro.copy() if not df_banco_micro.empty else pd.DataFrame()
+                if not df_gantt_base.empty and filtro_gantt != "Todas as obras":
+                    df_gantt_base = df_gantt_base[df_gantt_base['Obra_Vinculada'] == filtro_gantt]
+                df_gantt = df_gantt_base.groupby(['Obra_Vinculada', 'EDT_Vinculado', 'Romaneio_Chapas']).agg(
                     Inicio=('Data_Producao_Programada', 'min'),
                     Fim=('Data_Limite_Obra', 'max'),
                     M2=('M2_Item', 'sum')
