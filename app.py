@@ -1818,7 +1818,7 @@ if setor in ["Master", "Esquadria", "Producao", "Diretoria"]:
     abas_disponiveis.append("Painel TV — Esquadrias")
 if setor in ["Master", "PCP"]:
     abas_disponiveis.append("Liberar OPs da Semana")
-if setor in ["Master", "Diretoria"]:
+if setor in ["Master", "Diretoria", "Medicao"]:
     abas_disponiveis.append("Visao Macro")
 if setor in ["Master"]:
     abas_disponiveis.append("Vincular Datas")
