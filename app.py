@@ -1795,13 +1795,16 @@ with ch2:
 df_banco_macro = carregar_macro()
 df_banco_micro = carregar_micro()
 
-if not df_banco_macro.empty:
-    obras_lista      = sorted(df_banco_macro['Obra'].unique().tolist())
-    obra_selecionada = st.selectbox("Obra de trabalho:", obras_lista)
-    df_macro_filtrado = carregar_macro_por_obra(obra_selecionada)
-else:
-    obra_selecionada  = None
-    df_macro_filtrado = pd.DataFrame()
+with st.sidebar:
+    st.caption("Obra de trabalho")
+    if not df_banco_macro.empty:
+        obras_lista      = sorted(df_banco_macro['Obra'].unique().tolist())
+        obra_selecionada = st.selectbox("Obra de trabalho:", obras_lista, label_visibility="collapsed")
+        df_macro_filtrado = carregar_macro_por_obra(obra_selecionada)
+    else:
+        obra_selecionada  = None
+        df_macro_filtrado = pd.DataFrame()
+        st.info("Nenhuma obra cadastrada.")
 
 # ========================================================
 # ABAS
