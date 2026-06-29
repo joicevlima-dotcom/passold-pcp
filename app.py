@@ -3921,7 +3921,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
 
             criticas = [f for f in frentes if f['situacao_key'] in ('critico', 'vencido')]
 
-            with st.expander(f"Frentes Criticas — {len(criticas)} alerta(s)", expanded=True):
+            with st.expander(f"Frentes Criticas — {len(criticas)} alerta(s) · Obra: {obra_selecionada or 'Nenhuma'}", expanded=True):
                 if not criticas:
                     st.success("Tudo dentro do prazo!")
                 else:
@@ -3964,7 +3964,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     time.sleep(0.3)
                                     st.rerun()
 
-            with st.expander(f"Todas as Frentes — {len(frentes)}", expanded=False):
+            with st.expander(f"Todas as Frentes — {len(frentes)} · Obra: {obra_selecionada or 'Nenhuma'}", expanded=False):
                 if not frentes:
                     st.info("Nenhuma frente cadastrada.")
                 else:
