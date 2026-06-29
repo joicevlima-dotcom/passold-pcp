@@ -1813,11 +1813,11 @@ setor = st.session_state.usuario_setor
 abas_disponiveis = []
 if setor in ["Master", "Producao", "Diretoria", "Engenharia"]:
     abas_disponiveis.append("Painel da Producao - ACM")
-if setor in ["Master", "Producao", "Diretoria"]:
+if setor in ["Master", "Producao", "Diretoria", "Medicao"]:
     abas_disponiveis.append("Painel TV — ACM")
 if setor in ["Master", "Esquadria", "Producao", "Diretoria", "Engenharia"]:
     abas_disponiveis.append("Painel da Producao - Esquadrias")
-if setor in ["Master", "Esquadria", "Producao", "Diretoria"]:
+if setor in ["Master", "Esquadria", "Producao", "Diretoria", "Medicao"]:
     abas_disponiveis.append("Painel TV — Esquadrias")
 if setor in ["Master", "PCP"]:
     abas_disponiveis.append("Liberar OPs da Semana")
@@ -1834,7 +1834,7 @@ if setor in ["Master", "Almoxarifado"]:
     abas_disponiveis.append("Almoxarifado")
 if setor in ["Master", "Medicao"]:
     abas_disponiveis.append("Sistema de Medicao")
-if setor in ["Master", "Diretoria", "PCP"]:
+if setor in ["Master", "Diretoria", "PCP", "Medicao"]:
     abas_disponiveis.append("Relatorio Geral")
 if setor in ["Master"]:
     abas_disponiveis.append("Configuracoes")
