@@ -3730,13 +3730,13 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                             for row in alteradas:
                                 cursor.execute("""
                                     UPDATE itens_detalhado
-                                    SET Cod_Lote=%s, Tipo_Material=%s, Qtd_Caixas=%s, M2_Item=%s,
+                                    SET EDT_Vinculado=%s, Cod_Lote=%s, Tipo_Material=%s, Qtd_Caixas=%s, M2_Item=%s,
                                         Data_Producao_Programada=%s, Data_Limite_Obra=%s,
                                         Romaneio_Chapas=%s, Status_Item=%s, Dificuldade=%s, Fase_Produtiva=%s,
                                         updated_at=NOW()
                                     WHERE id=%s
                                 """, (
-                                    row['Cod_Lote'], row['Tipo_Material'], int(row['Qtd_Caixas']),
+                                    row['EDT_Vinculado'], row['Cod_Lote'], row['Tipo_Material'], int(row['Qtd_Caixas']),
                                     float(row['M2_Item']), row['Data_Producao_Programada'],
                                     row['Data_Limite_Obra'], row['Romaneio_Chapas'],
                                     row['Status_Item'], int(row['Dificuldade']),
