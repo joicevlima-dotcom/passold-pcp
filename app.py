@@ -76,10 +76,14 @@ section[data-testid="stSidebar"] {
     border-right: none !important;
     box-shadow: 4px 0 24px rgba(0,0,0,0.15) !important;
 }
-/* Esconde o botão «» de fechar/abrir a sidebar */
-button[data-testid="collapsedControl"],
-section[data-testid="stSidebar"] > div > div > button[kind="header"] {
-    display: none !important;
+/* Camufla o botão «» na cor do fundo da sidebar */
+button[data-testid="collapsedControl"] {
+    background: var(--sidebar-bg) !important;
+    color: var(--sidebar-bg) !important;
+    border: none !important;
+    box-shadow: none !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
 }
 /* ── Sidebar geral ──────────────────────────────────────── */
 section[data-testid="stSidebar"] * { color: var(--sidebar-text) !important; }
