@@ -27,7 +27,7 @@ BLOQUEIO_MINUTOS      = 15
 TIMEOUT_SESSAO_HORAS  = 8
 LIMITE_REGISTROS_LOAD = 2000   # máx de linhas carregadas de uma vez
 
-st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide", page_icon="🏭")
+st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide", page_icon="🏭", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
