@@ -3551,144 +3551,13 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             if setor not in ["Master", "PCP"]:
                 st.error("⛔ Acesso negado.")
                 st.stop()
-            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Liberar OPs da Semana</h2><p>Solicite, aceite e libere Ordens de Produção para a fábrica</p></div><span class="page-icon">🔓</span></div>', unsafe_allow_html=True)
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Ordens de Produção</h2><p>Gerencie e libere Ordens de Produção para a fábrica</p></div><span class="page-icon">🔓</span></div>', unsafe_allow_html=True)
 
-            # ── PIPELINE VISUAL ────────────────────────────────────
-            st.markdown("""
-            <div class="pipeline">
-                <div class="pipeline-step done">✅ 1. Solicitação</div>
-                <div class="pipeline-arrow">›</div>
-                <div class="pipeline-step done">✅ 2. Aceito pelo Master</div>
-                <div class="pipeline-arrow">›</div>
-                <div class="pipeline-step active">▶ 3. Liberar para Fábrica</div>
-                <div class="pipeline-arrow">›</div>
-                <div class="pipeline-step">4. Lançar Peças</div>
-                <div class="pipeline-arrow">›</div>
-                <div class="pipeline-step">5. Gerar OP</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            st.markdown("---")
-
-            # ── SEÇÃO 0: ADICIONAR OP PARA LIBERAÇÃO — PCP ────────
-            st.markdown("### 📋 Solicitação de OP")
-
-            with st.expander("➕ Nova solicitação de OP", expanded=False):
-                with st.form("form_solicitacao_op", clear_on_submit=True):
-                    obras_disp_sol = sorted(df_banco_macro['Obra'].dropna().unique().tolist()) if not df_banco_macro.empty else []
-                    col_s1, col_s2 = st.columns(2)
-                    with col_s1:
-                        sol_obra = st.selectbox("Obra:", obras_disp_sol, key="sol_obra")
-                        sol_projeto = st.text_input("Número do Projeto:", key="sol_projeto")
-                        sol_tipo_material = st.text_input("Tipo de Material:", key="sol_tipo_material")
-                    with col_s2:
-                        sol_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="sol_qtd")
-                        sol_anexos = st.file_uploader(
-                            "Anexos (PDF, imagem, DWG):",
-                            type=["pdf", "png", "jpg", "jpeg", "dwg"],
-                            accept_multiple_files=True, key="sol_anexos"
-                        )
-                    sol_descricao = st.text_area("Descrição/Especificação:", key="sol_descricao")
-                    sol_obs = st.text_area("Observação:", key="sol_obs")
-                    enviar_sol = st.form_submit_button("📤 Enviar solicitação", type="primary")
-                    if enviar_sol:
-                        if not sol_obra or not sol_tipo_material.strip() or not sol_descricao.strip():
-                            st.error("Preencha Obra, Tipo de Material e Descrição.")
-                        else:
-                            novo_sol_id = salvar_solicitacao_op(
-                                sol_obra, sol_projeto.strip(), sol_tipo_material.strip(),
-                                sol_descricao.strip(), float(sol_qtd), sol_obs.strip(),
-                                st.session_state.usuario_nome
-                            )
-                            if novo_sol_id:
-                                for arq_sol in (sol_anexos or []):
-                                    salvar_arquivo_solicitacao(
-                                        novo_sol_id, arq_sol.name, arq_sol.type or "",
-                                        arq_sol.read(), st.session_state.usuario_nome
-                                    )
-                                registrar_auditoria(st.session_state.usuario_nome, "SOLICITAR_OP",
-                                    f"Solicitação #{novo_sol_id} — Obra: {sol_obra} — Material: {sol_tipo_material.strip()}")
-                                carregar_solicitacoes_op.clear()
-                                st.toast("Solicitação enviada!")
-                                time.sleep(0.3)
-                                st.rerun()
-
-            df_sol = carregar_solicitacoes_op()
-            df_sol_pend = df_sol[df_sol['status'] == 'Aguardando Vinculacao'] if not df_sol.empty else df_sol
-
-            if df_sol_pend.empty:
-                st.caption("Nenhuma solicitação aguardando vinculação.")
-            else:
-                st.caption(f"{len(df_sol_pend)} solicitação(ões) aguardando vinculação")
-                for _, sol in df_sol_pend.iterrows():
-                    sol_id = int(sol['id'])
-                    with st.expander(f"🗂️ #{sol_id} — {sol['obra']} — {sol['tipo_material']} (Proj. {sol['numero_projeto'] or '-'})"):
-                        st.write(f"**Descrição:** {sol['descricao']}")
-                        st.write(f"**Quantidade:** {sol['quantidade']}")
-                        if sol['observacao']:
-                            st.write(f"**Observação:** {sol['observacao']}")
-                        st.caption(f"Solicitado por {sol['solicitado_por']} em {pd.to_datetime(sol['criado_em']).strftime('%d/%m/%Y %H:%M')}")
-
-                        arqs_sol = carregar_arquivos_solicitacao(sol_id)
-                        if arqs_sol:
-                            st.markdown("**Arquivos anexados:**")
-                            for arq_s in arqs_sol:
-                                arq_s_id, arq_s_nome, arq_s_tipo, arq_s_por, arq_s_em = arq_s
-                                col_sa, col_sb = st.columns([4, 1])
-                                col_sa.markdown(f"📄 **{arq_s_nome}** — {arq_s_por}")
-                                with col_sb:
-                                    conteudo_sol = carregar_conteudo_arquivo_solicitacao(arq_s_id)
-                                    if conteudo_sol:
-                                        _, _, bytes_sol = conteudo_sol
-                                        st.download_button(
-                                            "⬇️", data=bytes(bytes_sol), file_name=arq_s_nome,
-                                            mime=arq_s_tipo or "application/octet-stream",
-                                            key=f"dl_sol_arq_{arq_s_id}"
-                                        )
-                        else:
-                            st.caption("Nenhum arquivo anexado.")
-
-                        if setor == "Master":
-                            st.caption("Ao aceitar, esta solicitação entra direto na lista de Lotes Pendentes (Seção 1) — o EDT e o Cód. do Lote podem ser ajustados ali mesmo.")
-                            if st.button("✅ Aceitar e enviar para Lotes Pendentes", key=f"btn_confirmar_sol_{sol_id}", type="primary"):
-                                conn_v = conectar_banco()
-                                novo_item_id = None
-                                try:
-                                    cursor_v = conn_v.cursor()
-                                    data_padrao = datetime.now().date()
-                                    cursor_v.execute(
-                                        """INSERT INTO itens_detalhado
-                                           (Obra_Vinculada, EDT_Vinculado, Cod_Lote, Tipo_Material, Qtd_Caixas,
-                                            M2_Item, Peso_Kg, Romaneio_Chapas, Dificuldade,
-                                            Data_Producao_Programada, Data_Limite_Obra, Status_Item)
-                                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente') RETURNING id""",
-                                        (sol['obra'], '', f"SOL-{sol_id:04d}", sol['tipo_material'],
-                                         int(sol['quantidade']), 0.0, 0.0, '', 3,
-                                         data_padrao, data_padrao)
-                                    )
-                                    novo_item_id = cursor_v.fetchone()[0]
-                                    conn_v.commit()
-                                except Exception as e:
-                                    conn_v.rollback()
-                                    st.error(f"Erro ao criar lote: {e}")
-                                finally:
-                                    liberar_conexao(conn_v)
-                                if novo_item_id:
-                                    confirmar_vinculacao_solicitacao(sol_id, novo_item_id, st.session_state.usuario_nome)
-                                    registrar_auditoria(st.session_state.usuario_nome, "VINCULAR_SOLICITACAO_OP",
-                                        f"Solicitação #{sol_id} vinculada ao lote {novo_item_id} — Obra: {sol['obra']}")
-                                    _limpar_cache_geral()
-                                    carregar_solicitacoes_op.clear()
-                                    st.toast("Solicitação enviada para Lotes Pendentes!")
-                                    time.sleep(0.4)
-                                    st.rerun()
-                        else:
-                            st.caption("⏳ Aguardando o Master aceitar esta solicitação.")
-
-            st.markdown("---")
-
-            # ── SEÇÃO 1: LOTES PENDENTES DO FATIAMENTO ────────────
-            st.markdown("###  Seção 1 — Lotes Pendentes do Fatiamento")
+            # ── CARD 1: LOTES PENDENTES ────────────────────────────
+            n_pend_card = len(df_banco_micro[df_banco_micro['Status_Item'] == 'Pendente']) if not df_banco_micro.empty else 0
+            with st.expander(f"📋 Lotes Pendentes  ·  {n_pend_card} aguardando liberação", expanded=True):
+                st.markdown("Selecione os lotes abaixo e libere para a fábrica.")
+                st.markdown("---")
 
             if not df_banco_micro.empty:
                 # Filtro 1 — Escopo
@@ -3797,20 +3666,18 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 else:
                     st.markdown('<div class="empty-state"><div class="empty-icon">✅</div><h4>Tudo em dia!</h4><p>Nenhum lote pendente para este filtro.</p></div>', unsafe_allow_html=True)
             else:
-                st.markdown('<div class="empty-state"><div class="empty-icon">📋</div><h4>Nenhum lote pendente</h4><p>Cadastre uma solicitação de OP na seção acima para começar.</p></div>', unsafe_allow_html=True)
+                st.markdown('<div class="empty-state"><div class="empty-icon">📋</div><h4>Nenhum lote cadastrado</h4><p>Cadastre frentes no Painel de Engenharia para gerar lotes.</p></div>', unsafe_allow_html=True)
 
-            st.markdown("---")
-# ── SEÇÃO 2: LANÇAR PEÇAS DA OP ───────────────────────
-            st.markdown("### Seção 2 — Lançar Peças da OP")
+            st.markdown("<br>", unsafe_allow_html=True)
 
-            tab_op_fat, tab_op_avulsa = st.tabs([" OPs do Fatiamento", "➕ OP Avulsa"])
+            # ── CARD 2: LANÇAR PEÇAS ──────────────────────────────
+            n_lib_card = len(df_banco_micro[df_banco_micro["Status_Item"].isin(["Liberado para Fabrica","Parcialmente Concluido"])]) if not df_banco_micro.empty else 0
+            with st.expander(f"✏️ Lançar Peças da OP  ·  {n_lib_card} OP(s) liberada(s)", expanded=False):
+                st.markdown("Selecione a OP liberada e lance as peças do romaneio.")
+                st.markdown("---")
 
-            # ── ABA 1: OPs DO FATIAMENTO ──────────────────────────
-            with tab_op_fat:
-                st.caption("Vincule os códigos reais das peças ao lote já liberado.")
-
-                obras_fat = sorted(df_banco_micro['Obra_Vinculada'].dropna().unique().tolist()) if not df_banco_micro.empty else []
-                obra_fat_sel = st.selectbox("Obra:", ["Todas"] + obras_fat, key="fat_obra_sel")
+                obras_fat = sorted(df_banco_micro["Obra_Vinculada"].dropna().unique().tolist()) if not df_banco_micro.empty else []
+                obra_fat_sel = st.selectbox("Filtrar por obra:", ["Todas"] + obras_fat, key="fat_obra_sel")
 
                 if not df_banco_micro.empty:
                     mask_fat = df_banco_micro['Status_Item'].isin(["Liberado para Fabrica", "Parcialmente Concluido"])
@@ -4078,8 +3945,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 else:
                     st.info("Nenhuma OP liberada para esta obra ainda.")
 
-            # ── ABA 2: OP AVULSA ──────────────────────────────────
-            with tab_op_avulsa:
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── CARD 3: OP AVULSA ─────────────────────────────────
+            with st.expander("➕ OP Avulsa  ·  Ancoragens, prisílias e materiais de apoio", expanded=False):
                 st.caption("Para ancoragens, prisilias, corte de perfil e outros materiais de apoio.")
                 av1, av2, av3 = st.columns(3)
                 with av1:
@@ -4230,11 +4099,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         time.sleep(0.5)
                         st.rerun()
 
-            st.markdown("---")
+            st.markdown("<br>", unsafe_allow_html=True)
 
-            # ── SEÇÃO 3: COMPONENTES POR OP ───────────────────────
-            st.markdown("### 📦 Seção 3 — Componentes por OP")
-            st.caption("Cadastre os componentes necessários para cada OP liberada.")
+            # ── CARD 4: COMPONENTES POR OP ────────────────────────
+            with st.expander("📦 Componentes por OP", expanded=False):
+                st.caption("Cadastre os componentes necessários para cada OP liberada.")
 
             df_lib_ops = df_banco_micro[
                 (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
