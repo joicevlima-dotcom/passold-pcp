@@ -15,8 +15,8 @@ from html import escape as html_escape
 FUSO_BR = ZoneInfo('America/Sao_Paulo')
 
 def hoje_projeto() -> datetime:
-    """Retorna meia-noite de hoje — sempre atualizado, nunca congelado na inicialização."""
-    return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    """Retorna meia-noite de hoje no fuso de São Paulo — sempre atualizado."""
+    return datetime.now(FUSO_BR).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
 
 # Alias para compatibilidade com usos existentes como constante
 # hoje_projeto() não é mais constante — use hoje_projeto() nos contextos de renderização
@@ -475,7 +475,7 @@ def registrar_auditoria(usuario: str, acao: str, detalhes: str = ""):
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO auditoria_log (usuario, acao, detalhes, criado_em) VALUES (%s, %s, %s, %s)",
-            (usuario, acao, detalhes, datetime.now().strftime('%d/%m/%Y %H:%M:%S'))
+            (usuario, acao, detalhes, datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M:%S'))
         )
         conn.commit()
     except Exception:
@@ -1105,7 +1105,7 @@ def salvar_solicitacao(edt, tarefa, prazo_atual, prazo_sol, justif, criado_por):
         cursor.execute("""
             INSERT INTO solicitacoes_prazo (edt, tarefa, prazo_atual, prazo_solicitado, justificativa, criado_por, status, criado_em)
             VALUES (%s,%s,%s,%s,%s,%s,'Pendente de Aprovacao',%s)
-        """, (edt, tarefa, prazo_atual, prazo_sol, justif, criado_por, datetime.now().strftime('%d/%m/%Y %H:%M')))
+        """, (edt, tarefa, prazo_atual, prazo_sol, justif, criado_por, datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M')))
         conn.commit()
         carregar_solicitacoes.clear()
     except Exception as e:
@@ -1199,7 +1199,7 @@ def confirmar_despacho(log_id, usuario):
             UPDATE logistica_envios
             SET Status_Logistica='Despachado', Confirmado_Por=%s, Confirmado_Em=%s
             WHERE id=%s
-        """, (usuario, datetime.now().strftime('%d/%m/%Y %H:%M'), log_id))
+        """, (usuario, datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M'), log_id))
         conn.commit()
         carregar_fila_logistica.clear()
     except Exception as e:
@@ -1509,7 +1509,7 @@ def atualizar_componente(comp_id, status, obs, usuario):
             UPDATE componentes_op
             SET Status_Item=%s, Observacao=%s, Conferido_Por=%s, Conferido_Em=%s
             WHERE id=%s
-        """, (status, obs, usuario, datetime.now().strftime('%d/%m/%Y %H:%M'), comp_id))
+        """, (status, obs, usuario, datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M'), comp_id))
         conn.commit()
         carregar_componentes_op.clear()
         carregar_todas_ops_com_componentes.clear()
@@ -1666,7 +1666,7 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
 
     linha = 3
     info_row(ws, linha,   "Nº OP:",          lote_row.get('Num_OP', '—'))
-    info_row(ws, linha+1, "DATA:",            datetime.now().strftime('%d/%m/%Y'))
+    info_row(ws, linha+1, "DATA:",            datetime.now(FUSO_BR).strftime('%d/%m/%Y'))
     info_row(ws, linha+2, "OBRA:",            lote_row.get('Obra_Vinculada', '—'))
     info_row(ws, linha+3, "PROJETO:",         f"{num_projeto} — {macro_row.get('Tarefa', '—')}" if num_projeto else macro_row.get('Tarefa', '—'))
     info_row(ws, linha+4, "LOTE:",            lote_row.get('Cod_Lote', '—'))
@@ -1813,7 +1813,7 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
         ("Lote:", str(lote_row.get('Cod_Lote', '—'))),
         ("Endereço:", str(endereco_obra)),
         ("Digitado por:", str(digitado_por)),
-        ("Data:", datetime.now().strftime('%d/%m/%Y')),
+        ("Data:", datetime.now(FUSO_BR).strftime('%d/%m/%Y')),
     ]
     linha = 3
     for label, valor in infos:
@@ -2221,7 +2221,7 @@ with st.sidebar:
         st.rerun()
 
 # ── Topbar ────────────────────────────────────────────────────────────────────
-agora_str = datetime.now().strftime("%d/%m/%Y  %H:%M")
+agora_str = datetime.now(FUSO_BR).strftime("%d/%m/%Y  %H:%M")
 
 # Busca notificações recentes do log de auditoria
 @st.cache_data(ttl=15)
@@ -3688,7 +3688,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             st.info("Nenhuma alteração detectada.")
 
                     ids_sel = df_ed[df_ed['Selecionar'] == True]['id'].tolist()
-                    prefixo = st.text_input("Prefixo da OP:", value=f"OP-{datetime.now().strftime('%Y')}-")
+                    prefixo = st.text_input("Prefixo da OP:", value=f"OP-{datetime.now(FUSO_BR).strftime('%Y')}-")
                     if st.button("Liberar para producao"):
                         if ids_sel:
                             conn = conectar_banco()
@@ -5207,7 +5207,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     obra_med_sel = st.selectbox("Obra:", list(opcoes_med.keys()), key="sel_obra_srv")
                     obra_med_id  = opcoes_med[obra_med_sel]
                     periodo_ref  = st.text_input("Período de referência (MM/AAAA):",
-                                                  value=datetime.now().strftime('%m/%Y'),
+                                                  value=datetime.now(FUSO_BR).strftime('%m/%Y'),
                                                   placeholder="Ex: 06/2025")
 
                     obra_med_info = df_med_obras2[df_med_obras2['id'] == obra_med_id].iloc[0]
@@ -5744,7 +5744,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                     # ── Linha 2: subtítulo ───────────────────────
                     ws.merge_cells("A2:J2")
-                    ws["A2"] = f"Relatório Geral de Produção  |  Obra: {titulo_filtro}  |  Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+                    ws["A2"] = f"Relatório Geral de Produção  |  Obra: {titulo_filtro}  |  Gerado em: {datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M')}"
                     ws["A2"].font = Font(name="Calibri", size=10, color="94A3B8", italic=True)
                     ws["A2"].fill = PatternFill("solid", fgColor=cor_sub)
                     ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
@@ -5764,7 +5764,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     ws.row_dimensions[4].height = 22
 
                     # ── Linhas de dados ──────────────────────────
-                    hoje_str = datetime.now().strftime('%d/%m/%Y')
+                    hoje_str = datetime.now(FUSO_BR).strftime('%d/%m/%Y')
                     for row_idx, row_data in enumerate(df_exp.itertuples(index=False), start=5):
                         is_par = (row_idx % 2 == 0)
                         limite_val = str(row_data[7]) if len(row_data) > 7 else ""
@@ -5807,7 +5807,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 st.download_button(
                     label="Baixar relatório em Excel",
                     data=excel_bytes,
-                    file_name=f"relatorio_producao_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    file_name=f"relatorio_producao_{datetime.now(FUSO_BR).strftime('%Y%m%d_%H%M')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="dl_rel_xlsx"
                 )
