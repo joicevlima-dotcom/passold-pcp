@@ -2157,15 +2157,19 @@ GRUPOS_NAV = {
     },
 }
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("""
-    <div class="sidebar-logo">
-        <div class="sidebar-logo-name">🏭 Passold</div>
-        <div class="sidebar-logo-sub">Sistemas de Fachadas</div>
-    </div>
-    """, unsafe_allow_html=True)
+# ── Constrói lista de páginas disponíveis para este setor ────────────────────
+paginas_disponiveis = ["Dashboard"]
 
+with st.sidebar:
+    # Logo
+    try:
+        st.image("assets/LOGO_BAUDENPASSOLD.png", use_container_width=True)
+    except Exception:
+        st.markdown('<div class="sidebar-logo"><div class="sidebar-logo-name">PSF</div><div class="sidebar-logo-sub">Gestão Industrial</div></div>', unsafe_allow_html=True)
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+
+    # Seletor de obra
     st.markdown('<p class="nav-section-label">Obra de trabalho</p>', unsafe_allow_html=True)
     if not df_banco_macro.empty:
         obras_lista      = ["Todas as Obras"] + sorted(df_banco_macro['Obra'].unique().tolist())
@@ -2180,38 +2184,70 @@ with st.sidebar:
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # Constrói lista de páginas disponíveis para este setor
-    paginas_disponiveis  = []   # chave interna (nome_aba)
-    paginas_labels       = []   # label exibido no menu
-    grupos_indices       = {}   # grupo → (início, fim) da lista
+    # Garante pagina_atual válida
+    if "pagina_atual" not in st.session_state:
+        st.session_state.pagina_atual = "Dashboard"
+
+    # Menu por grupos com botões reais
+    st.markdown("""
+    <style>
+    section[data-testid="stSidebar"] .stButton > button {
+        background: rgba(255,255,255,0.06) !important;
+        color: #E2E8F0 !important;
+        border: none !important;
+        border-radius: 6px !important;
+        padding: 9px 14px !important;
+        font-size: 0.88rem !important;
+        font-weight: 500 !important;
+        width: 100% !important;
+        box-shadow: none !important;
+        margin: 2px 0 !important;
+        text-align: left !important;
+        justify-content: flex-start !important;
+    }
+    section[data-testid="stSidebar"] .stButton > button:hover {
+        background: rgba(255,255,255,0.14) !important;
+        color: #fff !important;
+        transform: none !important;
+        box-shadow: none !important;
+    }
+    section[data-testid="stSidebar"] .stButton > button p {
+        color: #E2E8F0 !important;
+        font-size: 0.88rem !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Dashboard sempre primeiro
+    _ativo = st.session_state.pagina_atual == "Dashboard"
+    _estilo_ativo = "background:rgba(59,130,246,0.2)!important;color:#fff!important;font-weight:700!important;border-left:3px solid #3B82F6!important;"
+    if _ativo:
+        st.markdown(f'<div style="{_estilo_ativo}border-radius:6px;padding:8px 12px;font-size:0.87rem;margin:1px 0;">🏠  Dashboard</div>', unsafe_allow_html=True)
+    else:
+        if st.button("🏠  Dashboard", key="nav_Dashboard"):
+            st.session_state.pagina_atual = "Dashboard"
+            st.rerun()
 
     for grupo, itens in GRUPOS_NAV.items():
         itens_grupo = [(k, v[0]) for k, v in itens.items() if setor in v[1]]
         if not itens_grupo:
             continue
-        grupos_indices[grupo] = (len(paginas_disponiveis), len(paginas_disponiveis) + len(itens_grupo))
-        st.markdown(f'<p class="nav-section-label">{grupo.split("  ")[1]}</p>', unsafe_allow_html=True)
+        grupo_label = grupo.split("  ")[1] if "  " in grupo else grupo
+        st.markdown(f'<p class="nav-section-label">{grupo_label}</p>', unsafe_allow_html=True)
         for chave, label in itens_grupo:
             paginas_disponiveis.append(chave)
-            paginas_labels.append(label)
-
-    # Adiciona Dashboard no início
-    paginas_disponiveis.insert(0, "Dashboard")
-    paginas_labels.insert(0, "🏠  Dashboard")
-
-    if "pagina_atual" not in st.session_state or st.session_state.pagina_atual not in paginas_disponiveis:
-        st.session_state.pagina_atual = "Dashboard"
-
-    idx_atual = paginas_disponiveis.index(st.session_state.pagina_atual)
-    escolha = st.radio("nav", paginas_labels, index=idx_atual, label_visibility="collapsed", key="nav_radio")
-    nome_aba = paginas_disponiveis[paginas_labels.index(escolha)]
-    st.session_state.pagina_atual = nome_aba
+            _ativo = st.session_state.pagina_atual == chave
+            if _ativo:
+                st.markdown(f'<div style="{_estilo_ativo}border-radius:6px;padding:8px 12px;font-size:0.87rem;margin:1px 0;">{label}</div>', unsafe_allow_html=True)
+            else:
+                if st.button(label, key=f"nav_{chave}"):
+                    st.session_state.pagina_atual = chave
+                    st.rerun()
 
     st.markdown("<hr>", unsafe_allow_html=True)
     ultima_at  = st.session_state.get("ultima_atividade")
     timeout_em = ultima_at + timedelta(hours=TIMEOUT_SESSAO_HORAS) if ultima_at else None
-    st.caption(f"👤 {st.session_state.usuario_nome}")
-    st.caption(f"🏷️ {setor}")
+    st.caption(f"👤 {st.session_state.usuario_nome}  ·  {setor}")
     if timeout_em:
         st.caption(f"⏱️ Sessão até {timeout_em.strftime('%H:%M')}")
     if st.button("↩ Sair", key="btn_sair_sidebar"):
@@ -2224,23 +2260,6 @@ with st.sidebar:
 agora_str = datetime.now(FUSO_BR).strftime("%d/%m/%Y  %H:%M")
 
 # Busca notificações recentes do log de auditoria
-@st.cache_data(ttl=15)
-def _carregar_notificacoes():
-    conn = conectar_banco()
-    try:
-        df = pd.read_sql_query(
-            "SELECT usuario, acao, detalhes, criado_em FROM auditoria_log ORDER BY id DESC LIMIT 30",
-            conn
-        )
-    except Exception:
-        df = pd.DataFrame()
-    finally:
-        liberar_conexao(conn)
-    return df
-
-_df_notif = _carregar_notificacoes()
-_n_notif  = len(_df_notif)
-
 _ICONES_ACAO = {
     "LOGIN": "🔐", "LOGOUT": "🚪",
     "LIBERAR_OPS": "🔓", "LANCAMENTO_PECAS": "📦",
@@ -2248,21 +2267,79 @@ _ICONES_ACAO = {
     "CRIAR_USUARIO": "👤", "OP_AVULSA": "📋",
     "SOLICITAR_OP": "📝", "VINCULAR_SOLICITACAO_OP": "🔗",
     "GERAR_LOTE": "⚙️", "EXCLUIR_LOTE": "🗑️",
-    "CADASTRAR_OBRA": "🏗️",
+    "CADASTRAR_OBRA": "🏗️", "CADASTRAR_FRENTE": "📐",
+    "ENVIO_TOTAL": "🚚", "DESPACHO_LOGISTICA": "🚚",
 }
+
+# Filtros de notificação por setor — cada setor vê só o que lhe interessa
+_FILTROS_NOTIF = {
+    "Master":        None,   # vê tudo (exceto login/logout)
+    "PCP":           ["SOLICITAR_OP", "LIBERAR_OPS", "GERAR_LOTE", "CADASTRAR_OBRA", "CADASTRAR_FRENTE", "VINCULAR_SOLICITACAO_OP"],
+    "Producao":      ["LIBERAR_OPS", "LANCAMENTO_PECAS", "GERAR_LOTE"],
+    "Engenharia":    ["CADASTRAR_FRENTE", "VINCULAR_SOLICITACAO_OP", "SOLICITAR_OP"],
+    "Diretoria":     ["CADASTRAR_OBRA", "GERAR_LOTE", "ENVIO_TOTAL", "LIBERAR_OPS"],
+    "Logistica":     ["ENVIO_TOTAL", "DESPACHO_LOGISTICA", "GERAR_LOTE"],
+    "Almoxarifado":  ["SOLICITAR_OP", "OP_AVULSA"],
+    "Medicao":       ["CADASTRAR_OBRA", "VINCULAR_SOLICITACAO_OP"],
+    "Esquadria":     ["LIBERAR_OPS", "GERAR_LOTE", "LANCAMENTO_PECAS"],
+}
+
+_TITULOS_NOTIF = {
+    "SOLICITAR_OP":           "Nova solicitação de OP recebida",
+    "LIBERAR_OPS":            "OPs liberadas para fábrica",
+    "LANCAMENTO_PECAS":       "Lançamento de peças registrado",
+    "GERAR_LOTE":             "Novo lote gerado",
+    "CADASTRAR_OBRA":         "Nova obra cadastrada",
+    "CADASTRAR_FRENTE":       "Nova frente cadastrada",
+    "VINCULAR_SOLICITACAO_OP":"Solicitação vinculada a OP",
+    "OP_AVULSA":              "OP avulsa lançada",
+    "ENVIO_TOTAL":            "Envio total registrado",
+    "DESPACHO_LOGISTICA":     "Despacho logístico registrado",
+    "EXCLUIR_OBRA":           "Obra excluída",
+    "EXCLUIR_FRENTE":         "Frente excluída",
+    "EXCLUIR_LOTE":           "Lote excluído",
+    "CRIAR_USUARIO":          "Novo usuário criado",
+}
+
+_ACOES_AUDITORIA = ["LOGIN", "LOGOUT"]   # só Master vê no painel de auditoria
+
+@st.cache_data(ttl=15)
+def _carregar_notificacoes(setor_usr: str):
+    conn = conectar_banco()
+    try:
+        filtro = _FILTROS_NOTIF.get(setor_usr)
+        if filtro is None:
+            # Master: tudo menos login/logout
+            df = pd.read_sql_query(
+                "SELECT usuario, acao, detalhes, criado_em FROM auditoria_log "
+                "WHERE acao NOT IN ('LOGIN','LOGOUT') ORDER BY id DESC LIMIT 30",
+                conn
+            )
+        else:
+            placeholders = ",".join(["%s"] * len(filtro))
+            df = pd.read_sql_query(
+                f"SELECT usuario, acao, detalhes, criado_em FROM auditoria_log "
+                f"WHERE acao IN ({placeholders}) ORDER BY id DESC LIMIT 30",
+                conn, params=filtro
+            )
+    except Exception:
+        df = pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+    return df
+
+_df_notif = _carregar_notificacoes(setor)
+_n_notif  = len(_df_notif)
 
 if "notif_aberto" not in st.session_state:
     st.session_state.notif_aberto = False
 
 tb_esq, tb_meio, tb_dir = st.columns([4, 1, 3])
 with tb_esq:
-    st.markdown(f"""
-    <div style="display:flex;align-items:center;padding:10px 0;">
-        <span style="font-size:1.15rem;font-weight:800;color:#1E3A5F;letter-spacing:-0.02em;">
-            Passold <span style="color:#1A56DB;">Sistemas de Fachadas</span>
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
+    try:
+        st.image("assets/LOGO_BAUDENPASSOLD.png", width=160)
+    except Exception:
+        st.markdown('<span style="font-size:1.1rem;font-weight:800;color:#1E3A5F;">PSF <span style="color:#1A56DB;">Gestão Industrial</span></span>', unsafe_allow_html=True)
 
 with tb_meio:
     _label_sino = f"🔔 {_n_notif}" if _n_notif > 0 else "🔔"
@@ -2297,26 +2374,33 @@ if st.session_state.notif_aberto:
         """, unsafe_allow_html=True)
 
         if _df_notif.empty:
-            st.info("Nenhuma atividade registrada ainda.")
+            st.markdown("""
+            <div style="padding:24px;text-align:center;color:#94A3B8;">
+                <div style="font-size:2rem;margin-bottom:8px;">📭</div>
+                <div>Nenhuma notificação para o seu setor.</div>
+            </div>""", unsafe_allow_html=True)
         else:
             for _, row in _df_notif.iterrows():
-                icone = _ICONES_ACAO.get(str(row.get('acao', '')), "📌")
-                acao  = str(row.get('acao', '')).replace('_', ' ').title()
-                det   = str(row.get('detalhes', ''))[:80] + ("…" if len(str(row.get('detalhes', ''))) > 80 else "")
-                usr   = str(row.get('usuario', ''))
-                hora  = str(row.get('criado_em', ''))[:16]
+                _acao_raw = str(row.get('acao', ''))
+                icone  = _ICONES_ACAO.get(_acao_raw, "📌")
+                titulo = _TITULOS_NOTIF.get(_acao_raw, _acao_raw.replace('_', ' ').title())
+                det    = str(row.get('detalhes', ''))
+                det    = det[:90] + ("…" if len(det) > 90 else "")
+                usr    = str(row.get('usuario', ''))
+                hora   = str(row.get('criado_em', ''))[:16]
                 st.markdown(f"""
-                <div style="display:flex;align-items:flex-start;gap:12px;padding:10px 16px;
+                <div style="display:flex;align-items:flex-start;gap:14px;padding:12px 20px;
                             border-bottom:1px solid #F1F5F9;background:#fff;">
-                    <span style="font-size:1.3rem;margin-top:2px;">{icone}</span>
+                    <div style="width:38px;height:38px;border-radius:10px;background:#EFF6FF;
+                                display:flex;align-items:center;justify-content:center;
+                                font-size:1.2rem;flex-shrink:0;">{icone}</div>
                     <div style="flex:1;min-width:0;">
-                        <div style="font-weight:600;font-size:0.85rem;color:#1E293B;">{acao}</div>
-                        <div style="font-size:0.78rem;color:#64748B;margin-top:2px;
+                        <div style="font-weight:700;font-size:0.85rem;color:#1E293B;">{titulo}</div>
+                        <div style="font-size:0.78rem;color:#64748B;margin-top:3px;
                                     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{det}</div>
-                    </div>
-                    <div style="text-align:right;flex-shrink:0;">
-                        <div style="font-size:0.72rem;color:#94A3B8;">{hora}</div>
-                        <div style="font-size:0.7rem;color:#CBD5E1;">👤 {usr}</div>
+                        <div style="font-size:0.7rem;color:#94A3B8;margin-top:4px;">
+                            👤 {usr} &nbsp;·&nbsp; 🕐 {hora}
+                        </div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
