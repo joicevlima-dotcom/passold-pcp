@@ -3879,6 +3879,34 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         finally:
                             liberar_conexao(conn)
 
+                st.markdown("---")
+                st.markdown("#### Excluir Obra")
+                st.warning("Isso remove **todas as frentes** da obra selecionada do cronograma macro.")
+                obras_para_del = sorted(df_banco_macro['Obra'].unique().tolist()) if not df_banco_macro.empty else []
+                if obras_para_del:
+                    obra_del = st.selectbox("Obra para excluir:", obras_para_del, key="sel_del_obra")
+                    n_frentes = len(df_banco_macro[df_banco_macro['Obra'] == obra_del])
+                    st.caption(f"{n_frentes} frente(s) serão removidas.")
+                    if st.button(f"🗑️ Excluir obra '{obra_del}'", key="btn_del_obra", type="primary"):
+                        conn = conectar_banco()
+                        try:
+                            cursor = conn.cursor()
+                            cursor.execute("DELETE FROM cronograma_macro WHERE Obra=%s", (obra_del,))
+                            conn.commit()
+                            _limpar_cache_geral()
+                            registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_OBRA",
+                                f"Obra '{obra_del}' removida — {n_frentes} frente(s)")
+                            st.toast(f"Obra '{obra_del}' removida com sucesso!")
+                            time.sleep(0.5)
+                            st.rerun()
+                        except Exception as e:
+                            conn.rollback()
+                            st.error(f"Erro: {e}")
+                        finally:
+                            liberar_conexao(conn)
+                else:
+                    st.info("Nenhuma obra cadastrada.")
+
     # ==================================================
     # PAINEL DE ENGENHARIA
     # ==================================================
