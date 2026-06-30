@@ -370,10 +370,10 @@ def conectar_banco():
  return get_connection_pool().getconn()
 
 def liberar_conexao(conn):
- try:
- get_connection_pool().putconn(conn)
- except Exception:
- pass
+    try:
+        get_connection_pool().putconn(conn)
+    except Exception:
+        pass
 
 # ========================================================
 # SENHAS — bcrypt com salt
