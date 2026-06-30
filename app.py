@@ -4473,13 +4473,21 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                     st.info(f"Teto da obra: **R$ {obra_med_info['valor_m2_global']:.2f}/m²**")
 
                     df_srvs = carregar_medicao_servicos(obra_med_id)
-                    if "med_num_servicos" not in st.session_state:
+                    if st.session_state.get("med_obra_id_atual") != obra_med_id:
+                        st.session_state.med_obra_id_atual = obra_med_id
                         st.session_state.med_num_servicos = max(1, len(df_srvs))
+                        st.session_state.med_servicos_excluidos = set()
+                    elif "med_num_servicos" not in st.session_state:
+                        st.session_state.med_num_servicos = max(1, len(df_srvs))
+                        st.session_state.med_servicos_excluidos = set()
 
-                    st.markdown(f"#### Serviços ({st.session_state.med_num_servicos})")
+                    ativos = st.session_state.med_num_servicos - len(st.session_state.med_servicos_excluidos)
+                    st.markdown(f"#### Serviços ({ativos})")
 
                     servicos_form = []
                     for si in range(st.session_state.med_num_servicos):
+                        if si in st.session_state.med_servicos_excluidos:
+                            continue
                         srv_existente = df_srvs.iloc[si] if si < len(df_srvs) else None
                         with st.expander(f"Serviço {si+1}", expanded=(si == 0)):
                             s1, s2 = st.columns(2)
@@ -4509,6 +4517,12 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                                     st.metric("Subtotal", f"R$ {sub_total:,.2f}")
                                 if sub_nome.strip():
                                     subdivisoes_form.append({"nome": sub_nome, "m2": sub_m2, "percentual": sub_pct})
+
+                            col_excluir = st.columns([1])[0]
+                            with col_excluir:
+                                if st.button(f"🗑️ Excluir Serviço {si+1}", key=f"excluir_srv_{si}", type="secondary"):
+                                    st.session_state.med_servicos_excluidos.add(si)
+                                    st.rerun()
 
                             if srv_nome.strip():
                                 servicos_form.append({"nome": srv_nome, "valor_m2_servico": srv_val, "subdivisoes": subdivisoes_form})
