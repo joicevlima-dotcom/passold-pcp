@@ -2336,10 +2336,7 @@ if "notif_aberto" not in st.session_state:
 
 tb_esq, tb_meio, tb_dir = st.columns([4, 1, 3])
 with tb_esq:
-    try:
-        st.image("assets/LOGO_BAUDENPASSOLD.png", width=160)
-    except Exception:
-        st.markdown('<span style="font-size:1.1rem;font-weight:800;color:#1E3A5F;">PSF <span style="color:#1A56DB;">Gestão Industrial</span></span>', unsafe_allow_html=True)
+    st.markdown('<span style="font-size:1.1rem;font-weight:700;color:#1E3A5F;">Passold <span style="color:#1A56DB;">Sistemas de Fachadas</span></span>', unsafe_allow_html=True)
 
 with tb_meio:
     _label_sino = f"🔔 {_n_notif}" if _n_notif > 0 else "🔔"
