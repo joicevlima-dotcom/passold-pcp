@@ -10,9 +10,16 @@ import psycopg2
 import psycopg2.extras
 from psycopg2 import pool
 from zoneinfo import ZoneInfo
+from html import escape as html_escape
 
 FUSO_BR = ZoneInfo('America/Sao_Paulo')
-HOJE_PROJETO = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+def hoje_projeto() -> datetime:
+    """Retorna meia-noite de hoje — sempre atualizado, nunca congelado na inicialização."""
+    return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+# Alias para compatibilidade com usos existentes como constante
+# hoje_projeto() não é mais constante — use hoje_projeto() nos contextos de renderização
 
 # ── Constantes de segurança ─────────────────────────────
 MAX_TENTATIVAS_LOGIN  = 3
@@ -26,12 +33,12 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 :root {
-    --primary:        #0F172A;
-    --primary-light:  #1E293B;
-    --primary-hover:  #334155;
-    --accent:         #EA580C;
-    --accent-hover:   #C2410C;
-    --accent-light:   #FFF7ED;
+    --primary:        #1E3A5F;
+    --primary-light:  #2A4F7C;
+    --primary-hover:  #355F90;
+    --accent:         #1A56DB;
+    --accent-hover:   #1447C0;
+    --accent-light:   #EFF6FF;
     --success:        #059669;
     --success-light:  #ECFDF5;
     --warning:        #D97706;
@@ -47,9 +54,9 @@ st.markdown("""
     --text:           #1E293B;
     --text-muted:     #64748B;
     --text-light:     #94A3B8;
-    --sidebar-bg:     #0F172A;
+    --sidebar-bg:     #1E3A5F;
     --sidebar-text:   #CBD5E1;
-    --sidebar-active: #EA580C;
+    --sidebar-active: #3B82F6;
     --shadow-xs:  0 1px 2px rgba(0,0,0,0.05);
     --shadow-sm:  0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
     --shadow-md:  0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
@@ -69,40 +76,53 @@ section[data-testid="stSidebar"] {
     border-right: none !important;
     box-shadow: 4px 0 24px rgba(0,0,0,0.15) !important;
 }
+/* ── Sidebar geral ──────────────────────────────────────── */
 section[data-testid="stSidebar"] * { color: var(--sidebar-text) !important; }
-section[data-testid="stSidebar"] .stRadio > label { display: none; }
-section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] { gap: 2px; display: flex; flex-direction: column; }
-section[data-testid="stSidebar"] .stRadio label {
-    display: flex !important;
-    align-items: center;
-    padding: 10px 14px;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    font-size: 0.88rem;
-    font-weight: 500;
-    color: var(--sidebar-text) !important;
-    transition: all 0.15s ease;
-    border: 1px solid transparent;
-}
-section[data-testid="stSidebar"] .stRadio label:hover {
-    background: rgba(255,255,255,0.07);
-    color: #fff !important;
-}
-section[data-testid="stSidebar"] .stRadio label[data-checked="true"],
-section[data-testid="stSidebar"] .stRadio label[aria-checked="true"] {
-    background: rgba(234,88,12,0.18) !important;
-    color: #fff !important;
-    border-color: rgba(234,88,12,0.4) !important;
-    font-weight: 700 !important;
-}
+section[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.12) !important; margin: 8px 0 !important; }
+section[data-testid="stSidebar"] .stCaption p { color: rgba(255,255,255,0.45) !important; font-size: 0.72rem !important; }
 section[data-testid="stSidebar"] .stSelectbox > div > div {
     background: rgba(255,255,255,0.08) !important;
     border-color: rgba(255,255,255,0.15) !important;
-    color: #fff !important;
     border-radius: var(--radius-sm) !important;
 }
-section[data-testid="stSidebar"] .stCaption { color: var(--text-light) !important; font-size: 0.72rem !important; }
-section[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.1) !important; margin: 10px 0 !important; }
+
+/* ── Esconde o label do radio de nav ──────────────────── */
+section[data-testid="stSidebar"] .stRadio > div > label:first-child { display: none !important; }
+
+/* ── Itens do menu ────────────────────────────────────── */
+section[data-testid="stSidebar"] .stRadio > div > div[role="radiogroup"] {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 2px !important;
+}
+section[data-testid="stSidebar"] .stRadio > div > div[role="radiogroup"] > label {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 9px 12px !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+    font-size: 0.87rem !important;
+    font-weight: 500 !important;
+    color: #94A3B8 !important;
+    border: 1px solid transparent !important;
+    transition: all 0.15s ease !important;
+    background: transparent !important;
+}
+section[data-testid="stSidebar"] .stRadio > div > div[role="radiogroup"] > label:hover {
+    background: rgba(255,255,255,0.07) !important;
+    color: #fff !important;
+}
+section[data-testid="stSidebar"] .stRadio > div > div[role="radiogroup"] > label:has(input:checked) {
+    background: rgba(59,130,246,0.2) !important;
+    color: #fff !important;
+    border-color: rgba(59,130,246,0.5) !important;
+    font-weight: 700 !important;
+}
+/* esconde o círculo nativo do radio */
+section[data-testid="stSidebar"] .stRadio input[type="radio"] {
+    display: none !important;
+}
 
 /* ── Topbar ─────────────────────────────────── */
 .topbar {
@@ -122,7 +142,7 @@ section[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.1) !impor
     background: var(--accent-light); color: var(--accent);
     padding: 3px 10px; border-radius: 20px;
     font-size: 0.75rem; font-weight: 700;
-    border: 1px solid rgba(234,88,12,0.2);
+    border: 1px solid rgba(26,86,219,0.2);
 }
 .topbar-time { font-size: 0.78rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
 
@@ -216,7 +236,7 @@ div[data-testid="stMetricDelta"] { font-size: 0.82rem !important; }
 .stNumberInput > div > div > input:focus,
 .stTextArea > div > div > textarea:focus {
     border-color: var(--accent) !important;
-    box-shadow: 0 0 0 3px rgba(234,88,12,0.1) !important;
+    box-shadow: 0 0 0 3px rgba(26,86,219,0.1) !important;
 }
 
 /* ── Tabelas ────────────────────────────────── */
@@ -261,7 +281,7 @@ div[data-testid="stExpander"]:hover { border-color: var(--border-hover) !importa
 div[data-testid="stAlert"] { border-radius: var(--radius-sm) !important; }
 
 /* ── Badges & Barras ────────────────────────── */
-.badge-obra  { background:var(--accent-light); color:#C2410C; padding:3px 10px; border-radius:20px; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; border:1px solid rgba(194,65,12,0.2); }
+.badge-obra  { background:var(--accent-light); color:#1447C0; padding:3px 10px; border-radius:20px; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; border:1px solid rgba(20,71,192,0.2); }
 .badge-edt   { background:#F1F5F9; color:#334155; padding:3px 10px; border-radius:20px; font-weight:600; font-size:11px; border:1px solid var(--border); }
 .badge-lote  { background:var(--success-light); color:#047857; padding:3px 10px; border-radius:20px; font-weight:700; font-size:11px; border:1px solid rgba(4,120,87,0.2); }
 .badge-op    { background:var(--info-light); color:#0369A1; padding:3px 10px; border-radius:20px; font-weight:700; font-size:11px; border:1px solid rgba(3,105,161,0.2); }
@@ -281,7 +301,7 @@ div[data-testid="stAlert"] { border-radius: var(--radius-sm) !important; }
     position:relative;
 }
 .pipeline-step.done   { background:var(--success-light); border-color:rgba(5,150,105,0.3); color:var(--success); }
-.pipeline-step.active { background:var(--accent-light);  border-color:rgba(234,88,12,0.3);  color:var(--accent); font-weight:700; }
+.pipeline-step.active { background:var(--accent-light);  border-color:rgba(26,86,219,0.3);  color:var(--accent); font-weight:700; }
 .pipeline-arrow { color:var(--border); font-size:1rem; padding:0 4px; }
 
 /* ── Seção cards do dashboard ───────────────── */
@@ -354,38 +374,87 @@ def hash_senha(senha: str) -> str:
 
 def verificar_senha(senha: str, hash_salvo: str) -> bool:
     try:
-        return bcrypt.checkpw(senha.encode(), hash_salvo.encode())
+        return bool(bcrypt.checkpw(senha.encode(), hash_salvo.encode()))
     except Exception:
-        return 
+        return False
 
-# ── Rate limiting de login ───────────────────────────────
-def _chave_bloqueio(usuario: str) -> str:
-    return f"login_attempts_{usuario}"
+
+# ── Rate limiting de login — persistido no banco ─────────
+# Resiste a refresh de página e novas sessões do mesmo usuário.
 
 def verificar_bloqueio(usuario: str) -> tuple:
     """Retorna (bloqueado: bool, segundos_restantes: int)."""
-    chave = _chave_bloqueio(usuario)
-    dados = st.session_state.get(chave, {"tentativas": 0, "bloqueado_ate": None})
-    if dados["bloqueado_ate"] and datetime.now() < dados["bloqueado_ate"]:
-        restante = int((dados["bloqueado_ate"] - datetime.now()).total_seconds())
-        return True, restante
-    return False, 0
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT tentativas, bloqueado_ate FROM login_tentativas WHERE usuario=%s",
+            (usuario,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return False, 0
+        tentativas, bloqueado_ate_str = row
+        if bloqueado_ate_str:
+            bloqueado_ate = datetime.fromisoformat(bloqueado_ate_str)
+            if datetime.now() < bloqueado_ate:
+                return True, int((bloqueado_ate - datetime.now()).total_seconds())
+        return False, 0
+    except Exception:
+        return False, 0
+    finally:
+        liberar_conexao(conn)
 
 def registrar_tentativa_falha(usuario: str):
-    chave = _chave_bloqueio(usuario)
-    dados = st.session_state.get(chave, {"tentativas": 0, "bloqueado_ate": None})
-    dados["tentativas"] += 1
-    if dados["tentativas"] >= MAX_TENTATIVAS_LOGIN:
-        dados["bloqueado_ate"] = datetime.now() + timedelta(minutes=BLOQUEIO_MINUTOS)
-        dados["tentativas"]    = 0
-    st.session_state[chave] = dados
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT tentativas FROM login_tentativas WHERE usuario=%s", (usuario,)
+        )
+        row = cursor.fetchone()
+        tentativas = (row[0] if row else 0) + 1
+        bloqueado_ate = None
+        if tentativas >= MAX_TENTATIVAS_LOGIN:
+            bloqueado_ate = (datetime.now() + timedelta(minutes=BLOQUEIO_MINUTOS)).isoformat()
+            tentativas = 0
+        cursor.execute(
+            """INSERT INTO login_tentativas (usuario, tentativas, bloqueado_ate)
+               VALUES (%s, %s, %s)
+               ON CONFLICT (usuario) DO UPDATE
+               SET tentativas=%s, bloqueado_ate=%s""",
+            (usuario, tentativas, bloqueado_ate, tentativas, bloqueado_ate)
+        )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        liberar_conexao(conn)
 
 def resetar_tentativas(usuario: str):
-    st.session_state[_chave_bloqueio(usuario)] = {"tentativas": 0, "bloqueado_ate": None}
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM login_tentativas WHERE usuario=%s", (usuario,)
+        )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        liberar_conexao(conn)
 
 def tentativas_restantes(usuario: str) -> int:
-    dados = st.session_state.get(_chave_bloqueio(usuario), {"tentativas": 0, "bloqueado_ate": None})
-    return MAX_TENTATIVAS_LOGIN - dados.get("tentativas", 0)
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT tentativas FROM login_tentativas WHERE usuario=%s", (usuario,))
+        row = cursor.fetchone()
+        return MAX_TENTATIVAS_LOGIN - (row[0] if row else 0)
+    except Exception:
+        return MAX_TENTATIVAS_LOGIN
+    finally:
+        liberar_conexao(conn)
 
 # ── Timeout de sessão ────────────────────────────────────
 def registrar_atividade():
@@ -659,16 +728,30 @@ def inicializar_banco_de_dados():
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_auditoria_usuario ON auditoria_log(usuario)")
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS login_tentativas (
+                usuario      TEXT PRIMARY KEY,
+                tentativas   INTEGER DEFAULT 0,
+                bloqueado_ate TEXT
+            )
+        """)
+
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
+            _senha_master = (
+                st.secrets.get("MASTER_PASS")
+                or os.environ.get("MASTER_PASS")
+                or "Passold@2025!"
+            )
             cursor.execute(
                 "INSERT INTO usuarios (usuario, nome, setor, senha) VALUES (%s, %s, %s, %s)",
-                ('master', 'Joice Master', 'Master', hash_senha('Jv568279.'))
+                ('master', 'Joice Master', 'Master', hash_senha(_senha_master))
             )
         conn.commit()
     except Exception as e:
         conn.rollback()
-        st.error(f"Erro na inicialização: {e}")
+        # Não exibe detalhes técnicos (pode conter DSN com credenciais)
+        st.error("Erro na inicialização do banco. Verifique as configurações de conexão.")
     finally:
         liberar_conexao(conn)
 
@@ -786,11 +869,11 @@ def carregar_micro():
 
 @st.cache_data(ttl=60)
 def carregar_micro_completo():
-    """Histórico completo (sem corte de 90 dias) — usado no Relatório Geral."""
+    """Histórico completo — usado no Relatório Geral. Limitado a 5000 registros mais recentes."""
     conn = conectar_banco()
     try:
         df = pd.read_sql_query(
-            "SELECT * FROM itens_detalhado ORDER BY Data_Producao_Programada ASC", conn
+            "SELECT * FROM itens_detalhado ORDER BY Data_Producao_Programada DESC LIMIT 5000", conn
         )
     finally:
         liberar_conexao(conn)
@@ -899,17 +982,17 @@ def carregar_solicitacoes_op():
     return df
 
 def _limpar_cache_geral():
-    carregar_macro.clear()
-    carregar_micro.clear()
-    carregar_micro_completo.clear()
-    carregar_fila_logistica.clear()
-    carregar_solicitacoes.clear()
-    carregar_solicitacoes_op.clear()
-    try:
-        carregar_macro_por_obra.clear()
-        carregar_micro_por_obra.clear()
-    except Exception:
-        pass
+    for fn in [
+        carregar_macro, carregar_micro, carregar_micro_completo,
+        carregar_fila_logistica, carregar_solicitacoes, carregar_solicitacoes_op,
+        carregar_macro_por_obra, carregar_micro_por_obra,
+        carregar_medicao_obras, carregar_medicao_servicos,
+        carregar_medicao_subdivisoes, carregar_medicao_historico,
+    ]:
+        try:
+            fn.clear()
+        except Exception:
+            pass
 
 def salvar_lotes_micro(lotes: list):
     if not lotes:
@@ -1036,8 +1119,25 @@ def atualizar_status_solicitacao(sol_id, novo_status):
     try:
         cursor = conn.cursor()
         cursor.execute("UPDATE solicitacoes_prazo SET status=%s WHERE id=%s", (novo_status, sol_id))
+        # Se aprovado, aplica o prazo solicitado no cronograma macro
+        if novo_status == "Aprovado":
+            cursor.execute(
+                "SELECT edt, prazo_solicitado FROM solicitacoes_prazo WHERE id=%s", (sol_id,)
+            )
+            row = cursor.fetchone()
+            if row:
+                edt_alvo, prazo_novo = row
+                cursor.execute(
+                    "UPDATE cronograma_macro SET Prazo_Engenharia=%s WHERE EDT=%s",
+                    (prazo_novo, edt_alvo)
+                )
         conn.commit()
         carregar_solicitacoes.clear()
+        try:
+            carregar_macro.clear()
+            carregar_macro_por_obra.clear()
+        except Exception:
+            pass
     except Exception as e:
         conn.rollback()
         st.error(f"Erro ao atualizar solicitação: {e}")
@@ -2122,16 +2222,108 @@ with st.sidebar:
 
 # ── Topbar ────────────────────────────────────────────────────────────────────
 agora_str = datetime.now().strftime("%d/%m/%Y  %H:%M")
-st.markdown(f"""
-<div class="topbar">
-    <div class="topbar-title">Passold <span>Sistemas de Fachadas</span></div>
-    <div class="topbar-right">
-        <span class="topbar-badge">{setor}</span>
-        <span class="topbar-user">👤 <strong>{st.session_state.usuario_nome}</strong></span>
-        <span class="topbar-time">🕐 {agora_str}</span>
+
+# Busca notificações recentes do log de auditoria
+@st.cache_data(ttl=15)
+def _carregar_notificacoes():
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            "SELECT usuario, acao, detalhes, criado_em FROM auditoria_log ORDER BY id DESC LIMIT 30",
+            conn
+        )
+    except Exception:
+        df = pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+    return df
+
+_df_notif = _carregar_notificacoes()
+_n_notif  = len(_df_notif)
+
+_ICONES_ACAO = {
+    "LOGIN": "🔐", "LOGOUT": "🚪",
+    "LIBERAR_OPS": "🔓", "LANCAMENTO_PECAS": "📦",
+    "EXCLUIR_FRENTE": "🗑️", "EXCLUIR_OBRA": "🗑️",
+    "CRIAR_USUARIO": "👤", "OP_AVULSA": "📋",
+    "SOLICITAR_OP": "📝", "VINCULAR_SOLICITACAO_OP": "🔗",
+    "GERAR_LOTE": "⚙️", "EXCLUIR_LOTE": "🗑️",
+    "CADASTRAR_OBRA": "🏗️",
+}
+
+if "notif_aberto" not in st.session_state:
+    st.session_state.notif_aberto = False
+
+tb_esq, tb_meio, tb_dir = st.columns([4, 1, 3])
+with tb_esq:
+    st.markdown(f"""
+    <div style="display:flex;align-items:center;padding:10px 0;">
+        <span style="font-size:1.15rem;font-weight:800;color:#1E3A5F;letter-spacing:-0.02em;">
+            Passold <span style="color:#1A56DB;">Sistemas de Fachadas</span>
+        </span>
     </div>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+
+with tb_meio:
+    _label_sino = f"🔔 {_n_notif}" if _n_notif > 0 else "🔔"
+    if st.button(_label_sino, key="btn_notif", help="Notificações recentes", use_container_width=True):
+        st.session_state.notif_aberto = not st.session_state.notif_aberto
+
+with tb_dir:
+    st.markdown(f"""
+    <div style="display:flex;align-items:center;justify-content:flex-end;gap:16px;padding:10px 0;">
+        <span style="background:#EFF6FF;color:#1A56DB;padding:3px 12px;border-radius:20px;
+                     font-size:0.75rem;font-weight:700;border:1px solid rgba(26,86,219,0.2);">{setor}</span>
+        <span style="font-size:0.82rem;color:#64748B;">👤 <strong style="color:#1E293B;">{st.session_state.usuario_nome}</strong></span>
+        <span style="font-size:0.78rem;color:#64748B;font-family:'JetBrains Mono',monospace;">🕐 {agora_str}</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.markdown('<hr style="margin:0 0 16px 0;border-color:#E2E8F0;">', unsafe_allow_html=True)
+
+# ── Painel de notificações ────────────────────────────────
+if st.session_state.notif_aberto:
+    with st.container():
+        st.markdown("""
+        <div style="background:#fff;border:1px solid #E2E8F0;border-radius:12px;
+                    box-shadow:0 8px 24px rgba(0,0,0,0.12);padding:0;overflow:hidden;
+                    margin-bottom:16px;">
+            <div style="background:#1E3A5F;padding:14px 20px;display:flex;
+                        align-items:center;justify-content:space-between;">
+                <span style="color:#fff;font-weight:700;font-size:0.95rem;">🔔 Notificações Recentes</span>
+                <span style="color:#94A3B8;font-size:0.75rem;">Últimas 30 ações do sistema</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if _df_notif.empty:
+            st.info("Nenhuma atividade registrada ainda.")
+        else:
+            for _, row in _df_notif.iterrows():
+                icone = _ICONES_ACAO.get(str(row.get('acao', '')), "📌")
+                acao  = str(row.get('acao', '')).replace('_', ' ').title()
+                det   = str(row.get('detalhes', ''))[:80] + ("…" if len(str(row.get('detalhes', ''))) > 80 else "")
+                usr   = str(row.get('usuario', ''))
+                hora  = str(row.get('criado_em', ''))[:16]
+                st.markdown(f"""
+                <div style="display:flex;align-items:flex-start;gap:12px;padding:10px 16px;
+                            border-bottom:1px solid #F1F5F9;background:#fff;">
+                    <span style="font-size:1.3rem;margin-top:2px;">{icone}</span>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-weight:600;font-size:0.85rem;color:#1E293B;">{acao}</div>
+                        <div style="font-size:0.78rem;color:#64748B;margin-top:2px;
+                                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{det}</div>
+                    </div>
+                    <div style="text-align:right;flex-shrink:0;">
+                        <div style="font-size:0.72rem;color:#94A3B8;">{hora}</div>
+                        <div style="font-size:0.7rem;color:#CBD5E1;">👤 {usr}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        if st.button("✕ Fechar notificações", key="fechar_notif"):
+            st.session_state.notif_aberto = False
+            st.rerun()
 
 # ── Remove o header antigo (evita duplicar) ───────────────────────────────────
 abas_disponiveis = paginas_disponiveis   # compatibilidade com código abaixo
@@ -2215,6 +2407,48 @@ if nome_aba == "Dashboard":
                 <div class="dash-card-sub">em andamento</div>
             </div>""", unsafe_allow_html=True)
 
+        # ── Faixa de alertas visível ──────────────────────────────
+        alertas = []
+        if lotes_atrasados > 0:
+            alertas.append(("danger", "🔴", f"{lotes_atrasados} lote(s) atrasado(s)", "Prazo vencido — acesse Relatório Geral"))
+        if ops_pendentes > 0:
+            alertas.append(("warn", "⚠️", f"{ops_pendentes} OP(s) aguardando liberação", "Acesse Liberar OPs da Semana"))
+        if not df_macro_dash.empty and 'Status_Engenharia' in df_macro_dash.columns:
+            criticos_eng = len(df_macro_dash[df_macro_dash['Status_Engenharia'].str.contains('Revisao|Aguardando', na=False)])
+            if criticos_eng > 0:
+                alertas.append(("warn", "📐", f"{criticos_eng} frente(s) em revisão ou aguardando", "Acesse Painel de Engenharia"))
+
+        if alertas:
+            st.markdown("---")
+            st.markdown("#### 🚨 Alertas do Sistema")
+            cols_alertas = st.columns(len(alertas))
+            estilos = {
+                "danger": ("background:#FEF2F2;border:1px solid #FECACA;border-left:5px solid #DC2626;", "#DC2626"),
+                "warn":   ("background:#FFFBEB;border:1px solid #FDE68A;border-left:5px solid #D97706;", "#D97706"),
+            }
+            for col, (tipo, icone, titulo, subtitulo) in zip(cols_alertas, alertas):
+                estilo, cor = estilos[tipo]
+                with col:
+                    st.markdown(f"""
+                    <div style="{estilo} border-radius:10px; padding:16px 20px;">
+                        <div style="font-size:1.6rem; margin-bottom:6px;">{icone}</div>
+                        <div style="font-size:1rem; font-weight:800; color:{cor}; line-height:1.2;">{titulo}</div>
+                        <div style="font-size:0.75rem; color:#6B7280; margin-top:4px;">{subtitulo}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            st.markdown("---")
+            st.markdown("""
+            <div style="background:#ECFDF5;border:1px solid #A7F3D0;border-left:5px solid #059669;
+                        border-radius:10px;padding:14px 20px;display:flex;align-items:center;gap:12px;">
+                <span style="font-size:1.4rem;">✅</span>
+                <div>
+                    <strong style="color:#065F46;">Tudo em ordem!</strong>
+                    <span style="color:#6B7280;font-size:0.85rem;margin-left:8px;">Nenhum alerta crítico no momento.</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
         st.markdown("<br>", unsafe_allow_html=True)
 
         col_esq, col_dir = st.columns([3, 2])
@@ -2231,7 +2465,6 @@ if nome_aba == "Dashboard":
                     'Concluido':               '#059669',
                     'Cancelado':               '#DC2626',
                 }
-                import plotly.express as px
                 fig = px.bar(status_counts, x='Status', y='Quantidade',
                              color='Status',
                              color_discrete_map=cores_status,
@@ -2245,27 +2478,12 @@ if nome_aba == "Dashboard":
                     xaxis=dict(title='', tickfont=dict(size=11)),
                     yaxis=dict(title='Qtd', gridcolor='#F1F5F9'),
                 )
-                fig.update_traces(marker_line_width=0, borderradius=4)
+                fig.update_traces(marker_line_width=0)
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.markdown('<div class="empty-state"><div class="empty-icon">📊</div><h4>Sem dados</h4><p>Nenhum lote cadastrado ainda.</p></div>', unsafe_allow_html=True)
 
         with col_dir:
-            st.markdown("#### 🚨 Alertas")
-            if lotes_atrasados > 0:
-                st.markdown(f'<div class="bar-danger">🔴 <strong>{lotes_atrasados} lote(s) atrasado(s)</strong> — verifique a aba Relatório</div>', unsafe_allow_html=True)
-            else:
-                st.markdown('<div class="bar-ok">✅ Nenhum lote atrasado</div>', unsafe_allow_html=True)
-
-            if ops_pendentes > 0:
-                st.markdown(f'<div class="bar-warn">⚠️ <strong>{ops_pendentes} OP(s) aguardando</strong> liberação para fábrica</div>', unsafe_allow_html=True)
-
-            if not df_macro_dash.empty and 'Status_Engenharia' in df_macro_dash.columns:
-                criticos = len(df_macro_dash[df_macro_dash['Status_Engenharia'].str.contains('Revisao|Aguardando', na=False)])
-                if criticos > 0:
-                    st.markdown(f'<div class="bar-warn">📐 <strong>{criticos} frente(s)</strong> em revisão ou aguardando</div>', unsafe_allow_html=True)
-
-            st.markdown("<br>", unsafe_allow_html=True)
             st.markdown("#### 📦 Lotes por Obra")
             if not df_micro_dash.empty:
                 por_obra = df_micro_dash.groupby('Obra_Vinculada').size().reset_index(name='Lotes')
@@ -2330,9 +2548,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     df_exp = pd.DataFrame(registros_exp) if registros_exp else pd.DataFrame()
 
                     if "prog_mes" not in st.session_state:
-                        st.session_state.prog_mes = HOJE_PROJETO.month
+                        st.session_state.prog_mes = hoje_projeto().month
                     if "prog_ano" not in st.session_state:
-                        st.session_state.prog_ano = HOJE_PROJETO.year
+                        st.session_state.prog_ano = hoje_projeto().year
 
                     c1, c2, c3 = st.columns([1, 2, 1])
                     with c1:
@@ -2374,7 +2592,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if data_dia.month == st.session_state.prog_mes:
                                     lotes_dia = df_exp[df_exp['_dia'] == data_dia] if not df_exp.empty else pd.DataFrame()
                                     n_lotes   = lotes_dia['Cod_Lote'].nunique() if not lotes_dia.empty else 0
-                                    eh_hoje   = (data_dia == HOJE_PROJETO.date())
+                                    eh_hoje   = (data_dia == hoje_projeto().date())
                                     if n_lotes > 0:
                                         obras_d   = lotes_dia['Obra_Vinculada'].unique()
                                         label_o   = obras_d[0] if len(obras_d) == 1 else f"{len(obras_d)} obras"
@@ -2393,7 +2611,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                     st.markdown("---")
                     if "dia_clicado_tv" not in st.session_state:
-                        st.session_state.dia_clicado_tv = HOJE_PROJETO.date()
+                        st.session_state.dia_clicado_tv = hoje_projeto().date()
                     dia_sel   = st.session_state.dia_clicado_tv
                     st.subheader(f"Lotes em producao — {dia_sel.strftime('%d/%m/%Y')}")
                     lotes_sel = (
@@ -2414,7 +2632,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             pode_concluir = bool(row.get('_pode_concluir', False)) or eh_parcial
                             dt_i = pd.to_datetime(row['Data_Producao_Programada']).strftime('%d/%m/%Y')
                             dt_f = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
-                            border_color = "#D97706" if eh_parcial else ("#EA580C" if pode_concluir else "#3B82F6")
+                            border_color = "#D97706" if eh_parcial else ("#1A56DB" if pode_concluir else "#3B82F6")
                             bg_color     = "#FFFBEB" if eh_parcial else ("#FFF7ED" if pode_concluir else "#F8FAFC")
                             st.markdown(
                                 f"<div style='border-left:4px solid {border_color};background:{bg_color};"
@@ -2441,7 +2659,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     elif eh_parcial:
                                         st.markdown("<span style='color:#D97706;font-size:12px;font-weight:700;'>🟠 Envio parcial registrado — ainda há peças pendentes</span>", unsafe_allow_html=True)
                                     elif pode_concluir:
-                                        st.markdown("<span style='color:#EA580C;font-size:12px;font-weight:600;'>Ultima semana — liberado para concluir</span>", unsafe_allow_html=True)
+                                        st.markdown("<span style='color:#1A56DB;font-size:12px;font-weight:600;'>Ultima semana — liberado para concluir</span>", unsafe_allow_html=True)
                                     else:
                                         dias_restantes = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel).days
                                         st.markdown(f"<span style='color:#3B82F6;font-size:12px;'>Em producao — {dias_restantes} dias ate o prazo</span>", unsafe_allow_html=True)
@@ -2501,11 +2719,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         )
 
                                     if tipo_envio == "Envio Total":
+                                        _pecas_lote_check = carregar_pecas_lote(int(row['id']))
                                         with me2:
-                                            st.info("Todas as peças serão marcadas como concluídas e enviadas para logística.")
+                                            if _pecas_lote_check.empty:
+                                                st.warning("⚠️ Nenhuma peça lançada neste lote. Lance as peças na Seção 2 antes de concluir.")
+                                            else:
+                                                st.info("Todas as peças serão marcadas como concluídas e enviadas para logística.")
                                         bt1, bt2, _ = st.columns([2, 2, 4])
                                         with bt1:
-                                            if st.button("✅ Confirmar Total", key=f"conf_total_{row['id']}", type="primary", use_container_width=True):
+                                            if st.button("✅ Confirmar Total", key=f"conf_total_{row['id']}", type="primary", use_container_width=True, disabled=_pecas_lote_check.empty):
                                                 conn = conectar_banco()
                                                 try:
                                                     cursor = conn.cursor()
@@ -2706,7 +2928,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 def urgencia(row):
                     prazo = row.get('Data_Limite_Obra')
                     if not prazo_valido(prazo): return 'sem_prazo'
-                    dias = (pd.to_datetime(prazo).normalize() - HOJE_PROJETO).days
+                    dias = (pd.to_datetime(prazo).normalize() - hoje_projeto()).days
                     if dias < 0:   return 'vencido'
                     if dias <= 3:  return 'critico'
                     if dias <= 7:  return 'atencao'
@@ -2714,7 +2936,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                 df_tv['_urgencia'] = df_tv.apply(urgencia, axis=1)
                 df_tv['_dias_restantes'] = df_tv['Data_Limite_Obra'].apply(
-                    lambda x: (pd.to_datetime(x).normalize() - HOJE_PROJETO).days if prazo_valido(x) else 9999
+                    lambda x: (pd.to_datetime(x).normalize() - hoje_projeto()).days if prazo_valido(x) else 9999
                 )
                 df_tv = df_tv.sort_values('_dias_restantes')
 
@@ -2726,7 +2948,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 }
                 URG_CONFIG = {
                     'vencido':   {'border': '#DC2626', 'bg': '#FEF2F2', 'tag': '🔴 VENCIDO',  'tag_color': '#DC2626'},
-                    'critico':   {'border': '#EA580C', 'bg': '#FFF7ED', 'tag': '🟠 URGENTE',  'tag_color': '#EA580C'},
+                    'critico':   {'border': '#1A56DB', 'bg': '#EFF6FF', 'tag': '🔵 URGENTE',  'tag_color': '#1A56DB'},
                     'atencao':   {'border': '#D97706', 'bg': '#FFFBEB', 'tag': '🟡 ATENÇÃO',  'tag_color': '#D97706'},
                     'ok':        {'border': '#059669', 'bg': '#F0FDF4', 'tag': '🟢 NO PRAZO', 'tag_color': '#059669'},
                     'sem_prazo': {'border': '#94A3B8', 'bg': '#F8FAFC', 'tag': '⚪ SEM PRAZO','tag_color': '#94A3B8'},
@@ -2836,8 +3058,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
     # ==================================================
     elif nome_aba == "Painel da Producao - Esquadrias":
         with aba_objeto:
-            ESCOPOS_ESQ = ["Esquadria", "Vidro", "ESQUADRIA", "VIDRO", "PERFIL", "ALUMINIO"]
-
             def _eh_esquadria(tipo):
                 if not tipo:
                     return False
@@ -2887,9 +3107,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     df_exp_esq = pd.DataFrame(registros_exp_esq)
 
                     if "esq_mes" not in st.session_state:
-                        st.session_state.esq_mes = HOJE_PROJETO.month
+                        st.session_state.esq_mes = hoje_projeto().month
                     if "esq_ano" not in st.session_state:
-                        st.session_state.esq_ano = HOJE_PROJETO.year
+                        st.session_state.esq_ano = hoje_projeto().year
 
                     c1, c2, c3 = st.columns([1, 2, 1])
                     with c1:
@@ -2927,7 +3147,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if data_dia.month == st.session_state.esq_mes:
                                     lotes_dia = df_exp_esq[df_exp_esq['_dia'] == data_dia]
                                     n_lotes = lotes_dia['Cod_Lote'].nunique() if not lotes_dia.empty else 0
-                                    eh_hoje = (data_dia == HOJE_PROJETO.date())
+                                    eh_hoje = (data_dia == hoje_projeto().date())
                                     if n_lotes > 0:
                                         obras_d = lotes_dia['Obra_Vinculada'].unique()
                                         label_o = obras_d[0] if len(obras_d) == 1 else f"{len(obras_d)} obras"
@@ -2945,7 +3165,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                     st.markdown("---")
                     if "esq_dia_clicado" not in st.session_state:
-                        st.session_state.esq_dia_clicado = HOJE_PROJETO.date()
+                        st.session_state.esq_dia_clicado = hoje_projeto().date()
                     dia_sel_esq = st.session_state.esq_dia_clicado
                     st.subheader(f"Lotes em producao — {dia_sel_esq.strftime('%d/%m/%Y')}")
                     lotes_sel_esq = df_exp_esq[df_exp_esq['_dia'] == dia_sel_esq].drop_duplicates(subset=['id'])
@@ -2964,7 +3184,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             pode_concluir = bool(row.get('_pode_concluir', False)) or eh_parcial
                             dt_i = pd.to_datetime(row['Data_Producao_Programada']).strftime('%d/%m/%Y')
                             dt_f = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
-                            border_color = "#D97706" if eh_parcial else ("#EA580C" if pode_concluir else "#3B82F6")
+                            border_color = "#D97706" if eh_parcial else ("#1A56DB" if pode_concluir else "#3B82F6")
                             bg_color = "#FFFBEB" if eh_parcial else ("#FFF7ED" if pode_concluir else "#F8FAFC")
                             st.markdown(
                                 f"<div style='border-left:4px solid {border_color};background:{bg_color};"
@@ -2990,7 +3210,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     elif eh_parcial:
                                         st.markdown("<span style='color:#D97706;font-size:12px;font-weight:700;'>Envio parcial registrado — ainda há peças pendentes</span>", unsafe_allow_html=True)
                                     elif pode_concluir:
-                                        st.markdown("<span style='color:#EA580C;font-size:12px;font-weight:600;'>Ultima semana — liberado para concluir</span>", unsafe_allow_html=True)
+                                        st.markdown("<span style='color:#1A56DB;font-size:12px;font-weight:600;'>Ultima semana — liberado para concluir</span>", unsafe_allow_html=True)
                                     else:
                                         dias_rest = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel_esq).days
                                         st.markdown(f"<span style='color:#3B82F6;font-size:12px;'>Em producao — {dias_rest} dias ate o prazo</span>", unsafe_allow_html=True)
@@ -3247,6 +3467,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
     # ==================================================
     elif nome_aba == "Liberar OPs da Semana":
         with aba_objeto:
+            if setor not in ["Master", "PCP"]:
+                st.error("⛔ Acesso negado.")
+                st.stop()
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Liberar OPs da Semana</h2><p>Solicite, aceite e libere Ordens de Produção para a fábrica</p></div><span class="page-icon">🔓</span></div>', unsafe_allow_html=True)
 
             # ── PIPELINE VISUAL ────────────────────────────────────
@@ -4095,7 +4318,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         df_gantt, x_start="Inicio", x_end="Fim", y="EDT_Vinculado",
                         color="Obra_Vinculada", hover_data=["Romaneio_Chapas", "M2"],
                         title="Ocupacao Fabrica vs Prazo Despacho",
-                        color_discrete_sequence=["#1E3A8A", "#EA580C", "#0891B2", "#15803D"]
+                        color_discrete_sequence=["#1E3A8A", "#1A56DB", "#0891B2", "#15803D"]
                     )
                     fig.update_yaxes(autorange="reversed")
                     fig.update_layout(height=400, margin=dict(l=20, r=20, t=40, b=20))
@@ -4108,6 +4331,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
     # ==================================================
     elif nome_aba == "Vincular Datas":
         with aba_objeto:
+            if setor != "Master":
+                st.error("⛔ Acesso negado.")
+                st.stop()
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Vincular Datas</h2><p>Fatiamento e vinculação de datas aos lotes de produção</p></div><span class="page-icon">📅</span></div>', unsafe_allow_html=True)
             if st.session_state.get('lote_salvo_sucesso'):
                 st.success("Lote gerado com sucesso!")
@@ -4400,7 +4626,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
     elif nome_aba == "Painel de Engenharia":
         with aba_objeto:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Painel de Engenharia</h2><p>Controle de status e alertas das frentes de engenharia</p></div><span class="page-icon">📐</span></div>', unsafe_allow_html=True)
-            st.caption(f"Hoje: {HOJE_PROJETO.strftime('%d/%m/%Y')} | Obra: **{obra_selecionada or 'Nenhuma'}**")
+            st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')} | Obra: **{obra_selecionada or 'Nenhuma'}**")
             df_eng = carregar_macro_por_obra(obra_selecionada) if obra_selecionada else pd.DataFrame()
 
             ESTADOS = [
@@ -4431,7 +4657,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 for _, row in df_eng.iterrows():
                     prazo_raw = row.get('Prazo_Engenharia')
                     prazo_eng = prazo_raw if prazo_valido(prazo_raw) else None
-                    dias_rest = (pd.to_datetime(prazo_eng) - HOJE_PROJETO).days if prazo_eng is not None else None
+                    dias_rest = (pd.to_datetime(prazo_eng) - hoje_projeto()).days if prazo_eng is not None else None
                     sk, situacao_txt, dias_num = classificar(dias_rest, row.get('Status_Engenharia', ESTADOS[0]))
                     frentes.append({
                         "id": row['id'], "edt": row['EDT'], "tarefa": row['Tarefa'],
@@ -4557,7 +4783,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         st.info(f"Prazo atual: **{pat}**")
                     with cs2:
                         nps = st.date_input("Novo prazo:", format="DD/MM/YYYY", key="sol_np",
-                                            value=((pd.to_datetime(fobj['prazo_eng']) + timedelta(days=7)).date() if fobj['prazo_eng'] else HOJE_PROJETO.date()))
+                                            value=((pd.to_datetime(fobj['prazo_eng']) + timedelta(days=7)).date() if fobj['prazo_eng'] else hoje_projeto().date()))
                         jus = st.text_area("Justificativa:", key="sol_jus")
                     if st.button("Enviar solicitacao", key="sol_env"):
                         if not jus.strip():
@@ -4623,7 +4849,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
     elif nome_aba == "Logistica":
         with aba_objeto:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Logística</h2><p>Gestão de despachos, transportes e envios</p></div><span class="page-icon">🚚</span></div>', unsafe_allow_html=True)
-            st.caption(f"Hoje: {HOJE_PROJETO.strftime('%d/%m/%Y')}")
+            st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')}")
             df_log = carregar_fila_logistica()
 
             if not df_log.empty:
@@ -4633,7 +4859,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 df_ativos  = df_log[df_log['Status_Logistica'] != 'Despachado']
                 n_atrasado = (
                     len(df_ativos[df_ativos['Data_Limite_Despacho'].apply(
-                        lambda x: prazo_valido(x) and pd.to_datetime(x) < HOJE_PROJETO
+                        lambda x: prazo_valido(x) and pd.to_datetime(x) < hoje_projeto()
                     )]) if not df_ativos.empty else 0
                 )
                 c1, c2, c3, c4 = st.columns(4)
@@ -4709,7 +4935,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     for _, row in df_ag.iterrows():
                         prazo_d = row['Data_Limite_Despacho']
                         if prazo_valido(prazo_d):
-                            dias_r = (pd.to_datetime(prazo_d) - HOJE_PROJETO).days
+                            dias_r = (pd.to_datetime(prazo_d) - hoje_projeto()).days
                             if dias_r < 0:    css_bar = "bar-danger"; tag = f"ATRASADO {abs(dias_r)}d"
                             elif dias_r <= 3: css_bar = "bar-warn";   tag = f"URGENTE — {dias_r}d restantes"
                             else:             css_bar = "bar-ok";     tag = f"{dias_r} dias restantes"
@@ -4744,7 +4970,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 fa1, fa2 = st.columns(2)
                                 with fa1:
                                     dt_env = st.date_input("Data envio:", format="DD/MM/YYYY", key=f"dt_env_{row['id']}",
-                                                           value=(pd.to_datetime(prazo_d).date() if prazo_valido(prazo_d) else HOJE_PROJETO.date()))
+                                                           value=(pd.to_datetime(prazo_d).date() if prazo_valido(prazo_d) else hoje_projeto().date()))
                                     transp = st.selectbox("Transporte:", ["Frota Propria (Passold)", "Transportadora Terceira", "Retirada pelo Cliente"], key=f"tr_{row['id']}")
                                 with fa2:
                                     veic = st.text_input("Veiculo / Placa:", key=f"ve_{row['id']}")
@@ -4838,7 +5064,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
     elif nome_aba == "Almoxarifado":
         with aba_objeto:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Almoxarifado</h2><p>Conferência e controle de componentes recebidos</p></div><span class="page-icon">📦</span></div>', unsafe_allow_html=True)
-            st.caption(f"Hoje: {HOJE_PROJETO.strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
+            st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
             df_ops_comp = carregar_todas_ops_com_componentes()
 
             if df_ops_comp.empty:
@@ -5049,8 +5275,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             st.rerun()
                     with col_save:
                         if st.button("💾 Salvar Lançamentos", type="primary"):
-                            if not periodo_ref.strip():
+                            import re as _re
+                            _per = periodo_ref.strip()
+                            if not _per:
                                 st.error("Informe o período.")
+                            elif not _re.match(r"^\d{2}/\d{4}$", _per):
+                                st.error("Formato inválido. Use MM/AAAA — ex: 06/2025")
                             elif not servicos_form:
                                 st.error("Adicione pelo menos um serviço.")
                             else:
@@ -5127,7 +5357,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         )
                         fig_evo.add_hline(
                             y=total_contratado4, line_dash="dash",
-                            line_color="#EA580C", annotation_text="Total Contratado"
+                            line_color="#1A56DB", annotation_text="Total Contratado"
                         )
                         fig_evo.update_layout(height=350, margin=dict(l=20, r=20, t=40, b=20))
                         st.plotly_chart(fig_evo, use_container_width=True)
@@ -5170,6 +5400,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
     # ==================================================
     elif nome_aba == "Configuracoes":
         with aba_objeto:
+            if setor != "Master":
+                st.error("⛔ Acesso negado. Apenas usuários Master podem acessar esta página.")
+                st.stop()
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Configurações</h2><p>Painel de controle e administração do sistema</p></div><span class="page-icon">⚙️</span></div>', unsafe_allow_html=True)
 
             with st.expander("Cadastrar Novo Usuario"):
@@ -5178,9 +5411,20 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     nn = st.text_input("Nome:")
                     ns = st.selectbox("Setor:", ["Producao", "Engenharia", "Diretoria", "Logistica", "Almoxarifado", "Medicao", "Master"])
                     np = st.text_input("Senha:", type="password")
+                    st.caption("Mínimo 8 caracteres, ao menos 1 número e 1 letra maiúscula.")
                     if st.form_submit_button("Salvar"):
-                        if not all([nu, nn, np]):
-                            st.error("Preencha tudo.")
+                        _erros_senha = []
+                        if not all([nu, nn, np.strip()]):
+                            _erros_senha.append("Preencha todos os campos.")
+                        if len(np) < 8:
+                            _erros_senha.append("Senha deve ter no mínimo 8 caracteres.")
+                        if not any(c.isupper() for c in np):
+                            _erros_senha.append("Senha deve conter ao menos 1 letra maiúscula.")
+                        if not any(c.isdigit() for c in np):
+                            _erros_senha.append("Senha deve conter ao menos 1 número.")
+                        if _erros_senha:
+                            for _e in _erros_senha:
+                                st.error(_e)
                         else:
                             conn = conectar_banco()
                             try:
@@ -5278,7 +5522,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown("""
             <div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;">
                 <div style="background:linear-gradient(135deg,#0F172A,#334155);padding:14px 20px;border-radius:10px;flex:1;">
-                    <span style="color:#EA580C;font-weight:800;font-size:1.4rem;letter-spacing:-0.02em;">Relatório Geral de Produção</span>
+                    <span style="color:#1A56DB;font-weight:800;font-size:1.4rem;letter-spacing:-0.02em;">Relatório Geral de Produção</span>
                     <span style="color:#94A3B8;font-size:0.85rem;margin-left:16px;">Todas as OPs ativas, envios parciais e status em tempo real</span>
                 </div>
             </div>
@@ -5292,7 +5536,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             with rel_f1:
                 filtro_obra_rel = st.selectbox("Obra:", obras_rel, key="rel_obra")
             with rel_f2:
-                status_opcoes = ["Todos", "Liberado para Fabrica", "Em Producao", "Aguardando Expedicao", "Enviado Parcial", "Concluido"]
+                status_opcoes = ["Todos", "Pendente", "Liberado para Fabrica", "Parcialmente Concluido", "Concluido"]
                 filtro_status_rel = st.selectbox("Status:", status_opcoes, key="rel_status")
             with rel_f3:
                 escopo_opcoes = ["Todos"] + sorted(df_banco_micro_rel['Tipo_Material'].dropna().unique().tolist()) if not df_banco_micro_rel.empty else ["Todos"]
@@ -5368,7 +5612,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         df_m2_obra, x='Obra', y='m²',
                         title='m² em Produção por Obra',
                         color='m²',
-                        color_continuous_scale=[[0,'#334155'],[1,'#EA580C']],
+                        color_continuous_scale=[[0,'#334155'],[1,'#1A56DB']],
                         text_auto='.1f'
                     )
                     fig_m2.update_layout(
@@ -5388,7 +5632,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         'Liberado para Fabrica': '#334155',
                         'Em Producao': '#2563EB',
                         'Aguardando Expedicao': '#D97706',
-                        'Enviado Parcial': '#EA580C',
+                        'Enviado Parcial': '#1A56DB',
                         'Concluido': '#059669',
                     }
                     fig_status = px.pie(
@@ -5416,7 +5660,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         'Liberado para Fabrica': ('background:#EFF6FF;color:#1D4ED8', 'Lib. Fábrica'),
                         'Em Producao':           ('background:#DBEAFE;color:#1D4ED8', 'Em Produção'),
                         'Aguardando Expedicao':  ('background:#FEF3C7;color:#92400E', 'Ag. Expedição'),
-                        'Enviado Parcial':       ('background:#FFF7ED;color:#C2410C', 'Env. Parcial'),
+                        'Enviado Parcial':       ('background:#EFF6FF;color:#1447C0', 'Env. Parcial'),
                         'Concluido':             ('background:#ECFDF5;color:#065F46', 'Concluído'),
                     }
                     estilo, label = cores.get(s, ('background:#F1F5F9;color:#334155', s))
@@ -5479,7 +5723,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                     # Paleta
                     cor_header_dark = "0F172A"
-                    cor_header_accent = "EA580C"
+                    cor_header_accent = "1A56DB"
                     cor_sub = "1E293B"
                     cor_linha_par = "F8FAFC"
                     cor_linha_impar = "FFFFFF"
