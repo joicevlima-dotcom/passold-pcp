@@ -20,55 +20,309 @@ BLOQUEIO_MINUTOS      = 15
 TIMEOUT_SESSAO_HORAS  = 8
 LIMITE_REGISTROS_LOAD = 2000   # máx de linhas carregadas de uma vez
 
-st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide")
+st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide", page_icon="🏭")
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 :root {
-    --primary-color: #0F172A;
-    --primary-light: #334155;
-    --accent-color: #EA580C;
-    --success-color: #059669;
-    --warning-color: #D97706;
-    --danger-color: #DC2626;
-    --bg-body: #F8FAFC;
-    --bg-card: #FFFFFF;
-    --border-color: #E2E8F0;
-    --text-main: #1E293B;
-    --text-muted: #64748B;
-    --shadow-sm: 0 1px 3px rgba(0,0,0,0.1);
-    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
-    --radius: 8px;
+    --primary:        #0F172A;
+    --primary-light:  #1E293B;
+    --primary-hover:  #334155;
+    --accent:         #EA580C;
+    --accent-hover:   #C2410C;
+    --accent-light:   #FFF7ED;
+    --success:        #059669;
+    --success-light:  #ECFDF5;
+    --warning:        #D97706;
+    --warning-light:  #FFFBEB;
+    --danger:         #DC2626;
+    --danger-light:   #FEF2F2;
+    --info:           #0EA5E9;
+    --info-light:     #F0F9FF;
+    --bg:             #F1F5F9;
+    --bg-card:        #FFFFFF;
+    --border:         #E2E8F0;
+    --border-hover:   #CBD5E1;
+    --text:           #1E293B;
+    --text-muted:     #64748B;
+    --text-light:     #94A3B8;
+    --sidebar-bg:     #0F172A;
+    --sidebar-text:   #CBD5E1;
+    --sidebar-active: #EA580C;
+    --shadow-xs:  0 1px 2px rgba(0,0,0,0.05);
+    --shadow-sm:  0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-md:  0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+    --shadow-lg:  0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+    --radius-sm:  6px;
+    --radius:     10px;
+    --radius-lg:  14px;
 }
-.stApp { background-color: var(--bg-body); font-family: 'Inter', sans-serif; color: var(--text-main); }
-section[data-testid="stSidebar"] { background-color: var(--bg-card); border-right: 1px solid var(--border-color); box-shadow: var(--shadow-sm); }
-h1, h2, h3, h4, h5, h6 { color: var(--primary-color)!important; font-weight: 700!important; letter-spacing: -0.02em; margin-bottom: 1rem!important; }
-p, label, div[data-testid="stWidgetLabel"] { color: var(--text-main); font-size: 0.95rem; }
-div[data-testid="metric-container"] { background: var(--bg-card)!important; border: 1px solid var(--border-color)!important; border-left: 5px solid var(--primary-color)!important; border-radius: var(--radius)!important; padding: 16px!important; box-shadow: var(--shadow-sm)!important; transition: transform 0.2s ease, box-shadow 0.2s ease; }
-div[data-testid="metric-container"]:hover { transform: translateY(-2px); box-shadow: var(--shadow-md)!important; border-left-color: var(--accent-color)!important; }
-div[data-testid="stMetricValue"] { font-size: 1.8rem!important; font-weight: 700!important; color: var(--primary-color)!important; }
-div[data-testid="stMetricLabel"] { color: var(--text-muted)!important; font-weight: 500!important; text-transform: uppercase; font-size: 0.75rem!important; letter-spacing: 0.05em; }
-.stButton > button { background-color: var(--primary-color)!important; color: #FFFFFF!important; font-weight: 600!important; border-radius: 6px!important; border: none!important; padding: 10px 24px!important; font-size: 0.9rem!important; box-shadow: var(--shadow-sm)!important; transition: all 0.2s ease!important; }
-.stButton > button p, .stButton > button span, .stButton > button div { color: #FFFFFF!important; }
-.stButton > button:hover { background-color: var(--primary-light)!important; transform: translateY(-1px); box-shadow: var(--shadow-md)!important; color: #FFFFFF!important; }
-.stButton > button[kind="primary"] { background-color: var(--accent-color)!important; }
-.stButton > button[kind="primary"]:hover { background-color: #c2410c!important; }
-.stTextInput > div > div > input, .stSelectbox > div > div > select, .stNumberInput > div > div > input { background-color: var(--bg-card)!important; border: 1px solid var(--border-color)!important; border-radius: 6px!important; color: var(--text-main)!important; padding: 10px!important; font-size: 0.9rem!important; box-shadow: none!important; }
-div[data-testid="stDataFrame"] { border-radius: var(--radius)!important; border: 1px solid var(--border-color)!important; overflow: hidden; }
-.stTabs [data-baseweb="tab-list"] { gap: 24px; border-bottom: 1px solid var(--border-color); }
-.stTabs [data-baseweb="tab"] { height: 50px; background-color: transparent; border-radius: 4px 4px 0px 0px; color: var(--text-muted); font-weight: 500; transition: all 0.2s; }
-.stTabs [aria-selected="true"] { background-color: var(--bg-body); color: var(--accent-color); font-weight: 700; border-bottom: 3px solid var(--accent-color); }
-.badge-obra { background:#FFF7ED; color:#C2410C; padding:4px 10px; border-radius:6px; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; }
-.badge-edt  { background:#F1F5F9; color:#334155; padding:4px 10px; border-radius:6px; font-weight:600; font-size:11px; border:1px solid #E2E8F0; }
-.badge-lote { background:#ECFDF5; color:#047857; padding:4px 10px; border-radius:6px; font-weight:700; font-size:11px; }
-.bar-ok      { border-left: 5px solid var(--success-color); background: #F0FDF4; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
-.bar-warn    { border-left: 5px solid var(--warning-color); background: #FFFBEB; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
-.bar-danger  { border-left: 5px solid var(--danger-color);  background: #FEF2F2; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
-.bar-neutral { border-left: 5px solid var(--text-muted);    background: #F8FAFC; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; box-shadow: var(--shadow-sm); }
-#MainMenu { visibility: hidden; }
-footer    { visibility: hidden; }
-header    { visibility: hidden; }
+
+/* ── Base ───────────────────────────────────── */
+.stApp { background: var(--bg); font-family: 'Inter', sans-serif; color: var(--text); }
+#MainMenu, footer, header { visibility: hidden; }
+
+/* ── Sidebar ────────────────────────────────── */
+section[data-testid="stSidebar"] {
+    background: var(--sidebar-bg) !important;
+    border-right: none !important;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.15) !important;
+}
+section[data-testid="stSidebar"] * { color: var(--sidebar-text) !important; }
+section[data-testid="stSidebar"] .stRadio > label { display: none; }
+section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] { gap: 2px; display: flex; flex-direction: column; }
+section[data-testid="stSidebar"] .stRadio label {
+    display: flex !important;
+    align-items: center;
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--sidebar-text) !important;
+    transition: all 0.15s ease;
+    border: 1px solid transparent;
+}
+section[data-testid="stSidebar"] .stRadio label:hover {
+    background: rgba(255,255,255,0.07);
+    color: #fff !important;
+}
+section[data-testid="stSidebar"] .stRadio label[data-checked="true"],
+section[data-testid="stSidebar"] .stRadio label[aria-checked="true"] {
+    background: rgba(234,88,12,0.18) !important;
+    color: #fff !important;
+    border-color: rgba(234,88,12,0.4) !important;
+    font-weight: 700 !important;
+}
+section[data-testid="stSidebar"] .stSelectbox > div > div {
+    background: rgba(255,255,255,0.08) !important;
+    border-color: rgba(255,255,255,0.15) !important;
+    color: #fff !important;
+    border-radius: var(--radius-sm) !important;
+}
+section[data-testid="stSidebar"] .stCaption { color: var(--text-light) !important; font-size: 0.72rem !important; }
+section[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.1) !important; margin: 10px 0 !important; }
+
+/* ── Topbar ─────────────────────────────────── */
+.topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 28px;
+    margin: -1rem -1rem 1.5rem -1rem;
+    box-shadow: var(--shadow-xs);
+}
+.topbar-title { font-size: 1.2rem; font-weight: 800; color: var(--primary); letter-spacing: -0.03em; }
+.topbar-title span { color: var(--accent); }
+.topbar-right { display: flex; align-items: center; gap: 20px; }
+.topbar-user { font-size: 0.82rem; color: var(--text-muted); }
+.topbar-user strong { color: var(--text); font-weight: 600; }
+.topbar-badge {
+    background: var(--accent-light); color: var(--accent);
+    padding: 3px 10px; border-radius: 20px;
+    font-size: 0.75rem; font-weight: 700;
+    border: 1px solid rgba(234,88,12,0.2);
+}
+.topbar-time { font-size: 0.78rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+
+/* ── Page Header ────────────────────────────── */
+.page-header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+.page-header-left h2 {
+    font-size: 1.5rem !important; font-weight: 800 !important;
+    color: var(--primary) !important; letter-spacing: -0.03em;
+    margin: 0 0 4px 0 !important;
+}
+.page-header-left p { font-size: 0.85rem; color: var(--text-muted); margin: 0; }
+.page-icon { font-size: 2rem; }
+
+/* ── Cards ──────────────────────────────────── */
+div[data-testid="metric-container"] {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    border-top: 4px solid var(--accent) !important;
+    border-radius: var(--radius) !important;
+    padding: 20px !important;
+    box-shadow: var(--shadow-sm) !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+div[data-testid="metric-container"]:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md) !important;
+}
+div[data-testid="stMetricValue"] {
+    font-size: 2rem !important; font-weight: 800 !important;
+    color: var(--primary) !important;
+}
+div[data-testid="stMetricLabel"] {
+    color: var(--text-muted) !important; font-weight: 600 !important;
+    text-transform: uppercase; font-size: 0.72rem !important;
+    letter-spacing: 0.06em;
+}
+div[data-testid="stMetricDelta"] { font-size: 0.82rem !important; }
+
+/* ── Botões ─────────────────────────────────── */
+.stButton > button {
+    background: var(--primary) !important;
+    color: #fff !important;
+    font-weight: 600 !important;
+    border-radius: var(--radius-sm) !important;
+    border: none !important;
+    padding: 10px 22px !important;
+    font-size: 0.88rem !important;
+    box-shadow: var(--shadow-xs) !important;
+    transition: all 0.18s ease !important;
+    letter-spacing: 0.01em;
+}
+.stButton > button p, .stButton > button span, .stButton > button div { color: #fff !important; }
+.stButton > button:hover {
+    background: var(--primary-hover) !important;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm) !important;
+}
+.stButton > button[kind="primary"] { background: var(--accent) !important; }
+.stButton > button[kind="primary"]:hover { background: var(--accent-hover) !important; }
+.stButton > button[kind="secondary"] {
+    background: transparent !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border) !important;
+    box-shadow: none !important;
+}
+.stButton > button[kind="secondary"] p,
+.stButton > button[kind="secondary"] span { color: var(--text) !important; }
+.stButton > button[kind="secondary"]:hover {
+    background: var(--bg) !important;
+    border-color: var(--border-hover) !important;
+}
+
+/* ── Inputs ─────────────────────────────────── */
+.stTextInput > div > div > input,
+.stNumberInput > div > div > input,
+.stTextArea > div > div > textarea {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-sm) !important;
+    color: var(--text) !important;
+    font-size: 0.9rem !important;
+    box-shadow: none !important;
+    transition: border-color 0.15s ease !important;
+}
+.stTextInput > div > div > input:focus,
+.stNumberInput > div > div > input:focus,
+.stTextArea > div > div > textarea:focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px rgba(234,88,12,0.1) !important;
+}
+
+/* ── Tabelas ────────────────────────────────── */
+div[data-testid="stDataFrame"] {
+    border-radius: var(--radius) !important;
+    border: 1px solid var(--border) !important;
+    overflow: hidden;
+    box-shadow: var(--shadow-xs);
+}
+
+/* ── Expander ───────────────────────────────── */
+div[data-testid="stExpander"] {
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+    box-shadow: var(--shadow-xs) !important;
+    overflow: hidden;
+    background: var(--bg-card) !important;
+}
+div[data-testid="stExpander"]:hover { border-color: var(--border-hover) !important; }
+
+/* ── Tabs internas ──────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0; border-bottom: 2px solid var(--border);
+    background: transparent;
+}
+.stTabs [data-baseweb="tab"] {
+    height: 44px; background: transparent;
+    color: var(--text-muted); font-weight: 500;
+    font-size: 0.88rem; padding: 0 20px;
+    transition: all 0.15s ease;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+}
+.stTabs [data-baseweb="tab"]:hover { color: var(--text); background: var(--bg); }
+.stTabs [aria-selected="true"] {
+    color: var(--accent) !important; font-weight: 700 !important;
+    border-bottom: 2px solid var(--accent) !important;
+    background: transparent !important;
+}
+
+/* ── Alerts ─────────────────────────────────── */
+div[data-testid="stAlert"] { border-radius: var(--radius-sm) !important; }
+
+/* ── Badges & Barras ────────────────────────── */
+.badge-obra  { background:var(--accent-light); color:#C2410C; padding:3px 10px; border-radius:20px; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; border:1px solid rgba(194,65,12,0.2); }
+.badge-edt   { background:#F1F5F9; color:#334155; padding:3px 10px; border-radius:20px; font-weight:600; font-size:11px; border:1px solid var(--border); }
+.badge-lote  { background:var(--success-light); color:#047857; padding:3px 10px; border-radius:20px; font-weight:700; font-size:11px; border:1px solid rgba(4,120,87,0.2); }
+.badge-op    { background:var(--info-light); color:#0369A1; padding:3px 10px; border-radius:20px; font-weight:700; font-size:11px; border:1px solid rgba(3,105,161,0.2); }
+.bar-ok      { border-left:4px solid var(--success); background:var(--success-light); padding:12px 16px; border-radius:var(--radius-sm); margin-bottom:8px; box-shadow:var(--shadow-xs); }
+.bar-warn    { border-left:4px solid var(--warning); background:var(--warning-light); padding:12px 16px; border-radius:var(--radius-sm); margin-bottom:8px; box-shadow:var(--shadow-xs); }
+.bar-danger  { border-left:4px solid var(--danger);  background:var(--danger-light);  padding:12px 16px; border-radius:var(--radius-sm); margin-bottom:8px; box-shadow:var(--shadow-xs); }
+.bar-neutral { border-left:4px solid var(--text-muted); background:var(--bg); padding:12px 16px; border-radius:var(--radius-sm); margin-bottom:8px; box-shadow:var(--shadow-xs); }
+
+/* ── Pipeline de OP ─────────────────────────── */
+.pipeline { display:flex; align-items:center; gap:0; margin:16px 0; }
+.pipeline-step {
+    display:flex; align-items:center; gap:8px;
+    padding:8px 16px; border-radius:var(--radius-sm);
+    font-size:0.78rem; font-weight:600;
+    background:var(--bg); border:1px solid var(--border);
+    color:var(--text-muted);
+    position:relative;
+}
+.pipeline-step.done   { background:var(--success-light); border-color:rgba(5,150,105,0.3); color:var(--success); }
+.pipeline-step.active { background:var(--accent-light);  border-color:rgba(234,88,12,0.3);  color:var(--accent); font-weight:700; }
+.pipeline-arrow { color:var(--border); font-size:1rem; padding:0 4px; }
+
+/* ── Seção cards do dashboard ───────────────── */
+.dash-card {
+    background:var(--bg-card); border:1px solid var(--border);
+    border-radius:var(--radius); padding:20px 24px;
+    box-shadow:var(--shadow-sm); height:100%;
+    transition: box-shadow 0.2s ease;
+}
+.dash-card:hover { box-shadow:var(--shadow-md); }
+.dash-card-title { font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); margin-bottom:8px; }
+.dash-card-value { font-size:2.4rem; font-weight:800; color:var(--primary); line-height:1; }
+.dash-card-value.red   { color:var(--danger); }
+.dash-card-value.orange{ color:var(--accent); }
+.dash-card-value.green { color:var(--success); }
+.dash-card-sub  { font-size:0.78rem; color:var(--text-muted); margin-top:6px; }
+
+/* ── Sidebar nav label ──────────────────────── */
+.nav-section-label {
+    font-size:0.65rem; font-weight:700; text-transform:uppercase;
+    letter-spacing:0.12em; color:rgba(255,255,255,0.3);
+    padding:16px 14px 6px; margin:0;
+}
+
+/* ── Empty state ────────────────────────────── */
+.empty-state {
+    text-align:center; padding:48px 24px;
+    color:var(--text-muted);
+}
+.empty-state .empty-icon { font-size:2.5rem; margin-bottom:12px; }
+.empty-state h4 { font-size:1rem; font-weight:600; color:var(--text); margin-bottom:6px; }
+.empty-state p  { font-size:0.85rem; }
+
+/* ── Sidebar logo area ──────────────────────── */
+.sidebar-logo {
+    padding:20px 16px 16px;
+    border-bottom:1px solid rgba(255,255,255,0.08);
+    margin-bottom:8px;
+}
+.sidebar-logo-name { font-size:0.95rem; font-weight:800; color:#fff; letter-spacing:-0.02em; }
+.sidebar-logo-sub  { font-size:0.7rem; color:rgba(255,255,255,0.4); margin-top:2px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1770,86 +2024,272 @@ if not st.session_state.autenticado:
     # Registrar atividade a cada interação
 registrar_atividade()
 
-# ========================================================
-# HEADER
-# ========================================================
-registrar_atividade()
+df_banco_macro = carregar_macro()
+df_banco_micro = carregar_micro()
 
-ch1, ch2 = st.columns([4, 1])
-with ch1:
-    st.title("Passold Sistemas de Fachadas - Gestão Industrial")
+setor = st.session_state.usuario_setor
+
+# ── Mapeamento de páginas por setor ──────────────────────────────────────────
+GRUPOS_NAV = {
+    "🏭  Produção": {
+        "Painel da Producao - ACM":       ("📋  Painel ACM",         ["Master","Producao","Diretoria","Engenharia"]),
+        "Painel TV — ACM":                ("📺  TV — ACM",           ["Master","Producao","Diretoria","Medicao"]),
+        "Painel da Producao - Esquadrias":("📋  Painel Esquadrias",  ["Master","Esquadria","Producao","Diretoria","Engenharia"]),
+        "Painel TV — Esquadrias":         ("📺  TV — Esquadrias",    ["Master","Esquadria","Producao","Diretoria","Medicao"]),
+        "Liberar OPs da Semana":          ("🔓  Liberar OPs",        ["Master","PCP"]),
+    },
+    "📐  Engenharia": {
+        "Painel de Engenharia": ("📐  Painel de Engenharia", ["Master","Engenharia"]),
+        "Visao Macro":          ("🗺️  Visão Macro",          ["Master","Diretoria","Medicao"]),
+        "Cadastrar Obra":       ("🏗️  Cadastrar Obra",       ["Master"]),
+        "Vincular Datas":       ("📅  Vincular Datas",       ["Master"]),
+    },
+    "🚚  Operações": {
+        "Logistica":    ("🚚  Logística",    ["Master","Logistica"]),
+        "Almoxarifado": ("📦  Almoxarifado", ["Master","Almoxarifado"]),
+    },
+    "📊  Relatórios": {
+        "Relatorio Geral":    ("📊  Relatório Geral",    ["Master","Diretoria","PCP","Medicao"]),
+        "Sistema de Medicao": ("📏  Sistema de Medição", ["Master","Medicao"]),
+    },
+    "⚙️  Sistema": {
+        "Configuracoes": ("⚙️  Configurações", ["Master"]),
+    },
+}
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("""
+    <div class="sidebar-logo">
+        <div class="sidebar-logo-name">🏭 Passold</div>
+        <div class="sidebar-logo-sub">Sistemas de Fachadas</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<p class="nav-section-label">Obra de trabalho</p>', unsafe_allow_html=True)
+    if not df_banco_macro.empty:
+        obras_lista      = ["Todas as Obras"] + sorted(df_banco_macro['Obra'].unique().tolist())
+        obra_selecionada = st.selectbox("Obra:", obras_lista, label_visibility="collapsed", key="obra_global")
+        if obra_selecionada == "Todas as Obras":
+            obra_selecionada = None
+        df_macro_filtrado = carregar_macro_por_obra(obra_selecionada) if obra_selecionada else pd.DataFrame()
+    else:
+        obra_selecionada  = None
+        df_macro_filtrado = pd.DataFrame()
+        st.caption("Nenhuma obra cadastrada.")
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+
+    # Constrói lista de páginas disponíveis para este setor
+    paginas_disponiveis  = []   # chave interna (nome_aba)
+    paginas_labels       = []   # label exibido no menu
+    grupos_indices       = {}   # grupo → (início, fim) da lista
+
+    for grupo, itens in GRUPOS_NAV.items():
+        itens_grupo = [(k, v[0]) for k, v in itens.items() if setor in v[1]]
+        if not itens_grupo:
+            continue
+        grupos_indices[grupo] = (len(paginas_disponiveis), len(paginas_disponiveis) + len(itens_grupo))
+        st.markdown(f'<p class="nav-section-label">{grupo.split("  ")[1]}</p>', unsafe_allow_html=True)
+        for chave, label in itens_grupo:
+            paginas_disponiveis.append(chave)
+            paginas_labels.append(label)
+
+    # Adiciona Dashboard no início
+    paginas_disponiveis.insert(0, "Dashboard")
+    paginas_labels.insert(0, "🏠  Dashboard")
+
+    if "pagina_atual" not in st.session_state or st.session_state.pagina_atual not in paginas_disponiveis:
+        st.session_state.pagina_atual = "Dashboard"
+
+    idx_atual = paginas_disponiveis.index(st.session_state.pagina_atual)
+    escolha = st.radio("nav", paginas_labels, index=idx_atual, label_visibility="collapsed", key="nav_radio")
+    nome_aba = paginas_disponiveis[paginas_labels.index(escolha)]
+    st.session_state.pagina_atual = nome_aba
+
+    st.markdown("<hr>", unsafe_allow_html=True)
     ultima_at  = st.session_state.get("ultima_atividade")
     timeout_em = ultima_at + timedelta(hours=TIMEOUT_SESSAO_HORAS) if ultima_at else None
-    cap_txt    = f"Usuário: **{st.session_state.usuario_nome}** | Setor: `{st.session_state.usuario_setor}`"
+    st.caption(f"👤 {st.session_state.usuario_nome}")
+    st.caption(f"🏷️ {setor}")
     if timeout_em:
-        cap_txt += f" | Sessão expira: {timeout_em.strftime('%H:%M')}"
-    st.caption(cap_txt)
-with ch2:
-    st.write("")
-    if st.button("Sair"):
+        st.caption(f"⏱️ Sessão até {timeout_em.strftime('%H:%M')}")
+    if st.button("↩ Sair", key="btn_sair_sidebar"):
         registrar_auditoria(st.session_state.usuario_nome, "LOGOUT", "Logout manual.")
         st.session_state.autenticado      = False
         st.session_state.ultima_atividade = None
         st.rerun()
 
-df_banco_macro = carregar_macro()
-df_banco_micro = carregar_micro()
+# ── Topbar ────────────────────────────────────────────────────────────────────
+agora_str = datetime.now().strftime("%d/%m/%Y  %H:%M")
+st.markdown(f"""
+<div class="topbar">
+    <div class="topbar-title">Passold <span>Sistemas de Fachadas</span></div>
+    <div class="topbar-right">
+        <span class="topbar-badge">{setor}</span>
+        <span class="topbar-user">👤 <strong>{st.session_state.usuario_nome}</strong></span>
+        <span class="topbar-time">🕐 {agora_str}</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-with st.sidebar:
-    st.caption("Obra de trabalho")
-    if not df_banco_macro.empty:
-        obras_lista      = sorted(df_banco_macro['Obra'].unique().tolist())
-        obra_selecionada = st.selectbox("Obra de trabalho:", obras_lista, label_visibility="collapsed")
-        df_macro_filtrado = carregar_macro_por_obra(obra_selecionada)
-    else:
-        obra_selecionada  = None
-        df_macro_filtrado = pd.DataFrame()
-        st.info("Nenhuma obra cadastrada.")
+# ── Remove o header antigo (evita duplicar) ───────────────────────────────────
+abas_disponiveis = paginas_disponiveis   # compatibilidade com código abaixo
 
-# ========================================================
-# ABAS
-# ========================================================
-setor = st.session_state.usuario_setor
-abas_disponiveis = []
-if setor in ["Master", "Producao", "Diretoria", "Engenharia"]:
-    abas_disponiveis.append("Painel da Producao - ACM")
-if setor in ["Master", "Producao", "Diretoria", "Medicao"]:
-    abas_disponiveis.append("Painel TV — ACM")
-if setor in ["Master", "Esquadria", "Producao", "Diretoria", "Engenharia"]:
-    abas_disponiveis.append("Painel da Producao - Esquadrias")
-if setor in ["Master", "Esquadria", "Producao", "Diretoria", "Medicao"]:
-    abas_disponiveis.append("Painel TV — Esquadrias")
-if setor in ["Master", "PCP"]:
-    abas_disponiveis.append("Liberar OPs da Semana")
-if setor in ["Master", "Diretoria", "Medicao"]:
-    abas_disponiveis.append("Visao Macro")
-if setor in ["Master"]:
-    abas_disponiveis.append("Vincular Datas")
-    abas_disponiveis.append("Cadastrar Obra")
-if setor in ["Master", "Engenharia"]:
-    abas_disponiveis.append("Painel de Engenharia")
-if setor in ["Master", "Logistica"]:
-    abas_disponiveis.append("Logistica")
-if setor in ["Master", "Almoxarifado"]:
-    abas_disponiveis.append("Almoxarifado")
-if setor in ["Master", "Medicao"]:
-    abas_disponiveis.append("Sistema de Medicao")
-if setor in ["Master", "Diretoria", "PCP", "Medicao"]:
-    abas_disponiveis.append("Relatorio Geral")
-if setor in ["Master"]:
-    abas_disponiveis.append("Configuracoes")
+# ── Compatibilidade: aba_objeto agora é um container único ────────────────────
+class _FakePage:
+    """Contexto vazio — substitui o with aba_objeto: das tabs antigas."""
+    def __enter__(self): return self
+    def __exit__(self, *_): pass
 
-with st.container():
-    abas_objetos = st.tabs(abas_disponiveis)
+aba_objeto = _FakePage()
 
-for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
+# ── Renderiza só a página selecionada ────────────────────────────────────────
+if True:  # mantém indentação do bloco original
+    nome_aba = st.session_state.pagina_atual
+
+# ── DASHBOARD ─────────────────────────────────────────────────────────────────
+if nome_aba == "Dashboard":
+    with aba_objeto:
+        st.markdown("""
+        <div class="page-header">
+            <div class="page-header-left">
+                <h2>Dashboard</h2>
+                <p>Resumo geral da operação em tempo real</p>
+            </div>
+            <span class="page-icon">🏠</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        df_micro_dash = carregar_micro()
+        df_macro_dash = carregar_macro()
+
+        ops_pendentes    = len(df_micro_dash[df_micro_dash['Status_Item'] == 'Pendente'])           if not df_micro_dash.empty else 0
+        ops_liberadas    = len(df_micro_dash[df_micro_dash['Status_Item'] == 'Liberado para Fabrica']) if not df_micro_dash.empty else 0
+        ops_concluidas   = len(df_micro_dash[df_micro_dash['Status_Item'] == 'Concluido'])          if not df_micro_dash.empty else 0
+        total_obras      = df_micro_dash['Obra_Vinculada'].nunique()                                 if not df_micro_dash.empty else 0
+
+        hoje = datetime.now().date()
+        if not df_micro_dash.empty and 'Data_Limite_Obra' in df_micro_dash.columns:
+            df_ativos = df_micro_dash[~df_micro_dash['Status_Item'].isin(['Concluido','Cancelado'])].copy()
+            df_ativos['Data_Limite_Obra'] = pd.to_datetime(df_ativos['Data_Limite_Obra'], errors='coerce')
+            lotes_atrasados = len(df_ativos[df_ativos['Data_Limite_Obra'].dt.date < hoje])
+        else:
+            lotes_atrasados = 0
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        with c1:
+            st.markdown(f"""
+            <div class="dash-card">
+                <div class="dash-card-title">OPs Pendentes</div>
+                <div class="dash-card-value orange">{ops_pendentes}</div>
+                <div class="dash-card-sub">aguardando liberação</div>
+            </div>""", unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"""
+            <div class="dash-card">
+                <div class="dash-card-title">Liberadas p/ Fábrica</div>
+                <div class="dash-card-value">{ops_liberadas}</div>
+                <div class="dash-card-sub">em produção</div>
+            </div>""", unsafe_allow_html=True)
+        with c3:
+            st.markdown(f"""
+            <div class="dash-card">
+                <div class="dash-card-title">Concluídas</div>
+                <div class="dash-card-value green">{ops_concluidas}</div>
+                <div class="dash-card-sub">finalizadas</div>
+            </div>""", unsafe_allow_html=True)
+        with c4:
+            cor_atr = "red" if lotes_atrasados > 0 else "green"
+            st.markdown(f"""
+            <div class="dash-card">
+                <div class="dash-card-title">Lotes Atrasados</div>
+                <div class="dash-card-value {cor_atr}">{lotes_atrasados}</div>
+                <div class="dash-card-sub">prazo vencido</div>
+            </div>""", unsafe_allow_html=True)
+        with c5:
+            st.markdown(f"""
+            <div class="dash-card">
+                <div class="dash-card-title">Obras Ativas</div>
+                <div class="dash-card-value">{total_obras}</div>
+                <div class="dash-card-sub">em andamento</div>
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        col_esq, col_dir = st.columns([3, 2])
+
+        with col_esq:
+            st.markdown("#### 📋 Status dos Lotes")
+            if not df_micro_dash.empty:
+                status_counts = df_micro_dash['Status_Item'].value_counts().reset_index()
+                status_counts.columns = ['Status', 'Quantidade']
+                cores_status = {
+                    'Pendente':                '#D97706',
+                    'Liberado para Fabrica':   '#0EA5E9',
+                    'Parcialmente Concluido':  '#8B5CF6',
+                    'Concluido':               '#059669',
+                    'Cancelado':               '#DC2626',
+                }
+                import plotly.express as px
+                fig = px.bar(status_counts, x='Status', y='Quantidade',
+                             color='Status',
+                             color_discrete_map=cores_status,
+                             template='plotly_white')
+                fig.update_layout(
+                    height=280, showlegend=False,
+                    margin=dict(l=0, r=0, t=10, b=0),
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font=dict(family='Inter', size=12),
+                    xaxis=dict(title='', tickfont=dict(size=11)),
+                    yaxis=dict(title='Qtd', gridcolor='#F1F5F9'),
+                )
+                fig.update_traces(marker_line_width=0, borderradius=4)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.markdown('<div class="empty-state"><div class="empty-icon">📊</div><h4>Sem dados</h4><p>Nenhum lote cadastrado ainda.</p></div>', unsafe_allow_html=True)
+
+        with col_dir:
+            st.markdown("#### 🚨 Alertas")
+            if lotes_atrasados > 0:
+                st.markdown(f'<div class="bar-danger">🔴 <strong>{lotes_atrasados} lote(s) atrasado(s)</strong> — verifique a aba Relatório</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="bar-ok">✅ Nenhum lote atrasado</div>', unsafe_allow_html=True)
+
+            if ops_pendentes > 0:
+                st.markdown(f'<div class="bar-warn">⚠️ <strong>{ops_pendentes} OP(s) aguardando</strong> liberação para fábrica</div>', unsafe_allow_html=True)
+
+            if not df_macro_dash.empty and 'Status_Engenharia' in df_macro_dash.columns:
+                criticos = len(df_macro_dash[df_macro_dash['Status_Engenharia'].str.contains('Revisao|Aguardando', na=False)])
+                if criticos > 0:
+                    st.markdown(f'<div class="bar-warn">📐 <strong>{criticos} frente(s)</strong> em revisão ou aguardando</div>', unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("#### 📦 Lotes por Obra")
+            if not df_micro_dash.empty:
+                por_obra = df_micro_dash.groupby('Obra_Vinculada').size().reset_index(name='Lotes')
+                por_obra = por_obra.sort_values('Lotes', ascending=False).head(8)
+                st.dataframe(por_obra, hide_index=True, use_container_width=True,
+                             column_config={"Obra_Vinculada": "Obra", "Lotes": "Qtd Lotes"})
+
+elif nome_aba not in abas_disponiveis:
+    st.warning("Página não encontrada.")
+
+# ── Bloco de compatibilidade — substitui o loop de tabs ──────────────────────
+# O código abaixo usa `if nome_aba == "X":` diretamente (sem for loop)
+if False:  # bloco morto — mantém o parser feliz com o código legado abaixo
+    for nome_aba, aba_objeto in zip([], []):
+        pass
+
+for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
     # ==================================================
     # PAINEL DA PRODUCAO ACM
     # ==================================================
     if nome_aba == "Painel da Producao - ACM":
         with aba_objeto:
-            st.header("Mural de Metas — Producao")
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Painel da Produção — ACM</h2><p>Acompanhamento em tempo real dos lotes e OPs de ACM</p></div><span class="page-icon">📋</span></div>', unsafe_allow_html=True)
             obras_tv = ["Todas as obras"] + (
                 list(df_banco_micro['Obra_Vinculada'].dropna().unique()) if not df_banco_micro.empty else []
             )
@@ -2233,6 +2673,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     elif nome_aba == "Painel TV — ACM":
         with aba_objeto:
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Painel TV — ACM</h2><p>Visão de chão de fábrica para exibição em televisão</p></div><span class="page-icon">📺</span></div>', unsafe_allow_html=True)
             if 'tv_last_refresh' not in st.session_state:
                 st.session_state.tv_last_refresh = time.time()
             agora   = time.time()
@@ -2403,7 +2844,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 t = str(tipo).upper()
                 return any(p in t for p in ["ESQUADRIA", "VIDRO", "ALUMINIO", "PERFIL"])
 
-            st.header("Mural de Metas — Esquadrias")
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Painel da Produção — Esquadrias</h2><p>Acompanhamento em tempo real dos lotes e OPs de Esquadrias</p></div><span class="page-icon">📋</span></div>', unsafe_allow_html=True)
             obras_esq = ["Todas as obras"] + (
                 list(df_banco_micro['Obra_Vinculada'].dropna().unique()) if not df_banco_micro.empty else []
             )
@@ -2711,6 +3152,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     elif nome_aba == "Painel TV — Esquadrias":
         with aba_objeto:
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Painel TV — Esquadrias</h2><p>Visão de chão de fábrica para exibição em televisão</p></div><span class="page-icon">📺</span></div>', unsafe_allow_html=True)
             def _eh_esquadria_tv(tipo):
                 if not tipo: return False
                 return any(p in str(tipo).upper() for p in ["ESQUADRIA","VIDRO","ALUMINIO","PERFIL"])
@@ -2805,10 +3247,27 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     elif nome_aba == "Liberar OPs da Semana":
         with aba_objeto:
-            st.header("Ordens de Producao — Liberacao Semanal")
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Liberar OPs da Semana</h2><p>Solicite, aceite e libere Ordens de Produção para a fábrica</p></div><span class="page-icon">🔓</span></div>', unsafe_allow_html=True)
+
+            # ── PIPELINE VISUAL ────────────────────────────────────
+            st.markdown("""
+            <div class="pipeline">
+                <div class="pipeline-step done">✅ 1. Solicitação</div>
+                <div class="pipeline-arrow">›</div>
+                <div class="pipeline-step done">✅ 2. Aceito pelo Master</div>
+                <div class="pipeline-arrow">›</div>
+                <div class="pipeline-step active">▶ 3. Liberar para Fábrica</div>
+                <div class="pipeline-arrow">›</div>
+                <div class="pipeline-step">4. Lançar Peças</div>
+                <div class="pipeline-arrow">›</div>
+                <div class="pipeline-step">5. Gerar OP</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("---")
 
             # ── SEÇÃO 0: ADICIONAR OP PARA LIBERAÇÃO — PCP ────────
-            st.markdown("### 📋 Adicionar OP para Liberação — PCP")
+            st.markdown("### 📋 Solicitação de OP")
 
             with st.expander("➕ Nova solicitação de OP", expanded=False):
                 with st.form("form_solicitacao_op", clear_on_submit=True):
@@ -3032,9 +3491,9 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                         else:
                             st.warning("Selecione pelo menos um item.")
                 else:
-                    st.success("Nenhum lote pendente para este filtro!")
+                    st.markdown('<div class="empty-state"><div class="empty-icon">✅</div><h4>Tudo em dia!</h4><p>Nenhum lote pendente para este filtro.</p></div>', unsafe_allow_html=True)
             else:
-                st.info("Nenhum lote pendente encontrado.")
+                st.markdown('<div class="empty-state"><div class="empty-icon">📋</div><h4>Nenhum lote pendente</h4><p>Cadastre uma solicitação de OP na seção acima para começar.</p></div>', unsafe_allow_html=True)
 
             st.markdown("---")
 # ── SEÇÃO 2: LANÇAR PEÇAS DA OP ───────────────────────
@@ -3046,10 +3505,16 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
             with tab_op_fat:
                 st.caption("Vincule os códigos reais das peças ao lote já liberado.")
 
-                df_lib = df_banco_micro[
-                    (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
-                    (df_banco_micro['Status_Item'].isin(["Liberado para Fabrica", "Parcialmente Concluido"]))
-                ].copy() if obra_selecionada and not df_banco_micro.empty else pd.DataFrame()
+                obras_fat = sorted(df_banco_micro['Obra_Vinculada'].dropna().unique().tolist()) if not df_banco_micro.empty else []
+                obra_fat_sel = st.selectbox("Obra:", ["Todas"] + obras_fat, key="fat_obra_sel")
+
+                if not df_banco_micro.empty:
+                    mask_fat = df_banco_micro['Status_Item'].isin(["Liberado para Fabrica", "Parcialmente Concluido"])
+                    if obra_fat_sel != "Todas":
+                        mask_fat = mask_fat & (df_banco_micro['Obra_Vinculada'] == obra_fat_sel)
+                    df_lib = df_banco_micro[mask_fat].copy()
+                else:
+                    df_lib = pd.DataFrame()
 
                 if not df_lib.empty:
                     opcoes_lotes = [
@@ -3557,7 +4022,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     elif nome_aba == "Visao Macro":
         with aba_objeto:
-            st.header("Dashboard Executivo")
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Visão Macro</h2><p>Indicadores executivos e visão consolidada das obras</p></div><span class="page-icon">🗺️</span></div>', unsafe_allow_html=True)
             if obra_selecionada and not df_banco_micro.empty:
                 df_dir = df_banco_micro[df_banco_micro['Obra_Vinculada'] == obra_selecionada].copy()
             else:
@@ -3643,7 +4108,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     elif nome_aba == "Vincular Datas":
         with aba_objeto:
-            st.header("Fatiamento de Lotes")
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Vincular Datas</h2><p>Fatiamento e vinculação de datas aos lotes de produção</p></div><span class="page-icon">📅</span></div>', unsafe_allow_html=True)
             if st.session_state.get('lote_salvo_sucesso'):
                 st.success("Lote gerado com sucesso!")
                 st.session_state.lote_salvo_sucesso = False
@@ -3779,7 +4244,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     elif nome_aba == "Cadastrar Obra":
         with aba_objeto:
-            st.header("Cadastrar Nova Obra")
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Cadastrar Obra</h2><p>Registre novas obras e frentes no cronograma macro</p></div><span class="page-icon">🏗️</span></div>', unsafe_allow_html=True)
             for k, v in [
                 ('mem_obra', ''), ('mem_frente', ''), ('mem_tarefa', ''),
                 ('mem_dt_ini', datetime.now().date()),
@@ -3861,58 +4326,80 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
                 if opcoes_del:
                     frente_del = st.selectbox("Frente para excluir:", opcoes_del, key="sel_del_frente")
                     edt_del    = frente_del.split(" — ")[0].strip()
-                    if st.button(f"Excluir frente {edt_del}", key="btn_del_frente"):
-                        conn = conectar_banco()
-                        try:
-                            cursor = conn.cursor()
-                            cursor.execute("DELETE FROM cronograma_macro WHERE EDT=%s", (edt_del,))
-                            conn.commit()
-                            _limpar_cache_geral()
-                            registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_FRENTE",
-                                f"EDT {edt_del} excluída — Obra: {obra_selecionada}")
-                            st.toast(f"Frente {edt_del} removida!")
-                            time.sleep(0.5)
-                            st.rerun()
-                        except Exception as e:
-                            conn.rollback()
-                            st.error(f"Erro: {e}")
-                        finally:
-                            liberar_conexao(conn)
+                    if st.button(f"🗑️ Excluir frente {edt_del}", key="btn_del_frente", type="secondary"):
+                        st.session_state["confirm_del_frente"] = edt_del
+                    if st.session_state.get("confirm_del_frente") == edt_del:
+                        st.error(f"⚠️ Confirma a exclusão da frente **{edt_del}**? Esta ação não pode ser desfeita.")
+                        cc1, cc2 = st.columns(2)
+                        with cc1:
+                            if st.button("Sim, excluir", key="confirm_yes_frente", type="primary"):
+                                conn = conectar_banco()
+                                try:
+                                    cursor = conn.cursor()
+                                    cursor.execute("DELETE FROM cronograma_macro WHERE EDT=%s", (edt_del,))
+                                    conn.commit()
+                                    _limpar_cache_geral()
+                                    registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_FRENTE",
+                                        f"EDT {edt_del} excluída — Obra: {obra_selecionada}")
+                                    st.toast(f"Frente {edt_del} removida!")
+                                    del st.session_state["confirm_del_frente"]
+                                    time.sleep(0.5)
+                                    st.rerun()
+                                except Exception as e:
+                                    conn.rollback()
+                                    st.error(f"Erro: {e}")
+                                finally:
+                                    liberar_conexao(conn)
+                        with cc2:
+                            if st.button("Cancelar", key="confirm_no_frente"):
+                                del st.session_state["confirm_del_frente"]
+                                st.rerun()
 
                 st.markdown("---")
-                st.markdown("#### Excluir Obra")
+                st.markdown("#### 🗑️ Excluir Obra")
                 st.warning("Isso remove **todas as frentes** da obra selecionada do cronograma macro.")
                 obras_para_del = sorted(df_banco_macro['Obra'].unique().tolist()) if not df_banco_macro.empty else []
                 if obras_para_del:
                     obra_del = st.selectbox("Obra para excluir:", obras_para_del, key="sel_del_obra")
                     n_frentes = len(df_banco_macro[df_banco_macro['Obra'] == obra_del])
                     st.caption(f"{n_frentes} frente(s) serão removidas.")
-                    if st.button(f"🗑️ Excluir obra '{obra_del}'", key="btn_del_obra", type="primary"):
-                        conn = conectar_banco()
-                        try:
-                            cursor = conn.cursor()
-                            cursor.execute("DELETE FROM cronograma_macro WHERE Obra=%s", (obra_del,))
-                            conn.commit()
-                            _limpar_cache_geral()
-                            registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_OBRA",
-                                f"Obra '{obra_del}' removida — {n_frentes} frente(s)")
-                            st.toast(f"Obra '{obra_del}' removida com sucesso!")
-                            time.sleep(0.5)
-                            st.rerun()
-                        except Exception as e:
-                            conn.rollback()
-                            st.error(f"Erro: {e}")
-                        finally:
-                            liberar_conexao(conn)
+                    if st.button(f"🗑️ Excluir obra '{obra_del}'", key="btn_del_obra", type="secondary"):
+                        st.session_state["confirm_del_obra"] = obra_del
+                    if st.session_state.get("confirm_del_obra") == obra_del:
+                        st.error(f"⚠️ Confirma a exclusão da obra **{obra_del}** e suas {n_frentes} frente(s)? Esta ação **não pode ser desfeita**.")
+                        do1, do2 = st.columns(2)
+                        with do1:
+                            if st.button("Sim, excluir obra", key="confirm_yes_obra", type="primary"):
+                                conn = conectar_banco()
+                                try:
+                                    cursor = conn.cursor()
+                                    cursor.execute("DELETE FROM cronograma_macro WHERE Obra=%s", (obra_del,))
+                                    conn.commit()
+                                    _limpar_cache_geral()
+                                    registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_OBRA",
+                                        f"Obra '{obra_del}' removida — {n_frentes} frente(s)")
+                                    st.toast(f"Obra '{obra_del}' removida com sucesso!")
+                                    del st.session_state["confirm_del_obra"]
+                                    time.sleep(0.5)
+                                    st.rerun()
+                                except Exception as e:
+                                    conn.rollback()
+                                    st.error(f"Erro: {e}")
+                                finally:
+                                    liberar_conexao(conn)
+                        with do2:
+                            if st.button("Cancelar", key="confirm_no_obra"):
+                                del st.session_state["confirm_del_obra"]
+                                st.rerun()
                 else:
-                    st.info("Nenhuma obra cadastrada.")
+                    st.markdown('<div class="empty-state"><div class="empty-icon">🏗️</div><h4>Nenhuma obra cadastrada</h4><p>Cadastre uma obra na seção acima.</p></div>', unsafe_allow_html=True)
 
     # ==================================================
     # PAINEL DE ENGENHARIA
     # ==================================================
     elif nome_aba == "Painel de Engenharia":
         with aba_objeto:
-            st.header("Painel Tecnico da Engenharia")
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Painel de Engenharia</h2><p>Controle de status e alertas das frentes de engenharia</p></div><span class="page-icon">📐</span></div>', unsafe_allow_html=True)
             st.caption(f"Hoje: {HOJE_PROJETO.strftime('%d/%m/%Y')} | Obra: **{obra_selecionada or 'Nenhuma'}**")
             df_eng = carregar_macro_por_obra(obra_selecionada) if obra_selecionada else pd.DataFrame()
 
@@ -4135,7 +4622,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     elif nome_aba == "Logistica":
         with aba_objeto:
-            st.header("Logistica — Gestao de Despachos")
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Logística</h2><p>Gestão de despachos, transportes e envios</p></div><span class="page-icon">🚚</span></div>', unsafe_allow_html=True)
             st.caption(f"Hoje: {HOJE_PROJETO.strftime('%d/%m/%Y')}")
             df_log = carregar_fila_logistica()
 
@@ -4350,7 +4837,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     elif nome_aba == "Almoxarifado":
         with aba_objeto:
-            st.header("Almoxarifado — Conferência de Componentes")
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Almoxarifado</h2><p>Conferência e controle de componentes recebidos</p></div><span class="page-icon">📦</span></div>', unsafe_allow_html=True)
             st.caption(f"Hoje: {HOJE_PROJETO.strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
             df_ops_comp = carregar_todas_ops_com_componentes()
 
@@ -4683,7 +5170,7 @@ for nome_aba, aba_objeto in zip(abas_disponiveis, abas_objetos):
     # ==================================================
     elif nome_aba == "Configuracoes":
         with aba_objeto:
-            st.header("Painel de Controle Master")
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Configurações</h2><p>Painel de controle e administração do sistema</p></div><span class="page-icon">⚙️</span></div>', unsafe_allow_html=True)
 
             with st.expander("Cadastrar Novo Usuario"):
                 with st.form("form_user"):
