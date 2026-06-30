@@ -27,7 +27,7 @@ BLOQUEIO_MINUTOS      = 15
 TIMEOUT_SESSAO_HORAS  = 8
 LIMITE_REGISTROS_LOAD = 2000   # máx de linhas carregadas de uma vez
 
-st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide", page_icon="", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide", page_icon="🏭", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -76,14 +76,10 @@ section[data-testid="stSidebar"] {
     border-right: none !important;
     box-shadow: 4px 0 24px rgba(0,0,0,0.15) !important;
 }
-/* Camufla o botão «» na cor do fundo da sidebar */
-button[data-testid="collapsedControl"] {
-    background: var(--sidebar-bg) !important;
-    color: var(--sidebar-bg) !important;
-    border: none !important;
-    box-shadow: none !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
+/* Esconde o botão «» de fechar/abrir a sidebar */
+button[data-testid="collapsedControl"],
+section[data-testid="stSidebar"] > div > div > button[kind="header"] {
+    display: none !important;
 }
 /* ── Sidebar geral ──────────────────────────────────────── */
 section[data-testid="stSidebar"] * { color: var(--sidebar-text) !important; }
