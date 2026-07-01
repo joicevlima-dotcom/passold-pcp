@@ -566,11 +566,17 @@ def inicializar_banco_de_dados():
             CREATE TABLE IF NOT EXISTS romaneios_manuais (
                 id SERIAL PRIMARY KEY,
                 obra_vinculada TEXT NOT NULL,
-                descricao TEXT NOT NULL,
-                quantidade NUMERIC NOT NULL,
                 data_recebimento DATE NOT NULL,
                 criado_por TEXT,
                 criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS romaneios_manuais_itens (
+                id SERIAL PRIMARY KEY,
+                romaneio_id INTEGER REFERENCES romaneios_manuais(id) ON DELETE CASCADE,
+                descricao TEXT NOT NULL,
+                quantidade NUMERIC NOT NULL
             )
         """)
         cursor.execute("""
@@ -1367,21 +1373,28 @@ def deletar_arquivo_op(arquivo_id: int):
     finally:
         liberar_conexao(conn)
 
-def salvar_romaneio_manual(obra: str, descricao: str, quantidade: float, data_recebimento, usuario: str):
+def salvar_romaneio_manual(obra: str, data_recebimento, itens: list, usuario: str):
+    """itens: lista de dicts {'descricao':..., 'quantidade':...}"""
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO romaneios_manuais (obra_vinculada, descricao, quantidade, data_recebimento, criado_por) "
-            "VALUES (%s,%s,%s,%s,%s)",
-            (obra, descricao, quantidade, data_recebimento, usuario)
+            "INSERT INTO romaneios_manuais (obra_vinculada, data_recebimento, criado_por) "
+            "VALUES (%s,%s,%s) RETURNING id",
+            (obra, data_recebimento, usuario)
         )
+        romaneio_id = cursor.fetchone()[0]
+        for item in itens:
+            cursor.execute(
+                "INSERT INTO romaneios_manuais_itens (romaneio_id, descricao, quantidade) VALUES (%s,%s,%s)",
+                (romaneio_id, item['descricao'], item['quantidade'])
+            )
         conn.commit()
-        return True
+        return romaneio_id
     except Exception as e:
         conn.rollback()
         st.error(f"Erro ao salvar romaneio manual: {e}")
-        return False
+        return None
     finally:
         liberar_conexao(conn)
 
@@ -1389,9 +1402,23 @@ def carregar_romaneios_manuais():
     conn = conectar_banco()
     try:
         return pd.read_sql_query(
-            "SELECT id, obra_vinculada, descricao, quantidade, data_recebimento, criado_por, criado_em "
-            "FROM romaneios_manuais ORDER BY data_recebimento DESC, id DESC",
+            "SELECT r.id, r.obra_vinculada, r.data_recebimento, r.criado_por, r.criado_em, "
+            "COUNT(i.id) AS qtd_itens "
+            "FROM romaneios_manuais r LEFT JOIN romaneios_manuais_itens i ON i.romaneio_id = r.id "
+            "GROUP BY r.id ORDER BY r.data_recebimento DESC, r.id DESC",
             conn
+        )
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
+def carregar_itens_romaneio_manual(romaneio_id: int):
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            "SELECT id, descricao, quantidade FROM romaneios_manuais_itens WHERE romaneio_id=%s ORDER BY id",
+            conn, params=(romaneio_id,)
         )
     except Exception:
         return pd.DataFrame()
@@ -1411,6 +1438,97 @@ def excluir_romaneio_manual(romaneio_id: int):
         return False
     finally:
         liberar_conexao(conn)
+
+def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por: str) -> bytes:
+    """Gera o romaneio manual .xlsx com a lista de itens (sem OP vinculada)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from io import BytesIO
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Romaneio"
+    ws.sheet_view.showGridLines = False
+    ws.page_setup.orientation = "portrait"
+
+    bd = Side(style='thin', color="000000")
+    borda = Border(left=bd, right=bd, top=bd, bottom=bd)
+    fill_cab = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    fill_sub = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+
+    ws.column_dimensions['A'].width = 22
+    ws.column_dimensions['B'].width = 30
+    ws.column_dimensions['C'].width = 16
+    ws.column_dimensions['D'].width = 16
+
+    ws.merge_cells("A1:D1")
+    ws["A1"] = "PASSOLD SISTEMAS DE FACHADAS"
+    ws["A1"].font = Font(name="Arial", size=14, bold=True, color="FFFFFF")
+    ws["A1"].fill = fill_cab
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 30
+
+    ws.merge_cells("A2:D2")
+    ws["A2"] = "ROMANEIO MANUAL (SEM OP VINCULADA)"
+    ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+    ws["A2"].fill = fill_cab
+    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    infos = [
+        ("Obra:", str(obra)),
+        ("Data de recebimento:", pd.to_datetime(data_recebimento).strftime('%d/%m/%Y')),
+        ("Cadastrado por:", str(criado_por)),
+    ]
+    linha = 3
+    for label, valor in infos:
+        ws.cell(linha, 1, label).font = Font(name="Arial", size=11, bold=True)
+        ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=4)
+        ws.cell(linha, 2, valor).font = Font(name="Arial", size=11)
+        for c in range(1, 5):
+            ws.cell(linha, c).border = borda
+        linha += 1
+
+    linha += 1
+    titulos = ["#", "DESCRIÇÃO DO MATERIAL", "QUANTIDADE", "CONFERIDO"]
+    for col, titulo in enumerate(titulos, 1):
+        cel = ws.cell(linha, col, titulo)
+        cel.font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        cel.fill = fill_cab
+        cel.alignment = Alignment(horizontal="center", vertical="center")
+        cel.border = borda
+    linha += 1
+
+    for i, (_, item) in enumerate(itens_df.iterrows(), 1):
+        dados = [i, item.get('descricao', ''), item.get('quantidade', 0), ""]
+        for col, val in enumerate(dados, 1):
+            cel = ws.cell(linha, col, val)
+            cel.font = Font(name="Arial", size=11)
+            cel.alignment = Alignment(horizontal="center", vertical="center")
+            cel.border = borda
+            if i % 2 == 0:
+                cel.fill = fill_sub
+        linha += 1
+
+    linha += 1
+    ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=2)
+    ws.cell(linha, 1, "TOTAL DE ITENS:").font = Font(name="Arial", size=11, bold=True)
+    ws.cell(linha, 3, len(itens_df)).font = Font(name="Arial", size=11, bold=True)
+    for c in range(1, 5):
+        ws.cell(linha, c).border = borda
+
+    linha += 3
+    assinaturas = ["Recebedor na Obra / Data", "Conferência Almoxarifado"]
+    for ass in assinaturas:
+        ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=2)
+        ws.cell(linha, 1).border = Border(bottom=bd)
+        ws.cell(linha + 1, 1, ass).font = Font(name="Arial", size=10, bold=True)
+        ws.cell(linha, 3, "____/____/______").font = Font(name="Arial", size=11)
+        linha += 3
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
 
 def salvar_solicitacao_op(obra: str, numero_projeto: str, tipo_material: str, descricao: str,
                            quantidade: float, observacao: str, usuario: str):
@@ -2257,8 +2375,9 @@ GRUPOS_NAV = {
         "Vincular Datas":       ("📅  Vincular Datas",       ["Master"]),
     },
     "🚚  Operações": {
-        "Logistica":    ("🚚  Logística",    ["Master","Logistica"]),
-        "Almoxarifado": ("📦  Almoxarifado", ["Master","Almoxarifado"]),
+        "Logistica":      ("🚚  Logística",       ["Master","Logistica"]),
+        "Almoxarifado":   ("📦  Almoxarifado",    ["Master","Almoxarifado"]),
+        "Romaneio Manual": ("📋  Romaneio Manual", ["Master","Almoxarifado","PCP"]),
     },
     "📊  Relatórios": {
         "Relatorio Geral":    ("📊  Relatório Geral",    ["Master","Diretoria","PCP","Medicao"]),
@@ -5152,52 +5271,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
         with aba_objeto:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Almoxarifado</h2><p>Conferência e controle de componentes recebidos</p></div><span class="page-icon">📦</span></div>', unsafe_allow_html=True)
             st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
-
-            with st.expander("📋 Romaneio Manual (sem OP vinculada)", expanded=False):
-                obras_rom = sorted(df_banco_macro['Obra'].dropna().unique().tolist()) if not df_banco_macro.empty else []
-                if not obras_rom:
-                    st.caption("Nenhuma obra cadastrada ainda.")
-                else:
-                    with st.form("form_romaneio_manual", clear_on_submit=True):
-                        rm1, rm2, rm3 = st.columns([3, 3, 2])
-                        with rm1:
-                            rom_obra = st.selectbox("Obra:", obras_rom, key="rom_obra")
-                        with rm2:
-                            rom_desc = st.text_input("Descrição do material:", key="rom_desc",
-                                                      placeholder="Ex: Perfil de alumínio natural 6m")
-                        with rm3:
-                            rom_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="rom_qtd")
-                        rom_data = st.date_input("Data de recebimento:", value=hoje_projeto().date(), format="DD/MM/YYYY", key="rom_data")
-                        if st.form_submit_button("💾 Salvar Romaneio", type="primary"):
-                            if not rom_desc.strip():
-                                st.error("Informe a descrição do material.")
-                            else:
-                                ok = salvar_romaneio_manual(rom_obra, rom_desc.strip(), rom_qtd, rom_data, st.session_state.usuario_nome)
-                                if ok:
-                                    registrar_auditoria(st.session_state.usuario_nome, "ROMANEIO_MANUAL",
-                                        f"Romaneio manual — Obra: {rom_obra} — {rom_desc.strip()} ({rom_qtd})")
-                                    st.toast("Romaneio salvo!")
-                                    time.sleep(0.3)
-                                    st.rerun()
-
-                st.markdown("---")
-                df_rom_manual = carregar_romaneios_manuais()
-                if df_rom_manual.empty:
-                    st.caption("Nenhum romaneio manual cadastrado ainda.")
-                else:
-                    for _, rm_row in df_rom_manual.iterrows():
-                        rmc1, rmc2, rmc3, rmc4 = st.columns([2, 3, 2, 1])
-                        rmc1.markdown(f"**{rm_row['obra_vinculada']}**")
-                        rmc2.markdown(f"{rm_row['descricao']}")
-                        rmc3.caption(f"Qtd: {rm_row['quantidade']:g} — {pd.to_datetime(rm_row['data_recebimento']).strftime('%d/%m/%Y')}")
-                        with rmc4:
-                            if st.button("🗑️", key=f"del_rom_{rm_row['id']}"):
-                                excluir_romaneio_manual(int(rm_row['id']))
-                                st.toast("Romaneio removido.")
-                                time.sleep(0.3)
-                                st.rerun()
-
-            st.markdown("---")
             df_ops_comp = carregar_todas_ops_com_componentes()
 
             if df_ops_comp.empty:
@@ -5270,6 +5343,107 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             st.error(f"⚠️ Itens em falta: {', '.join(itens_falt)}")
                         elif n_conf == n_total:
                             st.success("✅ Todos os componentes conferidos e disponíveis!")
+
+    # ==================================================
+    # ROMANEIO MANUAL (sem OP vinculada)
+    # ==================================================
+    elif nome_aba == "Romaneio Manual":
+        with aba_objeto:
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Romaneio Manual</h2><p>Registro de recebimento de material sem OP vinculada</p></div><span class="page-icon">📋</span></div>', unsafe_allow_html=True)
+            st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
+
+            if "rom_itens" not in st.session_state:
+                st.session_state.rom_itens = []
+
+            obras_rom = sorted(df_banco_macro['Obra'].dropna().unique().tolist()) if not df_banco_macro.empty else []
+            if not obras_rom:
+                st.info("Nenhuma obra cadastrada ainda.")
+            else:
+                rm1, rm2 = st.columns(2)
+                with rm1:
+                    rom_obra = st.selectbox("Obra:", obras_rom, key="rom_obra")
+                with rm2:
+                    rom_data = st.date_input("Data de recebimento:", value=hoje_projeto().date(),
+                                              format="DD/MM/YYYY", key="rom_data")
+
+                st.markdown("**Adicionar item ao romaneio:**")
+                ri1, ri2, ri3 = st.columns([5, 2, 1])
+                with ri1:
+                    rom_desc = st.text_input("Descrição do material:", key="rom_desc",
+                                              placeholder="Ex: Perfil de alumínio natural 6m")
+                with ri2:
+                    rom_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="rom_qtd")
+                with ri3:
+                    st.write("")
+                    st.write("")
+                    if st.button("➕ Adicionar", key="btn_add_rom_item"):
+                        if not rom_desc.strip():
+                            st.error("Informe a descrição do material antes de adicionar.")
+                        else:
+                            st.session_state.rom_itens.append({"descricao": rom_desc.strip(), "quantidade": rom_qtd})
+                            st.rerun()
+
+                if st.session_state.rom_itens:
+                    st.markdown("**Itens do romaneio:**")
+                    for i, item in enumerate(st.session_state.rom_itens):
+                        col_desc, col_qtd, col_rem = st.columns([5, 2, 1])
+                        col_desc.write(f"{i+1}. {item['descricao']}")
+                        col_qtd.write(f"{item['quantidade']:g}")
+                        with col_rem:
+                            if st.button("🗑", key=f"rem_rom_item_{i}"):
+                                st.session_state.rom_itens.pop(i)
+                                st.rerun()
+
+                    if st.button("💾 Salvar Romaneio", type="primary", key="btn_salvar_rom_manual"):
+                        romaneio_id = salvar_romaneio_manual(rom_obra, rom_data, st.session_state.rom_itens, st.session_state.usuario_nome)
+                        if romaneio_id:
+                            registrar_auditoria(st.session_state.usuario_nome, "ROMANEIO_MANUAL",
+                                f"Romaneio manual #{romaneio_id} — Obra: {rom_obra} — {len(st.session_state.rom_itens)} item(ns)")
+                            st.session_state.rom_itens = []
+                            st.toast("Romaneio salvo!")
+                            time.sleep(0.3)
+                            st.rerun()
+                else:
+                    st.caption("Nenhum item adicionado ainda.")
+
+            st.markdown("---")
+            st.markdown("### Histórico de Envios")
+            df_rom_manual = carregar_romaneios_manuais()
+            if df_rom_manual.empty:
+                st.caption("Nenhum romaneio manual cadastrado ainda.")
+            else:
+                obras_hist = ["Todas"] + sorted(df_rom_manual['obra_vinculada'].dropna().unique().tolist())
+                filtro_obra_hist = st.selectbox("Filtrar por obra:", obras_hist, key="filtro_obra_rom_hist")
+                if filtro_obra_hist != "Todas":
+                    df_rom_manual = df_rom_manual[df_rom_manual['obra_vinculada'] == filtro_obra_hist]
+
+                if df_rom_manual.empty:
+                    st.caption("Nenhum romaneio para essa obra ainda.")
+                for _, rm_row in df_rom_manual.iterrows():
+                    with st.expander(
+                        f"{rm_row['obra_vinculada']} — {pd.to_datetime(rm_row['data_recebimento']).strftime('%d/%m/%Y')} "
+                        f"({int(rm_row['qtd_itens'])} item(ns)) — por {rm_row['criado_por']}"
+                    ):
+                        df_itens_rom = carregar_itens_romaneio_manual(int(rm_row['id']))
+                        st.dataframe(df_itens_rom[['descricao', 'quantidade']], hide_index=True, use_container_width=True)
+                        rmb1, rmb2 = st.columns(2)
+                        with rmb1:
+                            rom_bytes = gerar_romaneio_manual_xlsx(
+                                rm_row['obra_vinculada'], rm_row['data_recebimento'], df_itens_rom, rm_row['criado_por']
+                            )
+                            st.download_button(
+                                "🖨️ Emitir Romaneio", data=rom_bytes,
+                                file_name=f"Romaneio_Manual_{rm_row['obra_vinculada']}_{pd.to_datetime(rm_row['data_recebimento']).strftime('%Y%m%d')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"dl_rom_manual_{rm_row['id']}"
+                            )
+                        with rmb2:
+                            if setor in ["Master", "Almoxarifado"]:
+                                if st.button("🗑️ Excluir", key=f"del_rom_manual_{rm_row['id']}"):
+                                    excluir_romaneio_manual(int(rm_row['id']))
+                                    st.toast("Romaneio removido.")
+                                    time.sleep(0.3)
+                                    st.rerun()
 
     # ==================================================
     # SISTEMA DE MEDICAO — agora 100% no banco
