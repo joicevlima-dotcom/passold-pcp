@@ -2813,7 +2813,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     op_txt = row['Num_OP'] if row.get('Num_OP') else "Aguardando OP"
                                     st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {row.get('Fase_Produtiva', '—')}")
                                     em_parada_op = bool(row.get('Em_Parada', False))
-                                    motivo_op    = html_escape(row.get('Motivo_Parada') or '')
+                                    _motivo_op_raw = row.get('Motivo_Parada')
+                                    motivo_op    = html_escape(str(_motivo_op_raw)) if pd.notna(_motivo_op_raw) else ''
                                     if em_parada_op:
                                         st.markdown(f"<span style='color:#DC2626;font-size:12px;font-weight:700;'>⛔ EM PARADA — {motivo_op}</span>", unsafe_allow_html=True)
                                     elif eh_parcial:
@@ -3364,7 +3365,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     op_txt = row['Num_OP'] if row.get('Num_OP') else "Aguardando OP"
                                     st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {row.get('Fase_Produtiva', '—')}")
                                     em_parada_esq = bool(row.get('Em_Parada', False))
-                                    motivo_esq    = html_escape(row.get('Motivo_Parada') or '')
+                                    _motivo_esq_raw = row.get('Motivo_Parada')
+                                    motivo_esq    = html_escape(str(_motivo_esq_raw)) if pd.notna(_motivo_esq_raw) else ''
                                     if em_parada_esq:
                                         st.markdown(f"<span style='color:#DC2626;font-size:12px;font-weight:700;'>⛔ EM PARADA — {motivo_esq}</span>", unsafe_allow_html=True)
                                     elif eh_parcial:
