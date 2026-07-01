@@ -2362,10 +2362,10 @@ setor = st.session_state.usuario_setor
 # ── Mapeamento de páginas por setor ──────────────────────────────────────────
 GRUPOS_NAV = {
     "🏭  Produção": {
-        "Painel da Producao - ACM":       ("📋  Painel ACM",         ["Master","Producao","Diretoria","Engenharia"]),
-        "Painel TV — ACM":                ("📺  TV — ACM",           ["Master","Producao","Diretoria","Medicao"]),
-        "Painel da Producao - Esquadrias":("📋  Painel Esquadrias",  ["Master","Esquadria","Producao","Diretoria","Engenharia"]),
-        "Painel TV — Esquadrias":         ("📺  TV — Esquadrias",    ["Master","Esquadria","Producao","Diretoria","Medicao"]),
+        "Painel da Producao - ACM":       ("📋  Painel ACM",         ["Master","Producao","Diretoria","Engenharia","PCP"]),
+        "Painel TV — ACM":                ("📺  TV — ACM",           ["Master","Producao","Diretoria","Medicao","PCP"]),
+        "Painel da Producao - Esquadrias":("📋  Painel Esquadrias",  ["Master","Esquadria","Producao","Diretoria","Engenharia","PCP"]),
+        "Painel TV — Esquadrias":         ("📺  TV — Esquadrias",    ["Master","Esquadria","Producao","Diretoria","Medicao","PCP"]),
         "Liberar OPs da Semana":          ("🔓  Liberar OPs",        ["Master","PCP"]),
     },
     "📐  Engenharia": {
@@ -5716,7 +5716,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 with st.form("form_user"):
                     nu = st.text_input("Login:").lower().strip()
                     nn = st.text_input("Nome:")
-                    ns = st.selectbox("Setor:", ["Producao", "Engenharia", "Diretoria", "Logistica", "Almoxarifado", "Medicao", "Master"])
+                    ns = st.selectbox("Setor:", ["Producao", "Engenharia", "Diretoria", "Logistica", "Almoxarifado", "Medicao", "PCP", "Master"])
                     np = st.text_input("Senha:", type="password")
                     st.caption("Mínimo 8 caracteres, ao menos 1 número e 1 letra maiúscula.")
                     if st.form_submit_button("Salvar"):
