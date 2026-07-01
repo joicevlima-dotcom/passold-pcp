@@ -4,6 +4,7 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import calendar as py_calendar
 import os
+import secrets
 import time
 import bcrypt
 import psycopg2
@@ -748,11 +749,14 @@ def inicializar_banco_de_dados():
 
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
-            _senha_master = (
-                st.secrets.get("MASTER_PASS")
-                or os.environ.get("MASTER_PASS")
-                or "Passold@2025!"
-            )
+            _senha_master = st.secrets.get("MASTER_PASS") or os.environ.get("MASTER_PASS")
+            if not _senha_master:
+                _senha_master = secrets.token_urlsafe(16)
+                st.warning(
+                    f"⚠️ Conta Master criada com senha temporária gerada automaticamente: **{_senha_master}** "
+                    "— anote agora, ela não será mostrada de novo. Configure MASTER_PASS em secrets.toml "
+                    "para definir a senha inicial da próxima vez."
+                )
             cursor.execute(
                 "INSERT INTO usuarios (usuario, nome, setor, senha) VALUES (%s, %s, %s, %s)",
                 ('master', 'Joice Master', 'Master', hash_senha(_senha_master))
@@ -1229,6 +1233,45 @@ def verificar_login(usuario, senha):
         return None
     except Exception:
         return None
+    finally:
+        liberar_conexao(conn)
+
+def trocar_propria_senha(usuario: str, senha_atual: str, senha_nova: str) -> tuple[bool, str]:
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT senha FROM usuarios WHERE usuario=%s", (usuario,))
+        resultado = cursor.fetchone()
+        if not resultado or not verificar_senha(senha_atual, resultado[0]):
+            return False, "Senha atual incorreta."
+        cursor.execute(
+            "UPDATE usuarios SET senha=%s WHERE usuario=%s",
+            (hash_senha(senha_nova), usuario)
+        )
+        conn.commit()
+        return True, "Senha alterada com sucesso!"
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao trocar senha: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def redefinir_senha_usuario(usuario_alvo: str, senha_nova: str) -> tuple[bool, str]:
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE usuarios SET senha=%s WHERE usuario=%s",
+            (hash_senha(senha_nova), usuario_alvo)
+        )
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return False, "Usuário não encontrado."
+        conn.commit()
+        return True, "Senha redefinida com sucesso!"
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao redefinir senha: {e}"
     finally:
         liberar_conexao(conn)
 
@@ -2071,6 +2114,7 @@ if 'autenticado' not in st.session_state:
     st.session_state.autenticado      = False
     st.session_state.usuario_nome     = ""
     st.session_state.usuario_setor    = ""
+    st.session_state.usuario_login    = ""
     st.session_state.ultima_atividade = None
 
 # ── Verificar timeout de sessão ──────────────────────────
@@ -2078,6 +2122,7 @@ if st.session_state.autenticado and verificar_timeout_sessao():
     st.session_state.autenticado      = False
     st.session_state.usuario_nome     = ""
     st.session_state.usuario_setor    = ""
+    st.session_state.usuario_login    = ""
     st.session_state.ultima_atividade = None
     st.warning(f"⏱️ Sessão encerrada por inatividade ({TIMEOUT_SESSAO_HORAS}h). Faça login novamente.")
 
@@ -2120,6 +2165,7 @@ if not st.session_state.autenticado:
                         st.session_state.autenticado      = True
                         st.session_state.usuario_nome     = dados[0]
                         st.session_state.usuario_setor    = dados[1]
+                        st.session_state.usuario_login    = usuario_limpo
                         st.session_state.ultima_atividade = datetime.now()
                         registrar_auditoria(usuario_limpo, "LOGIN", f"Login bem-sucedido — {dados[1]}")
                         st.rerun()
@@ -2260,6 +2306,29 @@ with st.sidebar:
     st.caption(f"👤 {st.session_state.usuario_nome}  ·  {setor}")
     if timeout_em:
         st.caption(f"⏱️ Sessão até {timeout_em.strftime('%H:%M')}")
+
+    with st.expander("🔑 Trocar minha senha"):
+        with st.form("form_trocar_senha", clear_on_submit=True):
+            senha_atual_inp = st.text_input("Senha atual:", type="password", key="senha_atual_troca")
+            senha_nova_inp  = st.text_input("Nova senha:", type="password", key="senha_nova_troca")
+            senha_conf_inp  = st.text_input("Confirmar nova senha:", type="password", key="senha_conf_troca")
+            if st.form_submit_button("Salvar nova senha"):
+                if not senha_atual_inp or not senha_nova_inp:
+                    st.error("Preencha todos os campos.")
+                elif len(senha_nova_inp) < 8:
+                    st.error("A nova senha precisa ter pelo menos 8 caracteres.")
+                elif senha_nova_inp != senha_conf_inp:
+                    st.error("A confirmação não confere com a nova senha.")
+                else:
+                    ok, msg = trocar_propria_senha(
+                        st.session_state.usuario_login, senha_atual_inp, senha_nova_inp
+                    )
+                    if ok:
+                        registrar_auditoria(st.session_state.usuario_nome, "TROCAR_SENHA", "Senha alterada pelo próprio usuário.")
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+
     if st.button("↩ Sair", key="btn_sair_sidebar"):
         registrar_auditoria(st.session_state.usuario_nome, "LOGOUT", "Logout manual.")
         st.session_state.autenticado      = False
@@ -2744,7 +2813,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     op_txt = row['Num_OP'] if row.get('Num_OP') else "Aguardando OP"
                                     st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {row.get('Fase_Produtiva', '—')}")
                                     em_parada_op = bool(row.get('Em_Parada', False))
-                                    motivo_op    = row.get('Motivo_Parada') or ''
+                                    motivo_op    = html_escape(row.get('Motivo_Parada') or '')
                                     if em_parada_op:
                                         st.markdown(f"<span style='color:#DC2626;font-size:12px;font-weight:700;'>⛔ EM PARADA — {motivo_op}</span>", unsafe_allow_html=True)
                                     elif eh_parcial:
@@ -2780,7 +2849,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     for arq in arqs_op:
                                         arq_id, arq_nome, arq_tipo, arq_enviado_por, _ = arq
                                         ca1, ca2 = st.columns([5, 1])
-                                        ca1.markdown(f"📄 **{arq_nome}**  \n<small style='color:#94A3B8'>{arq_enviado_por}</small>", unsafe_allow_html=True)
+                                        ca1.markdown(f"📄 **{html_escape(arq_nome)}**  \n<small style='color:#94A3B8'>{html_escape(arq_enviado_por)}</small>", unsafe_allow_html=True)
                                         conteudo_arq = carregar_conteudo_arquivo(arq_id)
                                         if conteudo_arq:
                                             _, _, bytes_arq = conteudo_arq
@@ -3295,7 +3364,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     op_txt = row['Num_OP'] if row.get('Num_OP') else "Aguardando OP"
                                     st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {row.get('Fase_Produtiva', '—')}")
                                     em_parada_esq = bool(row.get('Em_Parada', False))
-                                    motivo_esq    = row.get('Motivo_Parada') or ''
+                                    motivo_esq    = html_escape(row.get('Motivo_Parada') or '')
                                     if em_parada_esq:
                                         st.markdown(f"<span style='color:#DC2626;font-size:12px;font-weight:700;'>⛔ EM PARADA — {motivo_esq}</span>", unsafe_allow_html=True)
                                     elif eh_parcial:
@@ -3930,7 +3999,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 for arq in arqs_existentes:
                                     arq_id, arq_nome, arq_tipo, arq_enviado_por, arq_enviado_em = arq
                                     col_a, col_b, col_c = st.columns([4, 2, 1])
-                                    col_a.markdown(f"📄 **{arq_nome}**")
+                                    col_a.markdown(f"📄 **{html_escape(arq_nome)}**")
                                     col_b.caption(f"{arq_enviado_por} — {pd.to_datetime(arq_enviado_em).strftime('%d/%m/%Y %H:%M')}")
                                     with col_c:
                                         conteudo_arq = carregar_conteudo_arquivo(arq_id)
@@ -5434,6 +5503,28 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         finally:
                             liberar_conexao(conn)
 
+            # ── Redefinir senha de usuário ─────────────────────
+            st.markdown("---")
+            st.markdown("### 🔑 Redefinir senha de usuário")
+            reset_u = st.selectbox("Usuário:", df_u['usuario'].tolist(), key="reset_senha_usuario")
+            with st.form("form_reset_senha_usuario", clear_on_submit=True):
+                nova_senha_reset  = st.text_input("Nova senha:", type="password", key="nova_senha_reset")
+                conf_senha_reset  = st.text_input("Confirmar nova senha:", type="password", key="conf_senha_reset")
+                if st.form_submit_button("Redefinir senha"):
+                    if not nova_senha_reset:
+                        st.error("Digite a nova senha.")
+                    elif len(nova_senha_reset) < 8:
+                        st.error("A nova senha precisa ter pelo menos 8 caracteres.")
+                    elif nova_senha_reset != conf_senha_reset:
+                        st.error("A confirmação não confere com a nova senha.")
+                    else:
+                        ok, msg = redefinir_senha_usuario(reset_u, nova_senha_reset)
+                        if ok:
+                            registrar_auditoria(st.session_state.usuario_nome, "REDEFINIR_SENHA",
+                                f"Senha redefinida para o usuário: {reset_u}")
+                            st.success(msg)
+                        else:
+                            st.error(msg)
 
             # ── Log de Auditoria ──────────────────────────────
             st.markdown("---")
