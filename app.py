@@ -76,10 +76,15 @@ section[data-testid="stSidebar"] {
     border-right: none !important;
     box-shadow: 4px 0 24px rgba(0,0,0,0.15) !important;
 }
-/* Esconde o botão «» de fechar/abrir a sidebar */
+/* Esconde o botão «» de fechar/abrir a sidebar (cobre versões antigas e novas do Streamlit) */
 button[data-testid="collapsedControl"],
-section[data-testid="stSidebar"] > div > div > button[kind="header"] {
+section[data-testid="stSidebar"] > div > div > button[kind="header"],
+[data-testid*="ollapse" i] button,
+button[data-testid*="ollapse" i],
+[data-testid="stSidebarHeader"] button,
+[data-testid="stSidebarCollapseButton"] {
     display: none !important;
+    pointer-events: none !important;
 }
 /* ── Sidebar geral ──────────────────────────────────────── */
 section[data-testid="stSidebar"] * { color: var(--sidebar-text) !important; }
