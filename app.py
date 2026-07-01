@@ -563,6 +563,17 @@ def inicializar_banco_de_dados():
             )
         """)
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS romaneios_manuais (
+                id SERIAL PRIMARY KEY,
+                obra_vinculada TEXT NOT NULL,
+                descricao TEXT NOT NULL,
+                quantidade NUMERIC NOT NULL,
+                data_recebimento DATE NOT NULL,
+                criado_por TEXT,
+                criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS usuarios (
                 id SERIAL PRIMARY KEY,
                 usuario TEXT UNIQUE,
@@ -1352,6 +1363,51 @@ def deletar_arquivo_op(arquivo_id: int):
     except Exception as e:
         conn.rollback()
         st.error(f"Erro ao deletar arquivo: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
+def salvar_romaneio_manual(obra: str, descricao: str, quantidade: float, data_recebimento, usuario: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO romaneios_manuais (obra_vinculada, descricao, quantidade, data_recebimento, criado_por) "
+            "VALUES (%s,%s,%s,%s,%s)",
+            (obra, descricao, quantidade, data_recebimento, usuario)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar romaneio manual: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
+def carregar_romaneios_manuais():
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            "SELECT id, obra_vinculada, descricao, quantidade, data_recebimento, criado_por, criado_em "
+            "FROM romaneios_manuais ORDER BY data_recebimento DESC, id DESC",
+            conn
+        )
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
+def excluir_romaneio_manual(romaneio_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM romaneios_manuais WHERE id=%s", (romaneio_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao excluir romaneio manual: {e}")
         return False
     finally:
         liberar_conexao(conn)
@@ -5096,6 +5152,52 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
         with aba_objeto:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Almoxarifado</h2><p>Conferência e controle de componentes recebidos</p></div><span class="page-icon">📦</span></div>', unsafe_allow_html=True)
             st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
+
+            with st.expander("📋 Romaneio Manual (sem OP vinculada)", expanded=False):
+                obras_rom = sorted(df_banco_macro['Obra'].dropna().unique().tolist()) if not df_banco_macro.empty else []
+                if not obras_rom:
+                    st.caption("Nenhuma obra cadastrada ainda.")
+                else:
+                    with st.form("form_romaneio_manual", clear_on_submit=True):
+                        rm1, rm2, rm3 = st.columns([3, 3, 2])
+                        with rm1:
+                            rom_obra = st.selectbox("Obra:", obras_rom, key="rom_obra")
+                        with rm2:
+                            rom_desc = st.text_input("Descrição do material:", key="rom_desc",
+                                                      placeholder="Ex: Perfil de alumínio natural 6m")
+                        with rm3:
+                            rom_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="rom_qtd")
+                        rom_data = st.date_input("Data de recebimento:", value=hoje_projeto().date(), format="DD/MM/YYYY", key="rom_data")
+                        if st.form_submit_button("💾 Salvar Romaneio", type="primary"):
+                            if not rom_desc.strip():
+                                st.error("Informe a descrição do material.")
+                            else:
+                                ok = salvar_romaneio_manual(rom_obra, rom_desc.strip(), rom_qtd, rom_data, st.session_state.usuario_nome)
+                                if ok:
+                                    registrar_auditoria(st.session_state.usuario_nome, "ROMANEIO_MANUAL",
+                                        f"Romaneio manual — Obra: {rom_obra} — {rom_desc.strip()} ({rom_qtd})")
+                                    st.toast("Romaneio salvo!")
+                                    time.sleep(0.3)
+                                    st.rerun()
+
+                st.markdown("---")
+                df_rom_manual = carregar_romaneios_manuais()
+                if df_rom_manual.empty:
+                    st.caption("Nenhum romaneio manual cadastrado ainda.")
+                else:
+                    for _, rm_row in df_rom_manual.iterrows():
+                        rmc1, rmc2, rmc3, rmc4 = st.columns([2, 3, 2, 1])
+                        rmc1.markdown(f"**{rm_row['obra_vinculada']}**")
+                        rmc2.markdown(f"{rm_row['descricao']}")
+                        rmc3.caption(f"Qtd: {rm_row['quantidade']:g} — {pd.to_datetime(rm_row['data_recebimento']).strftime('%d/%m/%Y')}")
+                        with rmc4:
+                            if st.button("🗑️", key=f"del_rom_{rm_row['id']}"):
+                                excluir_romaneio_manual(int(rm_row['id']))
+                                st.toast("Romaneio removido.")
+                                time.sleep(0.3)
+                                st.rerun()
+
+            st.markdown("---")
             df_ops_comp = carregar_todas_ops_com_componentes()
 
             if df_ops_comp.empty:
