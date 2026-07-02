@@ -572,6 +572,17 @@ def inicializar_banco_de_dados():
             )
         """)
         cursor.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='romaneios_manuais' AND column_name='descricao') THEN
+                    ALTER TABLE romaneios_manuais ALTER COLUMN descricao DROP NOT NULL;
+                END IF;
+                IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='romaneios_manuais' AND column_name='quantidade') THEN
+                    ALTER TABLE romaneios_manuais ALTER COLUMN quantidade DROP NOT NULL;
+                END IF;
+            END $$;
+        """)
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS romaneios_manuais_itens (
                 id SERIAL PRIMARY KEY,
                 romaneio_id INTEGER REFERENCES romaneios_manuais(id) ON DELETE CASCADE,
