@@ -3273,6 +3273,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 st.markdown("<div style='text-align:center;padding:60px;color:#94A3B8;font-size:20px;'>Nenhum lote cadastrado.</div>", unsafe_allow_html=True)
             else:
                 def urgencia(row):
+                    if row.get('Status_Item') == 'Concluido': return 'concluido'
                     prazo = row.get('Data_Limite_Obra')
                     if not prazo_valido(prazo): return 'sem_prazo'
                     dias = (pd.to_datetime(prazo).normalize() - hoje_projeto()).days
@@ -3299,10 +3300,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     'atencao':   {'border': '#D97706', 'bg': '#FFFBEB', 'tag': '🟡 ATENÇÃO',  'tag_color': '#D97706'},
                     'ok':        {'border': '#059669', 'bg': '#F0FDF4', 'tag': '🟢 NO PRAZO', 'tag_color': '#059669'},
                     'sem_prazo': {'border': '#94A3B8', 'bg': '#F8FAFC', 'tag': '⚪ SEM PRAZO','tag_color': '#94A3B8'},
+                    'concluido': {'border': '#15803D', 'bg': '#F0FDF4', 'tag': '✅ CONCLUÍDO','tag_color': '#15803D'},
                 }
 
                 urgentes = df_tv[df_tv['_urgencia'].isin(['vencido', 'critico'])]
-                demais   = df_tv[df_tv['_urgencia'].isin(['atencao', 'ok', 'sem_prazo'])]
+                demais   = df_tv[df_tv['_urgencia'].isin(['atencao', 'ok', 'sem_prazo', 'concluido'])]
 
                 if not urgentes.empty:
                     st.markdown(f"""
