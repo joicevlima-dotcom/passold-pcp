@@ -710,6 +710,7 @@ def inicializar_banco_de_dados():
         # Coluna de m2 executado na etapa
         cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN IF NOT EXISTS m2_executado REAL DEFAULT 0")
         cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN IF NOT EXISTS Numero_Projeto TEXT DEFAULT ''")
+        cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN IF NOT EXISTS Detalhado BOOLEAN DEFAULT TRUE")
         cursor.execute("ALTER TABLE op_pecas ADD COLUMN IF NOT EXISTS m2_op_real REAL DEFAULT 0")
         cursor.execute("ALTER TABLE op_pecas ADD COLUMN IF NOT EXISTS descricao TEXT DEFAULT ''")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_lote ON op_pecas(lote_id)")
@@ -2760,7 +2761,8 @@ if nome_aba == "Dashboard":
         if ops_pendentes > 0:
             alertas.append(("warn", "⚠️", f"{ops_pendentes} OP(s) aguardando liberação", "Acesse Liberar OPs da Semana"))
         if not df_macro_dash.empty and 'Status_Engenharia' in df_macro_dash.columns:
-            criticos_eng = len(df_macro_dash[df_macro_dash['Status_Engenharia'].str.contains('Revisao|Aguardando', na=False)])
+            df_macro_eng = df_macro_dash[df_macro_dash['Detalhado'] != False] if 'Detalhado' in df_macro_dash.columns else df_macro_dash
+            criticos_eng = len(df_macro_eng[df_macro_eng['Status_Engenharia'].str.contains('Revisao|Aguardando', na=False)])
             if criticos_eng > 0:
                 alertas.append(("warn", "📐", f"{criticos_eng} frente(s) em revisão ou aguardando", "Acesse Painel de Engenharia"))
 
@@ -3972,16 +3974,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             fr_edt = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
                             if not fr_edt.empty:
                                 macro_row_sel = fr_edt.iloc[0]
-                                m2_total_edt  = float(macro_row_sel.get('M2_Total_Tarefa', 0) or 0)
+                                m2_total_raw  = macro_row_sel.get('M2_Total_Tarefa')
+                                m2_total_edt  = float(m2_total_raw) if pd.notna(m2_total_raw) and float(m2_total_raw) > 0 else None
                                 m2_exec_edt   = float(macro_row_sel.get('m2_executado', 0) or 0)
-                                m2_saldo_edt  = m2_total_edt - m2_exec_edt
+                                m2_saldo_edt  = (m2_total_edt - m2_exec_edt) if m2_total_edt is not None else None
                                 num_proj_edt  = str(macro_row_sel.get('Numero_Projeto', '') or '')
                                 tipo_esc_edt  = str(macro_row_sel.get('Tipo_Escopo', 'ACM') or 'ACM')
                                 se1, se2, se3, se4 = st.columns(4)
                                 se1.metric("Etapa", edt_lote)
                                 se2.metric("Projeto", num_proj_edt or "—")
-                                se3.metric("m² Total Etapa", f"{m2_total_edt:.2f}")
-                                se4.metric("Saldo Etapa", f"{m2_saldo_edt:.2f} m²")
+                                se3.metric("m² Total Etapa", f"{m2_total_edt:.2f}" if m2_total_edt is not None else "— (não definido)")
+                                se4.metric("Saldo Etapa", f"{m2_saldo_edt:.2f} m²" if m2_saldo_edt is not None else "—")
                             else:
                                 macro_row_sel = {}
                                 tipo_esc_edt  = "ACM"
@@ -4070,10 +4073,13 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if not df_banco_macro.empty and edt_lote and edt_lote != 'AVULSO':
                                     fr2 = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
                                     if not fr2.empty:
-                                        m2_exec2   = float(fr2.iloc[0].get('m2_executado', 0) or 0)
-                                        m2_total2  = float(fr2.iloc[0].get('M2_Total_Tarefa', 0) or 0)
-                                        saldo_apos = m2_total2 - m2_exec2 - m2_op_real
-                                        st.metric("Saldo após este lançamento", f"{saldo_apos:.2f} m²")
+                                        m2_exec2      = float(fr2.iloc[0].get('m2_executado', 0) or 0)
+                                        m2_total2_raw = fr2.iloc[0].get('M2_Total_Tarefa')
+                                        if pd.notna(m2_total2_raw) and float(m2_total2_raw) > 0:
+                                            saldo_apos = float(m2_total2_raw) - m2_exec2 - m2_op_real
+                                            st.metric("Saldo após este lançamento", f"{saldo_apos:.2f} m²")
+                                        else:
+                                            st.metric("Saldo após este lançamento", "— (total não definido)")
 
                             tab_rom, tab_manual = st.tabs(["📋 Colar Romaneio", "✏️ Manual"])
 
@@ -4604,7 +4610,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             f"Saida da fabrica: **{dt_desp.strftime('%d/%m/%Y')}**\n\n"
                             f"Chegada na obra: **{data_alvo.strftime('%d/%m/%Y')}**"
                         )
-                    if "Liberados" not in str(row_sel.get('Status_Engenharia', '')):
+                    if row_sel.get('Detalhado', True) is not False and "Liberados" not in str(row_sel.get('Status_Engenharia', '')):
                         st.warning(f"Atencao — Engenharia: `{row_sel.get('Status_Engenharia', '—')}`")
                     if st.form_submit_button("Gerar Lote"):
                         if not cod_lote.strip():
@@ -4703,46 +4709,77 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 co1, co2  = st.columns(2)
                 with co1:
                     escopo      = st.selectbox("Escopo:", ["ACM", "Vidro/Esquadria", "Terceirizada"])
-                    num_projeto = st.text_input("Número do Projeto:", placeholder="Ex: 1068")
-                    frente      = st.text_input("Frente Macro:", value=st.session_state.mem_frente)
-                    tarefa      = st.text_input("Nome da Tarefa:", value=st.session_state.mem_tarefa)
                 with co2:
-                    edt_cod = st.text_input("Codigo EDT (base, sem a subdivisao):")
-                    subdiv  = st.text_input("Subdivisao / Balancim:").upper()
+                    num_projeto = st.text_input("Número do Projeto:", placeholder="Ex: 1068")
+
+                with st.expander("➕ Detalhar frente (opcional)", expanded=False):
+                    st.caption("Preencha só quando já souber a subdivisão, a metragem e as datas dessa etapa. "
+                               "Sem isso, a obra/escopo já fica pronta pra lançar OPs — o detalhamento pode ser adicionado depois.")
+                    frente = st.text_input("Frente Macro:", value=st.session_state.mem_frente)
+                    tarefa = st.text_input("Nome da Tarefa:", value=st.session_state.mem_tarefa)
+                    de1, de2 = st.columns(2)
+                    with de1:
+                        edt_cod = st.text_input("Codigo EDT (base, sem a subdivisao):")
+                    with de2:
+                        subdiv  = st.text_input("Subdivisao / Balancim:").upper()
                     st.caption("O EDT salvo será o código base + a subdivisão, garantindo que cada subdivisão tenha um identificador único mesmo dentro da mesma etapa.")
-                    m2_tot  = st.number_input("Metragem (m²):", min_value=0.1, value=100.0)
-                cd1, cd2 = st.columns(2)
-                with cd1:
-                    dt_ini = st.date_input("Inicio da Instalacao:", value=st.session_state.mem_dt_ini, format="DD/MM/YYYY")
-                with cd2:
-                    dt_fim = st.date_input("Prazo Maximo Obra:", value=st.session_state.mem_dt_fim, format="DD/MM/YYYY")
-                if st.form_submit_button("Registrar Frente"):
-                    if not all([nome_obra.strip(), edt_cod.strip(), tarefa.strip(), subdiv.strip()]):
-                        st.error("Preencha todos os campos.")
+                    m2_tot = st.number_input("Metragem (m²):", min_value=0.0, value=0.0,
+                                              help="Deixe 0 se ainda não souber o total dessa etapa.")
+                    dd1, dd2 = st.columns(2)
+                    with dd1:
+                        dt_ini = st.date_input("Inicio da Instalacao:", value=st.session_state.mem_dt_ini, format="DD/MM/YYYY")
+                    with dd2:
+                        dt_fim = st.date_input("Prazo Maximo Obra:", value=st.session_state.mem_dt_fim, format="DD/MM/YYYY")
+
+                if st.form_submit_button("Registrar Obra"):
+                    if not nome_obra.strip():
+                        st.error("Informe o nome da obra.")
+                    elif bool(edt_cod.strip()) != bool(subdiv.strip()):
+                        st.error("Preencha Código EDT e Subdivisão juntos, ou deixe os dois em branco para cadastrar só a obra/escopo.")
+                    elif edt_cod.strip() and subdiv.strip() and not tarefa.strip():
+                        st.error("Informe o nome da tarefa para detalhar a frente.")
                     else:
                         st.session_state.mem_obra   = nome_obra
                         st.session_state.mem_frente = frente
                         st.session_state.mem_tarefa = tarefa
                         st.session_state.mem_dt_ini = dt_ini
                         st.session_state.mem_dt_fim = dt_fim
-                        edt_final = f"{edt_cod.strip()} [{subdiv.strip()}]"
+                        detalhado = bool(edt_cod.strip() and subdiv.strip())
                         conn = conectar_banco()
                         try:
                             cursor = conn.cursor()
-                            cursor.execute("""
-                                INSERT INTO cronograma_macro
-                                (Obra, EDT, Tipo_Escopo, Etapa_Macro, Subdivisao, Tarefa,
-                                 M2_Total_Tarefa, Inicio_Previsto, Termino_Obra, Status,
-                                 Status_Engenharia, Numero_Projeto)
-                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente','Aguardando Medicao In Loco',%s)
-                            """, (nome_obra, edt_final, escopo, frente, subdiv, tarefa,
-                                  float(m2_tot), dt_ini.strftime('%Y-%m-%d'),
-                                  dt_fim.strftime('%Y-%m-%d'), num_projeto.strip()))
-                            conn.commit()
-                            _limpar_cache_geral()
-                            registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_OBRA",
-                                f"Obra: {nome_obra} | EDT: {edt_final} | {m2_tot}m²")
-                            st.toast("Frente registrada!")
+                            if detalhado:
+                                edt_final = f"{edt_cod.strip()} [{subdiv.strip()}]"
+                                cursor.execute("""
+                                    INSERT INTO cronograma_macro
+                                    (Obra, EDT, Tipo_Escopo, Etapa_Macro, Subdivisao, Tarefa,
+                                     M2_Total_Tarefa, Inicio_Previsto, Termino_Obra, Status,
+                                     Status_Engenharia, Numero_Projeto, Detalhado)
+                                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente','Aguardando Medicao In Loco',%s,TRUE)
+                                """, (nome_obra, edt_final, escopo, frente.strip(), subdiv.strip(), tarefa.strip(),
+                                      float(m2_tot) if m2_tot > 0 else None, dt_ini.strftime('%Y-%m-%d'),
+                                      dt_fim.strftime('%Y-%m-%d'), num_projeto.strip()))
+                                conn.commit()
+                                _limpar_cache_geral()
+                                registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_OBRA",
+                                    f"Obra: {nome_obra} | EDT: {edt_final} | {m2_tot}m²")
+                                st.toast("Frente detalhada registrada!")
+                            else:
+                                edt_final = f"{nome_obra.strip()}-{escopo}".upper().replace(" ", "-")
+                                cursor.execute("""
+                                    INSERT INTO cronograma_macro
+                                    (Obra, EDT, Tipo_Escopo, Etapa_Macro, Subdivisao, Tarefa,
+                                     M2_Total_Tarefa, Inicio_Previsto, Termino_Obra, Status,
+                                     Status_Engenharia, Numero_Projeto, Detalhado)
+                                    VALUES (%s,%s,%s,'','',%s,NULL,NULL,NULL,'Pendente','Aguardando Medicao In Loco',%s,FALSE)
+                                    ON CONFLICT (EDT) DO NOTHING
+                                """, (nome_obra, edt_final, escopo, "Geral (sem detalhamento)", num_projeto.strip()))
+                                criado = cursor.rowcount > 0
+                                conn.commit()
+                                _limpar_cache_geral()
+                                registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_OBRA",
+                                    f"Obra: {nome_obra} | Escopo: {escopo} | sem detalhamento")
+                                st.toast("Obra/Escopo pronta para lançar OPs!" if criado else "Obra/Escopo já estava cadastrada — tudo certo.")
                             time.sleep(0.4)
                             st.rerun()
                         except Exception as e:
@@ -4758,7 +4795,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 for col in ['Inicio_Previsto', 'Termino_Obra']:
                     if col in df_show.columns:
                         df_show[col] = pd.to_datetime(df_show[col], errors='coerce').dt.strftime('%d/%m/%Y')
-                cols_s = [c for c in ['Obra', 'EDT', 'Subdivisao', 'Tarefa', 'M2_Total_Tarefa',
+                if 'M2_Total_Tarefa' in df_show.columns:
+                    df_show['M2_Total_Tarefa'] = df_show['M2_Total_Tarefa'].apply(
+                        lambda v: f"{v:.2f}" if pd.notna(v) and v > 0 else "—")
+                if 'Detalhado' in df_show.columns:
+                    df_show['Detalhado'] = df_show['Detalhado'].apply(lambda v: "Sim" if v else "Não")
+                cols_s = [c for c in ['Obra', 'EDT', 'Subdivisao', 'Tarefa', 'M2_Total_Tarefa', 'Detalhado',
                                       'Inicio_Previsto', 'Termino_Obra', 'Status_Engenharia'] if c in df_show.columns]
                 st.dataframe(df_show[cols_s], hide_index=True, use_container_width=True)
 
@@ -4874,16 +4916,19 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             frentes = []
             if not df_eng.empty:
                 for _, row in df_eng.iterrows():
+                    if row.get('Detalhado', True) is False:
+                        continue  # obra/escopo sem frente detalhada — nada pra engenharia controlar aqui
                     prazo_raw = row.get('Prazo_Engenharia')
                     prazo_eng = prazo_raw if prazo_valido(prazo_raw) else None
                     dias_rest = (pd.to_datetime(prazo_eng) - hoje_projeto()).days if prazo_eng is not None else None
                     sk, situacao_txt, dias_num = classificar(dias_rest, row.get('Status_Engenharia', ESTADOS[0]))
+                    m2_raw = row.get('M2_Total_Tarefa')
                     frentes.append({
                         "id": row['id'], "edt": row['EDT'], "tarefa": row['Tarefa'],
                         "subdivisao": row.get('Subdivisao', ''), "tipo_escopo": row.get('Tipo_Escopo', ''),
                         "inicio_previsto": row.get('Inicio_Previsto'), "despacho": row.get('Data_Limite_Despacho'),
                         "primeiro_prod": row.get('Primeiro_Dia_Producao'), "termino_obra": row.get('Termino_Obra'),
-                        "m2": row.get('M2_Total_Tarefa', 0.0), "prazo_eng": prazo_eng,
+                        "m2": float(m2_raw) if pd.notna(m2_raw) and float(m2_raw) > 0 else None, "prazo_eng": prazo_eng,
                         "dias_restantes": dias_rest, "situacao_key": sk, "situacao_txt": situacao_txt,
                         "dias_num": dias_num, "status_tecnico": row.get('Status_Engenharia', ESTADOS[0]),
                     })
@@ -4957,7 +5002,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             with ci:
                                 sub = f" · *{fr['subdivisao']}*" if fr['subdivisao'] else ""
                                 st.markdown(f"**{fr['tarefa']}**{sub}")
-                                st.caption(f"EDT: {fr['edt']} | {fr['tipo_escopo']} | {fr['m2']:,.2f} m²")
+                                m2_txt = f"{fr['m2']:,.2f} m²" if fr['m2'] is not None else "m² não definido"
+                                st.caption(f"EDT: {fr['edt']} | {fr['tipo_escopo']} | {m2_txt}")
                                 cor_status = STATUS_CORES.get(fr['status_tecnico'], "#94A3B8")
                                 st.markdown(f"<span style='background:{cor_status}20;color:{cor_status};padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{fr['status_tecnico']}</span>", unsafe_allow_html=True)
                             with cd:
