@@ -553,6 +553,7 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS motivo_parada TEXT")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Escopo TEXT")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Numero_Projeto TEXT")
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Uso_Interno BOOLEAN DEFAULT FALSE")
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_itens_detalhado_num_op ON itens_detalhado(Num_OP) WHERE Num_OP IS NOT NULL")
         # Escopo oficial (enum unico usado em toda a aplicacao): ACM / Esquadria-Vidro / Terceirizada.
         # Itens ligados a EDT herdam o Tipo_Escopo do cronograma (normalizado pro enum);
@@ -1365,6 +1366,10 @@ def atualizar_status_solicitacao(sol_id, novo_status):
         liberar_conexao(conn)
 
 def enviar_para_logistica(row, limite_despacho):
+    if bool(row.get('Uso_Interno', False)):
+        # Uso Interno nunca precisa de romaneio de despacho — a OP se resolve sozinha,
+        # sem entrar na fila de logistica.
+        return
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
@@ -3991,10 +3996,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Ordens de Produção</h2><p>Gerencie e libere Ordens de Produção para a fábrica</p></div><span class="page-icon">🔓</span></div>', unsafe_allow_html=True)
 
             # ── CARD 0: LOTE SEM FRENTE (uso frequente — fica no topo) ──
-            with st.expander("➕ Lote sem frente  ·  Ancoragens, prisílias e materiais de apoio", expanded=True):
+            with st.expander("➕ Liberação de OP  ·  Ancoragens, prisílias e materiais de apoio", expanded=True):
                 st.caption("Para ancoragens, prisilias, corte de perfil e outros materiais de apoio — não precisa de frente detalhada, mas precisa de um Projeto já cadastrado em 'Cadastrar Obra'.")
                 if df_projetos.empty:
-                    st.info("Cadastre uma Obra e um Projeto em 'Cadastrar Obra' antes de lançar um lote sem frente.")
+                    st.info("Cadastre uma Obra e um Projeto em 'Cadastrar Obra' antes de lançar uma OP.")
                     av_obra, av_projeto, av_escopo = None, None, None
                 else:
                     av1, av2, av3 = st.columns(3)
@@ -4005,7 +4010,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         projetos_av = sorted(df_projetos[df_projetos['Obra'] == av_obra]['Numero_Projeto'].unique().tolist())
                         av_projeto = st.selectbox("Projeto:", projetos_av, key="av_projeto") if projetos_av else None
                     with av3:
-                        av_escopo = st.selectbox("Tipo de Escopo:", ["ACM", "Esquadria-Vidro", "Terceirizada"], key="av_escopo")
+                        # Escopo vem travado do que ja foi cadastrado pra esse Obra+Projeto em
+                        # 'Cadastrar Obra', quando ha uma unica frente/escopo registrada — evita
+                        # escolher um escopo diferente do que a obra ja define.
+                        escopos_projeto = sorted(df_banco_macro[
+                            (df_banco_macro['Obra'] == av_obra) & (df_banco_macro['Numero_Projeto'] == av_projeto)
+                        ]['Tipo_Escopo'].dropna().unique().tolist()) if not df_banco_macro.empty and av_projeto else []
+                        if len(escopos_projeto) == 1:
+                            av_escopo = escopos_projeto[0]
+                            st.text_input("Tipo de Escopo:", value=av_escopo, disabled=True, key="av_escopo_travado")
+                        else:
+                            av_escopo = st.selectbox("Tipo de Escopo:", ["ACM", "Esquadria-Vidro", "Terceirizada"], key="av_escopo")
 
                     st.caption("Este item entra como **Pendente** e recebe o número da OP na liberação, em 'Liberar OPs da Semana'.")
 
@@ -4097,8 +4112,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     (Obra_Vinculada, EDT_Vinculado, Cod_Lote, Num_OP, Tipo_Material,
                                      Qtd_Caixas, M2_Item, Peso_Kg, Data_Producao_Programada, Data_Limite_Obra,
                                      Data_Despacho, Romaneio_Chapas, Status_Item, Dificuldade,
-                                     Fase_Produtiva, Enviado_Logistica, Escopo, Numero_Projeto)
-                                    VALUES (%s,'AVULSO',%s,NULL,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente',1,%s,%s,%s,%s)
+                                     Fase_Produtiva, Enviado_Logistica, Escopo, Numero_Projeto, Uso_Interno)
+                                    VALUES (%s,'AVULSO',%s,NULL,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente',1,%s,%s,%s,%s,%s)
                                 """, (
                                     av_obra,
                                     f"AVULSO-{av_projeto}",
@@ -4113,7 +4128,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     f"LOTE SEM FRENTE — {av_escopo} | {'Envio para Obra' if av_destino == 'Envio para Obra' else 'Uso Interno'}",
                                     1 if av_destino == "Envio para Obra" else 0,
                                     av_escopo,
-                                    av_projeto
+                                    av_projeto,
+                                    av_destino == "Uso Interno"
                                 ))
                             conn_av2.commit()
                             _limpar_cache_geral()
@@ -4509,90 +4525,93 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             with st.expander("📦 Componentes por OP", expanded=False):
                 st.caption("Cadastre os componentes necessários para cada OP liberada.")
 
-            df_lib_ops = df_banco_micro[
-                (df_banco_micro['Obra_Vinculada'] == obra_selecionada) &
-                (df_banco_micro['Status_Item'] == "Liberado para Fabrica")
-            ].copy() if obra_selecionada and not df_banco_micro.empty else pd.DataFrame()
+                df_lib_ops_todas = df_banco_micro[
+                    df_banco_micro['Status_Item'].isin(["Liberado para Fabrica", "Parcialmente Concluido"])
+                ].copy() if not df_banco_micro.empty else pd.DataFrame()
 
-            if not df_lib_ops.empty:
-                opcoes_ops = [
-                    f"{row['Num_OP']} — {row['Cod_Lote']} | {row['Tipo_Material']}"
-                    for _, row in df_lib_ops.iterrows() if row.get('Num_OP')
-                ]
-                if opcoes_ops:
-                    op_sel  = st.selectbox("OP:", opcoes_ops, key="sel_op_comp")
-                    row_op  = df_lib_ops[df_lib_ops['Num_OP'] == op_sel.split(" — ")[0].strip()].iloc[0]
+                obras_comp = sorted(df_lib_ops_todas['Obra_Vinculada'].dropna().unique().tolist()) if not df_lib_ops_todas.empty else []
+                obra_comp_sel = st.selectbox("Obra:", ["Todas as obras"] + obras_comp, key="sel_obra_comp")
+                df_lib_ops = df_lib_ops_todas if obra_comp_sel == "Todas as obras" else df_lib_ops_todas[df_lib_ops_todas['Obra_Vinculada'] == obra_comp_sel]
 
-                    # Verificar status dos componentes via op_pecas
-                    df_pecas_op = carregar_pecas_lote(int(row_op['id']))
-                    comp_st = df_pecas_op.iloc[0]['componentes_status'] if not df_pecas_op.empty else "Aguardando Projetista"
+                if not df_lib_ops.empty:
+                    opcoes_ops = [
+                        f"{row['Num_OP']} — {row['Cod_Lote']} | {row['Tipo_Material']}"
+                        for _, row in df_lib_ops.iterrows() if row.get('Num_OP')
+                    ]
+                    if opcoes_ops:
+                        op_sel  = st.selectbox("OP:", opcoes_ops, key="sel_op_comp")
+                        row_op  = df_lib_ops[df_lib_ops['Num_OP'] == op_sel.split(" — ")[0].strip()].iloc[0]
 
-                    if comp_st == "Aguardando Projetista":
-                        st.warning("🟠 Componentes: **Aguardando Projetista** — cadastre as peças na Seção 2 primeiro e marque como 'Componentes OK'.")
-                    else:
-                        comp_existentes = carregar_componentes_op(int(row_op['id']))
-                        if not comp_existentes.empty:
-                            st.success(f"✅ {len(comp_existentes)} componente(s) já cadastrado(s) para esta OP.")
+                        # Verificar status dos componentes via op_pecas
+                        df_pecas_op = carregar_pecas_lote(int(row_op['id']))
+                        comp_st = df_pecas_op.iloc[0]['componentes_status'] if not df_pecas_op.empty else "Aguardando Projetista"
 
-                        with st.expander(
-                            "➕ Adicionar / Substituir lista de componentes",
-                            expanded=comp_existentes.empty
-                        ):
-                            st.caption("⚠️ Salvar substitui a lista anterior desta OP.")
-                            aba_manual, aba_romaneio = st.tabs(["✏️ Manual", "📋 Colar Romaneio"])
+                        if comp_st == "Aguardando Projetista":
+                            st.warning("🟠 Componentes: **Aguardando Projetista** — cadastre as peças na Seção 2 primeiro e marque como 'Componentes OK'.")
+                        else:
+                            comp_existentes = carregar_componentes_op(int(row_op['id']))
+                            if not comp_existentes.empty:
+                                st.success(f"✅ {len(comp_existentes)} componente(s) já cadastrado(s) para esta OP.")
 
-                            with aba_romaneio:
-                                st.caption("Cole o romaneio completo abaixo — uma peça por linha no formato: `Ref - Cód - Descrição - Medida - Ângulos - Qtd`")
-                                texto_romaneio = st.text_area(
-                                    "Romaneio:",
-                                    height=250,
-                                    placeholder="JA19.AP402 - CT016 - Cantoneira 25x25 Preto Fosco - 3120mm - 90/90 - 1pç\nJA22 - MM035 - Luva da Coluna Central - 4450mm - 90/90 - 2pç",
-                                    key="txt_romaneio_paste"
-                                )
-                                pecas_romaneio_comp = parse_romaneio(texto_romaneio) if texto_romaneio.strip() else []
-                                parsed = [
-                                    {
-                                        "nome": f"{p['codigo']} - {p['descricao']}".strip(' -'),
-                                        "qtd": p['qtd'],
-                                        "unidade": "pç",
-                                    }
-                                    for p in pecas_romaneio_comp
-                                ]
-                                if parsed:
-                                    st.success(f"**{len(parsed)} linha(s) reconhecida(s):**")
-                                    df_prev_romaneio = pd.DataFrame(parsed).rename(columns={"nome": "Componente", "qtd": "Qtd", "unidade": "Un"})
-                                    st.dataframe(df_prev_romaneio, use_container_width=True, hide_index=True)
-                                if st.button("💾 Salvar romaneio", key="btn_salvar_romaneio", disabled=not parsed):
-                                    salvar_componentes(int(row_op['id']), row_op['Obra_Vinculada'], row_op['Cod_Lote'], row_op['Num_OP'], parsed)
-                                    st.toast(f"Romaneio salvo para {row_op['Num_OP']} ({len(parsed)} itens)!")
-                                    time.sleep(0.3)
-                                    st.rerun()
+                            with st.expander(
+                                "➕ Adicionar / Substituir lista de componentes",
+                                expanded=comp_existentes.empty
+                            ):
+                                st.caption("⚠️ Salvar substitui a lista anterior desta OP.")
+                                aba_manual, aba_romaneio = st.tabs(["✏️ Manual", "📋 Colar Romaneio"])
 
-                            with aba_manual:
-                                num_itens = st.number_input("Quantos componentes?", min_value=1, max_value=30, value=3, key="num_comp")
-                                componentes_input = []
-                                for idx in range(int(num_itens)):
-                                    c1, c2, c3 = st.columns([4, 2, 2])
-                                    with c1:
-                                        nome = st.text_input(f"Componente {idx+1}:", key=f"comp_nome_{idx}")
-                                    with c2:
-                                        qtd  = st.number_input(f"Qtd {idx+1}:", min_value=0.0, value=1.0, key=f"comp_qtd_{idx}")
-                                    with c3:
-                                        und  = st.selectbox(f"Un {idx+1}:", ["un", "kg", "m", "m²", "cx", "pç", "rolo"], key=f"comp_und_{idx}")
-                                    if nome.strip():
-                                        componentes_input.append({"nome": nome.strip(), "qtd": qtd, "unidade": und})
-                                if st.button("💾 Salvar lista de componentes", key="btn_salvar_comp"):
-                                    if not componentes_input:
-                                        st.error("Preencha pelo menos um componente.")
-                                    else:
-                                        salvar_componentes(int(row_op['id']), row_op['Obra_Vinculada'], row_op['Cod_Lote'], row_op['Num_OP'], componentes_input)
-                                        st.toast(f"Lista salva para {row_op['Num_OP']}!")
+                                with aba_romaneio:
+                                    st.caption("Cole o romaneio completo abaixo — uma peça por linha no formato: `Ref - Cód - Descrição - Medida - Ângulos - Qtd`")
+                                    texto_romaneio = st.text_area(
+                                        "Romaneio:",
+                                        height=250,
+                                        placeholder="JA19.AP402 - CT016 - Cantoneira 25x25 Preto Fosco - 3120mm - 90/90 - 1pç\nJA22 - MM035 - Luva da Coluna Central - 4450mm - 90/90 - 2pç",
+                                        key="txt_romaneio_paste"
+                                    )
+                                    pecas_romaneio_comp = parse_romaneio(texto_romaneio) if texto_romaneio.strip() else []
+                                    parsed = [
+                                        {
+                                            "nome": f"{p['codigo']} - {p['descricao']}".strip(' -'),
+                                            "qtd": p['qtd'],
+                                            "unidade": "pç",
+                                        }
+                                        for p in pecas_romaneio_comp
+                                    ]
+                                    if parsed:
+                                        st.success(f"**{len(parsed)} linha(s) reconhecida(s):**")
+                                        df_prev_romaneio = pd.DataFrame(parsed).rename(columns={"nome": "Componente", "qtd": "Qtd", "unidade": "Un"})
+                                        st.dataframe(df_prev_romaneio, use_container_width=True, hide_index=True)
+                                    if st.button("💾 Salvar romaneio", key="btn_salvar_romaneio", disabled=not parsed):
+                                        salvar_componentes(int(row_op['id']), row_op['Obra_Vinculada'], row_op['Cod_Lote'], row_op['Num_OP'], parsed)
+                                        st.toast(f"Romaneio salvo para {row_op['Num_OP']} ({len(parsed)} itens)!")
                                         time.sleep(0.3)
                                         st.rerun()
+
+                                with aba_manual:
+                                    num_itens = st.number_input("Quantos componentes?", min_value=1, max_value=30, value=3, key="num_comp")
+                                    componentes_input = []
+                                    for idx in range(int(num_itens)):
+                                        c1, c2, c3 = st.columns([4, 2, 2])
+                                        with c1:
+                                            nome = st.text_input(f"Componente {idx+1}:", key=f"comp_nome_{idx}")
+                                        with c2:
+                                            qtd  = st.number_input(f"Qtd {idx+1}:", min_value=0.0, value=1.0, key=f"comp_qtd_{idx}")
+                                        with c3:
+                                            und  = st.selectbox(f"Un {idx+1}:", ["un", "kg", "m", "m²", "cx", "pç", "rolo"], key=f"comp_und_{idx}")
+                                        if nome.strip():
+                                            componentes_input.append({"nome": nome.strip(), "qtd": qtd, "unidade": und})
+                                    if st.button("💾 Salvar lista de componentes", key="btn_salvar_comp"):
+                                        if not componentes_input:
+                                            st.error("Preencha pelo menos um componente.")
+                                        else:
+                                            salvar_componentes(int(row_op['id']), row_op['Obra_Vinculada'], row_op['Cod_Lote'], row_op['Num_OP'], componentes_input)
+                                            st.toast(f"Lista salva para {row_op['Num_OP']}!")
+                                            time.sleep(0.3)
+                                            st.rerun()
+                    else:
+                        st.info("Nenhuma OP com número gerado ainda.")
                 else:
-                    st.info("Nenhuma OP com número gerado ainda.")
-            else:
-                st.info("Nenhuma OP liberada para esta obra ainda.")
+                    st.info("Nenhuma OP liberada para esta obra ainda.")
 
     # ==================================================
     # VISAO MACRO
