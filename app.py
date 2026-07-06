@@ -1645,12 +1645,13 @@ def _inserir_logo_cabecalho(ws, ultima_col_letra: str):
     """Linha 1 em branco com o logo Passold (mesmo arquivo usado na barra lateral),
     no lugar do texto 'PASSOLD SISTEMAS DE FACHADAS'."""
     from openpyxl.styles import Font, Alignment
-    ws.row_dimensions[1].height = 56
+    ws.row_dimensions[1].height = 74
     try:
         from openpyxl.drawing.image import Image as XLImage
         logo_img = XLImage("assets/LOGO_BAUDENPASSOLD.png")
-        logo_img.width = 168
-        logo_img.height = 71
+        # 6,4 x 2,33 cm (tamanho ajustado manualmente) -> pixels a 96 DPI
+        logo_img.width = 242
+        logo_img.height = 88
         ws.add_image(logo_img, "A1")
     except Exception:
         ws["A1"] = "PASSOLD SISTEMAS DE FACHADAS"
