@@ -3990,6 +3990,147 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 st.stop()
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Ordens de Produção</h2><p>Gerencie e libere Ordens de Produção para a fábrica</p></div><span class="page-icon">🔓</span></div>', unsafe_allow_html=True)
 
+            # ── CARD 0: LOTE SEM FRENTE (uso frequente — fica no topo) ──
+            with st.expander("➕ Lote sem frente  ·  Ancoragens, prisílias e materiais de apoio", expanded=True):
+                st.caption("Para ancoragens, prisilias, corte de perfil e outros materiais de apoio — não precisa de frente detalhada, mas precisa de um Projeto já cadastrado em 'Cadastrar Obra'.")
+                if df_projetos.empty:
+                    st.info("Cadastre uma Obra e um Projeto em 'Cadastrar Obra' antes de lançar um lote sem frente.")
+                    av_obra, av_projeto, av_escopo = None, None, None
+                else:
+                    av1, av2, av3 = st.columns(3)
+                    with av1:
+                        obras_disp = sorted(df_projetos['Obra'].dropna().unique().tolist())
+                        av_obra = st.selectbox("Obra:", obras_disp, key="av_obra")
+                    with av2:
+                        projetos_av = sorted(df_projetos[df_projetos['Obra'] == av_obra]['Numero_Projeto'].unique().tolist())
+                        av_projeto = st.selectbox("Projeto:", projetos_av, key="av_projeto") if projetos_av else None
+                    with av3:
+                        av_escopo = st.selectbox("Tipo de Escopo:", ["ACM", "Esquadria-Vidro", "Terceirizada"], key="av_escopo")
+
+                    st.caption("Este item entra como **Pendente** e recebe o número da OP na liberação, em 'Liberar OPs da Semana'.")
+
+                # Lista de itens acumulados na sessão
+                if "av_itens" not in st.session_state:
+                    st.session_state.av_itens = []
+
+                st.markdown("**Itens da OP:**")
+                av_desc = st.text_input("Descrição do material:", key="av_desc",
+                                         placeholder="Ex: Ancoragem estrutural, Prisilia, Corte de perfil...")
+                av4, av5 = st.columns(2)
+                if av_escopo == "ACM":
+                    with av4:
+                        av_qtd_cx = st.number_input("Qtd Caixas:", min_value=0, value=1, key="av_qtd_cx")
+                    with av5:
+                        av_m2 = st.number_input("m²:", min_value=0.0, value=0.0, step=0.1, key="av_m2")
+                    av_peso = 0.0
+                    av_unidade = "cx"
+                elif av_escopo == "Esquadria-Vidro":
+                    with av4:
+                        av_qtd_cx = st.number_input("Quantidade (un):", min_value=0, value=1, key="av_qtd_cx")
+                    with av5:
+                        av_peso = st.number_input("Peso (kg):", min_value=0.0, value=0.0, step=0.1, key="av_peso")
+                    av_m2 = 0.0
+                    av_unidade = "un"
+                else:
+                    with av4:
+                        av_unidade = st.selectbox("Unidade:", ["un", "kg", "m", "m²", "cx", "pç"], key="av_unidade")
+                    with av5:
+                        av_qtd_cx = st.number_input("Quantidade:", min_value=0, value=1, key="av_qtd_cx")
+                    av_m2  = 0.0
+                    av_peso = 0.0
+
+                if st.button("➕ Adicionar Item", key="btn_add_item"):
+                    if not av_desc.strip():
+                        st.error("Informe a descrição do material antes de adicionar.")
+                    else:
+                        st.session_state.av_itens.append({
+                            "desc": av_desc.strip().upper(),
+                            "qtd": int(av_qtd_cx),
+                            "m2": float(av_m2),
+                            "peso": float(av_peso),
+                            "unidade": av_unidade,
+                        })
+                        st.rerun()
+
+                if st.session_state.av_itens:
+                    st.markdown("**Itens adicionados:**")
+                    for i, item in enumerate(st.session_state.av_itens):
+                        col_desc, col_qtd, col_rem = st.columns([5, 2, 1])
+                        with col_desc:
+                            st.write(f"{i+1}. {item['desc']}")
+                        with col_qtd:
+                            if item['m2'] > 0:
+                                st.write(f"{item['qtd']} cx | {item['m2']} m²")
+                            elif item['peso'] > 0:
+                                st.write(f"{item['qtd']} {item['unidade']} | {item['peso']} kg")
+                            else:
+                                st.write(f"{item['qtd']} {item['unidade']}")
+                        with col_rem:
+                            if st.button("🗑", key=f"rem_item_{i}"):
+                                st.session_state.av_itens.pop(i)
+                                st.rerun()
+
+                av6, av7 = st.columns(2)
+                with av6:
+                    av_dt_ini = st.date_input("Entrada em produção:", value=datetime.now().date(),
+                                               format="DD/MM/YYYY", key="av_dt_ini")
+                with av7:
+                    av_dt_fim = st.date_input("Data limite:", value=(datetime.now() + timedelta(days=7)).date(),
+                                               format="DD/MM/YYYY", key="av_dt_fim")
+
+                av_pav     = st.text_input("Pavimentos / Destino:", key="av_pav", placeholder="Ex: Pav 10 ao 15")
+                av_destino = st.radio("Destino:", ["Envio para Obra", "Uso Interno"],
+                                       horizontal=True, key="av_destino")
+
+                if st.button("💾 Cadastrar Lote", key="btn_av", type="primary", disabled=df_projetos.empty):
+                    if not st.session_state.av_itens:
+                        st.error("Adicione ao menos um item antes de cadastrar.")
+                    elif not av_projeto:
+                        st.error("Selecione o Projeto (cadastre um em 'Cadastrar Obra' se ainda não existir).")
+                    else:
+                        conn_av2 = conectar_banco()
+                        try:
+                            cursor_av2 = conn_av2.cursor()
+                            for item in st.session_state.av_itens:
+                                cursor_av2.execute("""
+                                    INSERT INTO itens_detalhado
+                                    (Obra_Vinculada, EDT_Vinculado, Cod_Lote, Num_OP, Tipo_Material,
+                                     Qtd_Caixas, M2_Item, Peso_Kg, Data_Producao_Programada, Data_Limite_Obra,
+                                     Data_Despacho, Romaneio_Chapas, Status_Item, Dificuldade,
+                                     Fase_Produtiva, Enviado_Logistica, Escopo, Numero_Projeto)
+                                    VALUES (%s,'AVULSO',%s,NULL,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente',1,%s,%s,%s,%s)
+                                """, (
+                                    av_obra,
+                                    f"AVULSO-{av_projeto}",
+                                    item["desc"],
+                                    item["qtd"],
+                                    item["m2"],
+                                    item["peso"],
+                                    av_dt_ini.strftime('%Y-%m-%d'),
+                                    av_dt_fim.strftime('%Y-%m-%d'),
+                                    av_dt_fim.strftime('%Y-%m-%d'),
+                                    f"PRJ-{av_projeto} | {av_pav}",
+                                    f"LOTE SEM FRENTE — {av_escopo} | {'Envio para Obra' if av_destino == 'Envio para Obra' else 'Uso Interno'}",
+                                    1 if av_destino == "Envio para Obra" else 0,
+                                    av_escopo,
+                                    av_projeto
+                                ))
+                            conn_av2.commit()
+                            _limpar_cache_geral()
+                        except Exception as e:
+                            conn_av2.rollback()
+                            st.error(f"Erro: {e}")
+                        finally:
+                            liberar_conexao(conn_av2)
+                        registrar_auditoria(st.session_state.usuario_nome, "LOTE_SEM_FRENTE",
+                            f"Projeto {av_projeto} — {len(st.session_state.av_itens)} itens — {av_obra} — {av_destino} — Pendente")
+                        st.toast(f"Lote cadastrado como Pendente — {len(st.session_state.av_itens)} item(ns). Libere em 'Liberar OPs da Semana'.")
+                        st.session_state.av_itens = []
+                        time.sleep(0.5)
+                        st.rerun()
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
             # ── CARD 1: LOTES PENDENTES ────────────────────────────
             df_pend_base = df_banco_micro[df_banco_micro['Status_Item'] == 'Pendente'].copy() if not df_banco_micro.empty else pd.DataFrame()
 
@@ -4019,40 +4160,39 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 time.sleep(0.5)
                 st.rerun()
 
-            if df_pend_base.empty:
-                st.markdown("### 📋 Lotes Pendentes")
-                st.markdown('<div class="empty-state"><div class="empty-icon">✅</div><h4>Tudo em dia!</h4><p>Nenhum lote esperando liberação no momento.</p></div>', unsafe_allow_html=True)
-            else:
-                st.markdown(f"### 📋 Lotes Pendentes · {len(df_pend_base)} aguardando liberação")
-                st.caption("Escolha a obra (opcional) e clique em Liberar no lote que quiser mandar pra fábrica.")
+            with st.expander(f"📋 Lotes Pendentes  ·  {len(df_pend_base)} aguardando liberação  (acompanhamento)", expanded=False):
+                if df_pend_base.empty:
+                    st.markdown('<div class="empty-state"><div class="empty-icon">✅</div><h4>Tudo em dia!</h4><p>Nenhum lote esperando liberação no momento.</p></div>', unsafe_allow_html=True)
+                else:
+                    st.caption("Escolha a obra (opcional) e clique em Liberar no lote que quiser mandar pra fábrica.")
 
-                obras_disp = sorted(df_pend_base['Obra_Vinculada'].dropna().unique().tolist())
-                obra_filtro_sec1 = st.selectbox("Obra:", ["Todas as obras"] + obras_disp, key="sec1_obra")
-                df_pend = df_pend_base if obra_filtro_sec1 == "Todas as obras" else df_pend_base[df_pend_base['Obra_Vinculada'] == obra_filtro_sec1]
+                    obras_disp = sorted(df_pend_base['Obra_Vinculada'].dropna().unique().tolist())
+                    obra_filtro_sec1 = st.selectbox("Obra:", ["Todas as obras"] + obras_disp, key="sec1_obra")
+                    df_pend = df_pend_base if obra_filtro_sec1 == "Todas as obras" else df_pend_base[df_pend_base['Obra_Vinculada'] == obra_filtro_sec1]
 
-                st.markdown("<br>", unsafe_allow_html=True)
-                cols_card = st.columns(3)
-                for i, (_, row) in enumerate(df_pend.sort_values('Obra_Vinculada').iterrows()):
-                    edt_row = row.get('EDT_Vinculado', '')
-                    numero_projeto_row = str(row.get('Numero_Projeto') or '')
-                    if edt_row and edt_row != 'AVULSO' and not df_banco_macro.empty:
-                        fr_row = df_banco_macro[df_banco_macro['EDT'] == edt_row]
-                        tag_frente = (
-                            f"🔗 {fr_row.iloc[0].get('Tarefa','')} · {fr_row.iloc[0].get('Tipo_Escopo','—')}"
-                            if not fr_row.empty else "🔗 Frente vinculada"
-                        )
-                    else:
-                        tag_frente = "🧩 Sem frente — suporte/avulso"
-                    with cols_card[i % 3]:
-                        with st.container(border=True):
-                            st.markdown(f"**{row['Obra_Vinculada']}**")
-                            st.caption(f"{row.get('Tipo_Material','—')} · Projeto {numero_projeto_row or '—'}")
-                            st.markdown(f"<span style='font-size:12px;color:#64748B;'>{tag_frente}</span>", unsafe_allow_html=True)
-                            if not numero_projeto_row:
-                                st.warning("Sem nº de projeto — edite a frente/projeto antes de liberar.", icon="⚠️")
-                            else:
-                                if st.button("✅ Liberar esta OP", key=f"liberar_{row['id']}", use_container_width=True):
-                                    _liberar_um_lote(int(row['id']), numero_projeto_row)
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    cols_card = st.columns(3)
+                    for i, (_, row) in enumerate(df_pend.sort_values('Obra_Vinculada').iterrows()):
+                        edt_row = row.get('EDT_Vinculado', '')
+                        numero_projeto_row = str(row.get('Numero_Projeto') or '')
+                        if edt_row and edt_row != 'AVULSO' and not df_banco_macro.empty:
+                            fr_row = df_banco_macro[df_banco_macro['EDT'] == edt_row]
+                            tag_frente = (
+                                f"🔗 {fr_row.iloc[0].get('Tarefa','')} · {fr_row.iloc[0].get('Tipo_Escopo','—')}"
+                                if not fr_row.empty else "🔗 Frente vinculada"
+                            )
+                        else:
+                            tag_frente = "🧩 Sem frente — suporte/avulso"
+                        with cols_card[i % 3]:
+                            with st.container(border=True):
+                                st.markdown(f"**{row['Obra_Vinculada']}**")
+                                st.caption(f"{row.get('Tipo_Material','—')} · Projeto {numero_projeto_row or '—'}")
+                                st.markdown(f"<span style='font-size:12px;color:#64748B;'>{tag_frente}</span>", unsafe_allow_html=True)
+                                if not numero_projeto_row:
+                                    st.warning("Sem nº de projeto — edite a frente/projeto antes de liberar.", icon="⚠️")
+                                else:
+                                    if st.button("✅ Liberar esta OP", key=f"liberar_{row['id']}", use_container_width=True):
+                                        _liberar_um_lote(int(row['id']), numero_projeto_row)
 
             st.markdown("<br>", unsafe_allow_html=True)
 
@@ -4362,147 +4502,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         st.info("Nenhuma OP com número gerado ainda. Libere os lotes primeiro.")
                 else:
                     st.info("Nenhuma OP liberada para esta obra ainda.")
-
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            # ── CARD 3: OP AVULSA ─────────────────────────────────
-            with st.expander("➕ Lote sem frente  ·  Ancoragens, prisílias e materiais de apoio", expanded=False):
-                st.caption("Para ancoragens, prisilias, corte de perfil e outros materiais de apoio — não precisa de frente detalhada, mas precisa de um Projeto já cadastrado em 'Cadastrar Obra'.")
-                if df_projetos.empty:
-                    st.info("Cadastre uma Obra e um Projeto em 'Cadastrar Obra' antes de lançar um lote sem frente.")
-                    av_obra, av_projeto, av_escopo = None, None, None
-                else:
-                    av1, av2, av3 = st.columns(3)
-                    with av1:
-                        obras_disp = sorted(df_projetos['Obra'].dropna().unique().tolist())
-                        av_obra = st.selectbox("Obra:", obras_disp, key="av_obra")
-                    with av2:
-                        projetos_av = sorted(df_projetos[df_projetos['Obra'] == av_obra]['Numero_Projeto'].unique().tolist())
-                        av_projeto = st.selectbox("Projeto:", projetos_av, key="av_projeto") if projetos_av else None
-                    with av3:
-                        av_escopo = st.selectbox("Tipo de Escopo:", ["ACM", "Esquadria-Vidro", "Terceirizada"], key="av_escopo")
-
-                    st.caption("Este item entra como **Pendente** e recebe o número da OP na liberação, em 'Liberar OPs da Semana'.")
-
-                # Lista de itens acumulados na sessão
-                if "av_itens" not in st.session_state:
-                    st.session_state.av_itens = []
-
-                st.markdown("**Itens da OP:**")
-                av_desc = st.text_input("Descrição do material:", key="av_desc",
-                                         placeholder="Ex: Ancoragem estrutural, Prisilia, Corte de perfil...")
-                av4, av5 = st.columns(2)
-                if av_escopo == "ACM":
-                    with av4:
-                        av_qtd_cx = st.number_input("Qtd Caixas:", min_value=0, value=1, key="av_qtd_cx")
-                    with av5:
-                        av_m2 = st.number_input("m²:", min_value=0.0, value=0.0, step=0.1, key="av_m2")
-                    av_peso = 0.0
-                    av_unidade = "cx"
-                elif av_escopo == "Esquadria-Vidro":
-                    with av4:
-                        av_qtd_cx = st.number_input("Quantidade (un):", min_value=0, value=1, key="av_qtd_cx")
-                    with av5:
-                        av_peso = st.number_input("Peso (kg):", min_value=0.0, value=0.0, step=0.1, key="av_peso")
-                    av_m2 = 0.0
-                    av_unidade = "un"
-                else:
-                    with av4:
-                        av_unidade = st.selectbox("Unidade:", ["un", "kg", "m", "m²", "cx", "pç"], key="av_unidade")
-                    with av5:
-                        av_qtd_cx = st.number_input("Quantidade:", min_value=0, value=1, key="av_qtd_cx")
-                    av_m2  = 0.0
-                    av_peso = 0.0
-
-                if st.button("➕ Adicionar Item", key="btn_add_item"):
-                    if not av_desc.strip():
-                        st.error("Informe a descrição do material antes de adicionar.")
-                    else:
-                        st.session_state.av_itens.append({
-                            "desc": av_desc.strip().upper(),
-                            "qtd": int(av_qtd_cx),
-                            "m2": float(av_m2),
-                            "peso": float(av_peso),
-                            "unidade": av_unidade,
-                        })
-                        st.rerun()
-
-                if st.session_state.av_itens:
-                    st.markdown("**Itens adicionados:**")
-                    for i, item in enumerate(st.session_state.av_itens):
-                        col_desc, col_qtd, col_rem = st.columns([5, 2, 1])
-                        with col_desc:
-                            st.write(f"{i+1}. {item['desc']}")
-                        with col_qtd:
-                            if item['m2'] > 0:
-                                st.write(f"{item['qtd']} cx | {item['m2']} m²")
-                            elif item['peso'] > 0:
-                                st.write(f"{item['qtd']} {item['unidade']} | {item['peso']} kg")
-                            else:
-                                st.write(f"{item['qtd']} {item['unidade']}")
-                        with col_rem:
-                            if st.button("🗑", key=f"rem_item_{i}"):
-                                st.session_state.av_itens.pop(i)
-                                st.rerun()
-
-                av6, av7 = st.columns(2)
-                with av6:
-                    av_dt_ini = st.date_input("Entrada em produção:", value=datetime.now().date(),
-                                               format="DD/MM/YYYY", key="av_dt_ini")
-                with av7:
-                    av_dt_fim = st.date_input("Data limite:", value=(datetime.now() + timedelta(days=7)).date(),
-                                               format="DD/MM/YYYY", key="av_dt_fim")
-
-                av_pav     = st.text_input("Pavimentos / Destino:", key="av_pav", placeholder="Ex: Pav 10 ao 15")
-                av_destino = st.radio("Destino:", ["Envio para Obra", "Uso Interno"],
-                                       horizontal=True, key="av_destino")
-
-                if st.button("💾 Cadastrar Lote", key="btn_av", type="primary", disabled=df_projetos.empty):
-                    if not st.session_state.av_itens:
-                        st.error("Adicione ao menos um item antes de cadastrar.")
-                    elif not av_projeto:
-                        st.error("Selecione o Projeto (cadastre um em 'Cadastrar Obra' se ainda não existir).")
-                    else:
-                        conn_av2 = conectar_banco()
-                        try:
-                            cursor_av2 = conn_av2.cursor()
-                            for item in st.session_state.av_itens:
-                                cursor_av2.execute("""
-                                    INSERT INTO itens_detalhado
-                                    (Obra_Vinculada, EDT_Vinculado, Cod_Lote, Num_OP, Tipo_Material,
-                                     Qtd_Caixas, M2_Item, Peso_Kg, Data_Producao_Programada, Data_Limite_Obra,
-                                     Data_Despacho, Romaneio_Chapas, Status_Item, Dificuldade,
-                                     Fase_Produtiva, Enviado_Logistica, Escopo, Numero_Projeto)
-                                    VALUES (%s,'AVULSO',%s,NULL,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente',1,%s,%s,%s,%s)
-                                """, (
-                                    av_obra,
-                                    f"AVULSO-{av_projeto}",
-                                    item["desc"],
-                                    item["qtd"],
-                                    item["m2"],
-                                    item["peso"],
-                                    av_dt_ini.strftime('%Y-%m-%d'),
-                                    av_dt_fim.strftime('%Y-%m-%d'),
-                                    av_dt_fim.strftime('%Y-%m-%d'),
-                                    f"PRJ-{av_projeto} | {av_pav}",
-                                    f"LOTE SEM FRENTE — {av_escopo} | {'Envio para Obra' if av_destino == 'Envio para Obra' else 'Uso Interno'}",
-                                    1 if av_destino == "Envio para Obra" else 0,
-                                    av_escopo,
-                                    av_projeto
-                                ))
-                            conn_av2.commit()
-                            _limpar_cache_geral()
-                        except Exception as e:
-                            conn_av2.rollback()
-                            st.error(f"Erro: {e}")
-                        finally:
-                            liberar_conexao(conn_av2)
-                        registrar_auditoria(st.session_state.usuario_nome, "LOTE_SEM_FRENTE",
-                            f"Projeto {av_projeto} — {len(st.session_state.av_itens)} itens — {av_obra} — {av_destino} — Pendente")
-                        st.toast(f"Lote cadastrado como Pendente — {len(st.session_state.av_itens)} item(ns). Libere em 'Liberar OPs da Semana'.")
-                        st.session_state.av_itens = []
-                        time.sleep(0.5)
-                        st.rerun()
 
             st.markdown("<br>", unsafe_allow_html=True)
 
