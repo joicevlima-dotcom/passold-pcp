@@ -692,6 +692,27 @@ def inicializar_banco_de_dados():
                 Conferido_Em TEXT
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS romaneios_componentes_op (
+                item_id INTEGER PRIMARY KEY,
+                num_op TEXT,
+                obra TEXT,
+                emitido_por TEXT,
+                emitido_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS insumos_saida (
+                id SERIAL PRIMARY KEY,
+                data_saida DATE NOT NULL,
+                descricao TEXT NOT NULL,
+                quantidade NUMERIC NOT NULL,
+                unidade TEXT DEFAULT 'un',
+                destino TEXT,
+                registrado_por TEXT,
+                criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
         # ── TABELAS DO SISTEMA DE MEDIÇÃO ──────────────────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS medicao_obras (
@@ -1971,6 +1992,98 @@ def atualizar_componente(comp_id, status, obs, usuario):
     finally:
         liberar_conexao(conn)
 
+def excluir_componente(comp_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM componentes_op WHERE id=%s", (comp_id,))
+        conn.commit()
+        carregar_componentes_op.clear()
+        carregar_todas_ops_com_componentes.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao excluir componente: {e}")
+    finally:
+        liberar_conexao(conn)
+
+def excluir_todos_componentes(item_id: int):
+    """Limpa a lista inteira de componentes de uma OP — util quando o vinculo foi feito
+    errado (ex: material de outra obra lancado na OP errada)."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM componentes_op WHERE item_id=%s", (item_id,))
+        cursor.execute("DELETE FROM romaneios_componentes_op WHERE item_id=%s", (item_id,))
+        conn.commit()
+        carregar_componentes_op.clear()
+        carregar_todas_ops_com_componentes.clear()
+        carregar_romaneios_componentes_emitidos.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao excluir componentes: {e}")
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=15)
+def carregar_romaneios_componentes_emitidos():
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query("SELECT * FROM romaneios_componentes_op", conn)
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
+def registrar_romaneio_componentes_emitido(item_id: int, num_op: str, obra: str, usuario: str):
+    """Marca a conferencia de componentes de uma OP como emitida — os itens indisponiveis
+    continuam visiveis na lista normalmente, isso so registra que o romaneio ja saiu."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO romaneios_componentes_op (item_id, num_op, obra, emitido_por, emitido_em)
+            VALUES (%s,%s,%s,%s,NOW())
+            ON CONFLICT (item_id) DO UPDATE SET
+                emitido_por = EXCLUDED.emitido_por, emitido_em = NOW()
+        """, (item_id, num_op, obra, usuario))
+        conn.commit()
+        carregar_romaneios_componentes_emitidos.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao registrar emissão: {e}")
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=15)
+def carregar_insumos_saida():
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query("SELECT * FROM insumos_saida ORDER BY data_saida DESC, id DESC", conn)
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
+def salvar_insumo_saida(data_saida, descricao: str, quantidade: float, unidade: str, destino: str, usuario: str):
+    """Registro simples de saida de insumo do almoxarifado — sem controle de entrada/saldo,
+    so pra dar visibilidade do que saiu, quando e pra onde."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO insumos_saida (data_saida, descricao, quantidade, unidade, destino, registrado_por)
+            VALUES (%s,%s,%s,%s,%s,%s)
+        """, (data_saida, descricao, quantidade, unidade, destino, usuario))
+        conn.commit()
+        carregar_insumos_saida.clear()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao registrar saída de insumo: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
 # ========================================================
 # FUNÇÕES DE OP_PECAS
 # ========================================================
@@ -2351,6 +2464,96 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
         ws.cell(linha, 1, "").font = Font(name="Arial", size=11)
         ws.cell(linha+1, 1, ass).font = Font(name="Arial", size=10, bold=True)
         ws.cell(linha, 4, "____/____/______").font = Font(name="Arial", size=11)
+        linha += 3
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+def gerar_romaneio_componentes_xlsx(obra: str, num_op: str, cod_lote: str, componentes_disponiveis_df, emitido_por: str) -> bytes:
+    """Romaneio com os componentes de uma OP ja conferidos e DISPONIVEIS — e o que
+    realmente sai do almoxarifado junto com a OP. Indisponiveis nao entram aqui."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from io import BytesIO
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Romaneio"
+    ws.sheet_view.showGridLines = False
+    ws.page_setup.orientation = "portrait"
+
+    bd = Side(style='thin', color="000000")
+    borda = Border(left=bd, right=bd, top=bd, bottom=bd)
+    fill_cab = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    fill_sub = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+
+    ws.column_dimensions['A'].width = 30
+    ws.column_dimensions['B'].width = 16
+    ws.column_dimensions['C'].width = 16
+    ws.column_dimensions['D'].width = 16
+
+    ws.merge_cells("A1:D1")
+    _inserir_logo_cabecalho(ws, "D")
+
+    ws.merge_cells("A2:D2")
+    ws["A2"] = "ROMANEIO DE COMPONENTES"
+    ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+    ws["A2"].fill = fill_cab
+    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    infos = [
+        ("OP:", str(num_op or '—')),
+        ("Obra:", str(obra or '—')),
+        ("Lote:", str(cod_lote or '—')),
+        ("Emitido por:", str(emitido_por)),
+        ("Data:", datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M')),
+    ]
+    linha = 3
+    for label, valor in infos:
+        ws.cell(linha, 1, label).font = Font(name="Arial", size=11, bold=True)
+        ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=4)
+        ws.cell(linha, 2, valor).font = Font(name="Arial", size=11)
+        for c in range(1, 5):
+            ws.cell(linha, c).border = borda
+        linha += 1
+
+    linha += 1
+    titulos = ["COMPONENTE", "QUANTIDADE", "UNIDADE", "STATUS"]
+    for col, titulo in enumerate(titulos, 1):
+        cel = ws.cell(linha, col, titulo)
+        cel.font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        cel.fill = fill_cab
+        cel.alignment = Alignment(horizontal="center", vertical="center")
+        cel.border = borda
+    linha += 1
+
+    for i, (_, comp) in enumerate(componentes_disponiveis_df.iterrows()):
+        dados = [comp.get('nome_componente', ''), comp.get('quantidade', 0), comp.get('unidade', ''), "✔ DISPONÍVEL"]
+        for col, val in enumerate(dados, 1):
+            cel = ws.cell(linha, col, val)
+            cel.font = Font(name="Arial", size=11)
+            cel.alignment = Alignment(horizontal="center", vertical="center")
+            cel.border = borda
+            if i % 2 == 0:
+                cel.fill = fill_sub
+        linha += 1
+
+    linha += 1
+    ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=2)
+    ws.cell(linha, 1, "TOTAL DE ITENS:").font = Font(name="Arial", size=11, bold=True)
+    ws.cell(linha, 3, len(componentes_disponiveis_df)).font = Font(name="Arial", size=11, bold=True)
+    for c in range(1, 5):
+        ws.cell(linha, c).border = borda
+
+    linha += 3
+    assinaturas = ["Almoxarifado", "Recebedor / Produção"]
+    for ass in assinaturas:
+        ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=2)
+        ws.cell(linha, 1).border = Border(bottom=bd)
+        ws.cell(linha+1, 1, ass).font = Font(name="Arial", size=10, bold=True)
+        ws.cell(linha, 3, "____/____/______").font = Font(name="Arial", size=11)
         linha += 3
 
     buf = BytesIO()
@@ -4537,6 +4740,33 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             comp_existentes = carregar_componentes_op(int(row_op['id']))
                             if not comp_existentes.empty:
                                 st.success(f"✅ {len(comp_existentes)} componente(s) já cadastrado(s) para esta OP.")
+                                for _, comp_ex in comp_existentes.iterrows():
+                                    cx1, cx2 = st.columns([6, 1])
+                                    cx1.write(f"{comp_ex['nome_componente']} — {comp_ex['quantidade']} {comp_ex['unidade']}")
+                                    with cx2:
+                                        if st.button("🗑️", key=f"del_comp_{comp_ex['id']}"):
+                                            excluir_componente(int(comp_ex['id']))
+                                            st.toast("Componente excluído.")
+                                            time.sleep(0.3)
+                                            st.rerun()
+
+                                item_id_comp = int(row_op['id'])
+                                if st.button("🗑️ Excluir todos os componentes desta OP", key=f"btn_clear_comp_{item_id_comp}"):
+                                    st.session_state[f"confirm_clear_comp_{item_id_comp}"] = True
+                                if st.session_state.get(f"confirm_clear_comp_{item_id_comp}"):
+                                    st.error(f"⚠️ Confirma excluir os {len(comp_existentes)} componentes cadastrados de {row_op['Num_OP']}?")
+                                    cc1, cc2 = st.columns(2)
+                                    with cc1:
+                                        if st.button("Sim, excluir tudo", key=f"confirm_clear_comp_yes_{item_id_comp}", type="primary"):
+                                            excluir_todos_componentes(item_id_comp)
+                                            del st.session_state[f"confirm_clear_comp_{item_id_comp}"]
+                                            st.toast("Lista de componentes limpa!")
+                                            time.sleep(0.3)
+                                            st.rerun()
+                                    with cc2:
+                                        if st.button("Cancelar", key=f"confirm_clear_comp_no_{item_id_comp}"):
+                                            del st.session_state[f"confirm_clear_comp_{item_id_comp}"]
+                                            st.rerun()
 
                             with st.expander(
                                 "➕ Adicionar / Substituir lista de componentes",
@@ -5747,6 +5977,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 c3.metric("❌ Indisponíveis", n_falta)
                 st.markdown("---")
 
+                df_rom_emitidos = carregar_romaneios_componentes_emitidos()
+
                 for _, op_row in df_ops_comp.iterrows():
                     df_comp = carregar_componentes_op(int(op_row['item_id']))
                     if df_comp.empty:
@@ -5799,6 +6031,74 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             st.error(f"⚠️ Itens em falta: {', '.join(itens_falt)}")
                         elif n_conf == n_total:
                             st.success("✅ Todos os componentes conferidos e disponíveis!")
+
+                        # ── Emitir romaneio (só com os itens Disponível) ──
+                        item_id_op = int(op_row['item_id'])
+                        df_disponiveis = df_comp[df_comp['status_item'] == 'Disponivel']
+                        ja_emitido = df_rom_emitidos[df_rom_emitidos['item_id'] == item_id_op] if not df_rom_emitidos.empty else pd.DataFrame()
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if not ja_emitido.empty:
+                            emitido_em_fmt = pd.to_datetime(ja_emitido.iloc[0]['emitido_em']).strftime('%d/%m/%Y %H:%M')
+                            st.caption(f"✅ Romaneio emitido em {emitido_em_fmt} por {ja_emitido.iloc[0]['emitido_por']}")
+                        if df_disponiveis.empty:
+                            st.caption("Nenhum item Disponível ainda pra emitir romaneio.")
+                        else:
+                            rom_comp_bytes = gerar_romaneio_componentes_xlsx(
+                                op_row['obra_vinculada'], op_row['num_op'], op_row['cod_lote'],
+                                df_disponiveis, st.session_state.usuario_nome
+                            )
+                            st.download_button(
+                                "🖨️ Emitir Romaneio" if ja_emitido.empty else "🖨️ Reemitir Romaneio",
+                                data=rom_comp_bytes,
+                                file_name=f"Romaneio_Componentes_{op_row['num_op']}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"dl_rom_comp_{item_id_op}",
+                                on_click=registrar_romaneio_componentes_emitido,
+                                args=(item_id_op, op_row['num_op'], op_row['obra_vinculada'], st.session_state.usuario_nome)
+                            )
+
+            st.markdown("---")
+            with st.expander("📤 Saída de Insumos  ·  materiais de consumo/apoio", expanded=False):
+                st.caption("Registro simples do que saiu do almoxarifado — sem controle de estoque, só pra acompanhar.")
+                obras_insumo = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
+                ii1, ii2 = st.columns(2)
+                with ii1:
+                    insumo_data = st.date_input("Data de saída:", value=hoje_projeto().date(), format="DD/MM/YYYY", key="insumo_data")
+                with ii2:
+                    insumo_destino = st.selectbox("Destino:", ["Uso Interno / Produção"] + obras_insumo, key="insumo_destino")
+                ii3, ii4, ii5 = st.columns([4, 2, 2])
+                with ii3:
+                    insumo_desc = st.text_input("Descrição do insumo:", key="insumo_desc",
+                                                 placeholder="Ex: Parafuso M6, Silicone, Fita dupla face...")
+                with ii4:
+                    insumo_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="insumo_qtd")
+                with ii5:
+                    insumo_unidade = st.selectbox("Unidade:", ["un", "kg", "m", "cx", "pç", "rolo", "L"], key="insumo_unidade")
+                if st.button("➕ Registrar Saída", key="btn_salvar_insumo", type="primary"):
+                    if not insumo_desc.strip():
+                        st.error("Informe a descrição do insumo.")
+                    else:
+                        if salvar_insumo_saida(insumo_data, insumo_desc.strip(), insumo_qtd, insumo_unidade,
+                                               insumo_destino, st.session_state.usuario_nome):
+                            registrar_auditoria(st.session_state.usuario_nome, "SAIDA_INSUMO",
+                                f"{insumo_desc.strip()} — {insumo_qtd:g} {insumo_unidade} — Destino: {insumo_destino}")
+                            st.toast("Saída registrada!")
+                            time.sleep(0.3)
+                            st.rerun()
+
+                st.markdown("#### Histórico de Saídas")
+                df_insumos = carregar_insumos_saida()
+                if df_insumos.empty:
+                    st.caption("Nenhuma saída registrada ainda.")
+                else:
+                    df_insumos_show = df_insumos.copy()
+                    df_insumos_show['data_saida'] = pd.to_datetime(df_insumos_show['data_saida']).dt.strftime('%d/%m/%Y')
+                    st.dataframe(
+                        df_insumos_show[['data_saida', 'descricao', 'quantidade', 'unidade', 'destino', 'registrado_por']]
+                            .rename(columns={'data_saida': 'Data', 'descricao': 'Descrição', 'quantidade': 'Qtd',
+                                             'unidade': 'Un', 'destino': 'Destino', 'registrado_por': 'Registrado por'}),
+                        hide_index=True, use_container_width=True
+                    )
 
     # ==================================================
     # ROMANEIO MANUAL (sem OP vinculada)
