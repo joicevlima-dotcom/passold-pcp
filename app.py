@@ -2088,34 +2088,33 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
     bd      = Side(style='thin', color="000000")
     borda   = Border(left=bd, right=bd, top=bd, bottom=bd)
     bd_bot  = Border(bottom=bd)
-    fill_az = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+    fill_az = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
     fill_lz = PatternFill(start_color="EFF6FF", end_color="EFF6FF", fill_type="solid")
     fill_gz = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
 
-    ws.column_dimensions['A'].width = 6
-    ws.column_dimensions['B'].width = 20
+    ws.column_dimensions['A'].width = 8
+    ws.column_dimensions['B'].width = 22
     ws.column_dimensions['C'].width = 30
     ws.column_dimensions['D'].width = 18
-    ws.column_dimensions['E'].width = 10
-    ws.column_dimensions['F'].width = 10
+    ws.column_dimensions['E'].width = 12
+    ws.column_dimensions['F'].width = 12
 
     tipo_escopo = str(macro_row.get('Tipo_Escopo', 'ACM') or 'ACM')
     num_projeto  = str(macro_row.get('Numero_Projeto', '') or '')
 
     # ── CABEÇALHO ──────────────────────────────────────────
     ws.merge_cells("A1:F1")
-    ws["A1"] = "PASSOLD SISTEMAS DE FACHADAS LTDA"
-    ws["A1"].font = Font(name="Arial", size=14, bold=True, color="FFFFFF")
-    ws["A1"].fill = fill_az
-    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[1].height = 28
+    _inserir_logo_cabecalho(ws, "F")
 
     ws.merge_cells("A2:F2")
     ws["A2"] = f"ORDEM DE PRODUÇÃO — {tipo_escopo.upper()}"
     ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
     ws["A2"].fill = fill_az
     ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[2].height = 22
+    ws.row_dimensions[2].height = 24
+
+    ws.row_dimensions[3].height = 8
+    linha_inicio = 4
 
     # ── INFO PRINCIPAL ─────────────────────────────────────
     def info_row(ws, linha, label, valor, fill=None):
@@ -2126,9 +2125,9 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
         for c in range(1, 7):
             ws.cell(linha, c).border = borda
             ws.cell(linha, c).alignment = Alignment(vertical="center")
-        ws.row_dimensions[linha].height = 18
+        ws.row_dimensions[linha].height = 22
 
-    linha = 3
+    linha = linha_inicio
     info_row(ws, linha,   "Nº OP:",          lote_row.get('Num_OP', '—'))
     info_row(ws, linha+1, "DATA:",            datetime.now(FUSO_BR).strftime('%d/%m/%Y'))
     info_row(ws, linha+2, "OBRA:",            lote_row.get('Obra_Vinculada', '—'))
@@ -2137,7 +2136,7 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
     info_row(ws, linha+5, "ETAPA/PAVIMENTOS:",lote_row.get('Romaneio_Chapas', '—'))
     info_row(ws, linha+6, "MATERIAL:",        campos_extras.get('material', lote_row.get('Tipo_Material', '—')))
 
-    linha = 10
+    linha = linha_inicio + 8
 
     # ── CAMPOS ESPECÍFICOS POR TIPO ────────────────────────
     if tipo_escopo.upper() == "ACM":
