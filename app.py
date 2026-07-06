@@ -4147,71 +4147,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
             st.markdown("<br>", unsafe_allow_html=True)
 
-            # ── CARD 1: LOTES PENDENTES ────────────────────────────
-            df_pend_base = df_banco_micro[df_banco_micro['Status_Item'] == 'Pendente'].copy() if not df_banco_micro.empty else pd.DataFrame()
-
-            def _liberar_um_lote(item_id: int, numero_projeto: str):
-                conn = conectar_banco()
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT COUNT(*) FROM itens_detalhado WHERE Numero_Projeto=%s AND Num_OP IS NOT NULL",
-                        (numero_projeto,)
-                    )
-                    seq = cursor.fetchone()[0] + 1
-                    num_op = f"OP-{numero_projeto}-{str(seq).zfill(3)}"
-                    cursor.execute(
-                        "UPDATE itens_detalhado SET Status_Item='Liberado para Fabrica', Num_OP=%s WHERE id=%s",
-                        (num_op, item_id)
-                    )
-                    conn.commit()
-                    _limpar_cache_geral()
-                    registrar_auditoria(st.session_state.usuario_nome, "LIBERAR_OPS", f"OP {num_op} liberada")
-                    st.toast(f"Liberado! Número da OP: {num_op}")
-                except Exception as e:
-                    conn.rollback()
-                    st.error(f"Erro: {e}")
-                finally:
-                    liberar_conexao(conn)
-                time.sleep(0.5)
-                st.rerun()
-
-            with st.expander(f"📋 Lotes Pendentes  ·  {len(df_pend_base)} aguardando liberação  (acompanhamento)", expanded=False):
-                if df_pend_base.empty:
-                    st.markdown('<div class="empty-state"><div class="empty-icon">✅</div><h4>Tudo em dia!</h4><p>Nenhum lote esperando liberação no momento.</p></div>', unsafe_allow_html=True)
-                else:
-                    st.caption("Escolha a obra (opcional) e clique em Liberar no lote que quiser mandar pra fábrica.")
-
-                    obras_disp = sorted(df_pend_base['Obra_Vinculada'].dropna().unique().tolist())
-                    obra_filtro_sec1 = st.selectbox("Obra:", ["Todas as obras"] + obras_disp, key="sec1_obra")
-                    df_pend = df_pend_base if obra_filtro_sec1 == "Todas as obras" else df_pend_base[df_pend_base['Obra_Vinculada'] == obra_filtro_sec1]
-
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    cols_card = st.columns(3)
-                    for i, (_, row) in enumerate(df_pend.sort_values('Obra_Vinculada').iterrows()):
-                        edt_row = row.get('EDT_Vinculado', '')
-                        numero_projeto_row = str(row.get('Numero_Projeto') or '')
-                        if edt_row and edt_row != 'AVULSO' and not df_banco_macro.empty:
-                            fr_row = df_banco_macro[df_banco_macro['EDT'] == edt_row]
-                            tag_frente = (
-                                f"🔗 {fr_row.iloc[0].get('Tarefa','')} · {fr_row.iloc[0].get('Tipo_Escopo','—')}"
-                                if not fr_row.empty else "🔗 Frente vinculada"
-                            )
-                        else:
-                            tag_frente = "🧩 Sem frente — suporte/avulso"
-                        with cols_card[i % 3]:
-                            with st.container(border=True):
-                                st.markdown(f"**{row['Obra_Vinculada']}**")
-                                st.caption(f"{row.get('Tipo_Material','—')} · Projeto {numero_projeto_row or '—'}")
-                                st.markdown(f"<span style='font-size:12px;color:#64748B;'>{tag_frente}</span>", unsafe_allow_html=True)
-                                if not numero_projeto_row:
-                                    st.warning("Sem nº de projeto — edite a frente/projeto antes de liberar.", icon="⚠️")
-                                else:
-                                    if st.button("✅ Liberar esta OP", key=f"liberar_{row['id']}", use_container_width=True):
-                                        _liberar_um_lote(int(row['id']), numero_projeto_row)
-
-            st.markdown("<br>", unsafe_allow_html=True)
-
             # ── CARD 2: LANÇAR PEÇAS ──────────────────────────────
             n_lib_card = len(df_banco_micro[df_banco_micro["Status_Item"].isin(["Liberado para Fabrica","Parcialmente Concluido"])]) if not df_banco_micro.empty else 0
             with st.expander(f"✏️ Lançar Peças da OP  ·  {n_lib_card} OP(s) liberada(s)", expanded=False):
@@ -4612,6 +4547,71 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         st.info("Nenhuma OP com número gerado ainda.")
                 else:
                     st.info("Nenhuma OP liberada para esta obra ainda.")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── CARD 1: LOTES PENDENTES (acompanhamento — fica por ultimo) ──
+            df_pend_base = df_banco_micro[df_banco_micro['Status_Item'] == 'Pendente'].copy() if not df_banco_micro.empty else pd.DataFrame()
+
+            def _liberar_um_lote(item_id: int, numero_projeto: str):
+                conn = conectar_banco()
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM itens_detalhado WHERE Numero_Projeto=%s AND Num_OP IS NOT NULL",
+                        (numero_projeto,)
+                    )
+                    seq = cursor.fetchone()[0] + 1
+                    num_op = f"OP-{numero_projeto}-{str(seq).zfill(3)}"
+                    cursor.execute(
+                        "UPDATE itens_detalhado SET Status_Item='Liberado para Fabrica', Num_OP=%s WHERE id=%s",
+                        (num_op, item_id)
+                    )
+                    conn.commit()
+                    _limpar_cache_geral()
+                    registrar_auditoria(st.session_state.usuario_nome, "LIBERAR_OPS", f"OP {num_op} liberada")
+                    st.toast(f"Liberado! Número da OP: {num_op}")
+                except Exception as e:
+                    conn.rollback()
+                    st.error(f"Erro: {e}")
+                finally:
+                    liberar_conexao(conn)
+                time.sleep(0.5)
+                st.rerun()
+
+            with st.expander(f"📋 Lotes Pendentes  ·  {len(df_pend_base)} aguardando liberação  (acompanhamento)", expanded=False):
+                if df_pend_base.empty:
+                    st.markdown('<div class="empty-state"><div class="empty-icon">✅</div><h4>Tudo em dia!</h4><p>Nenhum lote esperando liberação no momento.</p></div>', unsafe_allow_html=True)
+                else:
+                    st.caption("Escolha a obra (opcional) e clique em Liberar no lote que quiser mandar pra fábrica.")
+
+                    obras_disp = sorted(df_pend_base['Obra_Vinculada'].dropna().unique().tolist())
+                    obra_filtro_sec1 = st.selectbox("Obra:", ["Todas as obras"] + obras_disp, key="sec1_obra")
+                    df_pend = df_pend_base if obra_filtro_sec1 == "Todas as obras" else df_pend_base[df_pend_base['Obra_Vinculada'] == obra_filtro_sec1]
+
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    cols_card = st.columns(3)
+                    for i, (_, row) in enumerate(df_pend.sort_values('Obra_Vinculada').iterrows()):
+                        edt_row = row.get('EDT_Vinculado', '')
+                        numero_projeto_row = str(row.get('Numero_Projeto') or '')
+                        if edt_row and edt_row != 'AVULSO' and not df_banco_macro.empty:
+                            fr_row = df_banco_macro[df_banco_macro['EDT'] == edt_row]
+                            tag_frente = (
+                                f"🔗 {fr_row.iloc[0].get('Tarefa','')} · {fr_row.iloc[0].get('Tipo_Escopo','—')}"
+                                if not fr_row.empty else "🔗 Frente vinculada"
+                            )
+                        else:
+                            tag_frente = "🧩 Sem frente — suporte/avulso"
+                        with cols_card[i % 3]:
+                            with st.container(border=True):
+                                st.markdown(f"**{row['Obra_Vinculada']}**")
+                                st.caption(f"{row.get('Tipo_Material','—')} · Projeto {numero_projeto_row or '—'}")
+                                st.markdown(f"<span style='font-size:12px;color:#64748B;'>{tag_frente}</span>", unsafe_allow_html=True)
+                                if not numero_projeto_row:
+                                    st.warning("Sem nº de projeto — edite a frente/projeto antes de liberar.", icon="⚠️")
+                                else:
+                                    if st.button("✅ Liberar esta OP", key=f"liberar_{row['id']}", use_container_width=True):
+                                        _liberar_um_lote(int(row['id']), numero_projeto_row)
 
     # ==================================================
     # VISAO MACRO
