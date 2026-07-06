@@ -795,6 +795,31 @@ def inicializar_banco_de_dados():
             WHERE COALESCE(m.m2_reserva_migrada, FALSE) = FALSE
         """)
 
+        # ── TABELA DE PROJETOS (agrupador dentro da Obra — uma obra pode ter varios) ──
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS projetos (
+                id SERIAL PRIMARY KEY,
+                Obra TEXT NOT NULL,
+                Numero_Projeto TEXT NOT NULL,
+                criado_em TIMESTAMP DEFAULT NOW(),
+                UNIQUE(Obra, Numero_Projeto)
+            )
+        """)
+        # Migracao: registra como projeto qualquer Numero_Projeto ja usado em frentes ou lotes,
+        # pra ninguem perder o historico que ja existe hoje.
+        cursor.execute("""
+            INSERT INTO projetos (Obra, Numero_Projeto)
+            SELECT DISTINCT Obra, Numero_Projeto FROM cronograma_macro
+            WHERE Numero_Projeto IS NOT NULL AND Numero_Projeto != ''
+            ON CONFLICT (Obra, Numero_Projeto) DO NOTHING
+        """)
+        cursor.execute("""
+            INSERT INTO projetos (Obra, Numero_Projeto)
+            SELECT DISTINCT Obra_Vinculada, Numero_Projeto FROM itens_detalhado
+            WHERE Numero_Projeto IS NOT NULL AND Numero_Projeto != ''
+            ON CONFLICT (Obra, Numero_Projeto) DO NOTHING
+        """)
+
         # ── TABELA DE SOLICITAÇÕES DE OP (PCP → Master) ────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS solicitacoes_op (
@@ -940,6 +965,16 @@ def prazo_valido(valor) -> bool:
 # ========================================================
 # FUNÇÕES DE BANCO — com cache, pool e try/finally
 # ========================================================
+@st.cache_data(ttl=30)
+def carregar_projetos():
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query("SELECT * FROM projetos ORDER BY Obra, Numero_Projeto", conn)
+    finally:
+        liberar_conexao(conn)
+    df.columns = [c.replace('_', ' ').title().replace(' ', '_') if c != 'id' else c for c in df.columns]
+    return df
+
 @st.cache_data(ttl=30)
 def carregar_macro():
     conn = conectar_banco()
@@ -1110,7 +1145,7 @@ def _limpar_cache_geral():
     for fn in [
         carregar_macro, carregar_micro, carregar_micro_completo,
         carregar_fila_logistica, carregar_solicitacoes, carregar_solicitacoes_op,
-        carregar_macro_por_obra, carregar_micro_por_obra,
+        carregar_macro_por_obra, carregar_micro_por_obra, carregar_projetos,
         carregar_medicao_obras, carregar_medicao_servicos,
         carregar_medicao_subdivisoes, carregar_medicao_historico,
     ]:
@@ -2523,6 +2558,7 @@ registrar_atividade()
 
 df_banco_macro = carregar_macro()
 df_banco_micro = carregar_micro()
+df_projetos = carregar_projetos()
 
 setor = st.session_state.usuario_setor
 
@@ -3955,143 +3991,68 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Ordens de Produção</h2><p>Gerencie e libere Ordens de Produção para a fábrica</p></div><span class="page-icon">🔓</span></div>', unsafe_allow_html=True)
 
             # ── CARD 1: LOTES PENDENTES ────────────────────────────
-            n_pend_card = len(df_banco_micro[df_banco_micro['Status_Item'] == 'Pendente']) if not df_banco_micro.empty else 0
-            with st.expander(f"📋 Lotes Pendentes  ·  {n_pend_card} aguardando liberação", expanded=True):
-                st.markdown("Selecione os lotes abaixo e libere para a fábrica.")
-                st.markdown("---")
+            df_pend_base = df_banco_micro[df_banco_micro['Status_Item'] == 'Pendente'].copy() if not df_banco_micro.empty else pd.DataFrame()
 
-            if not df_banco_micro.empty:
-                df_pend_base = df_banco_micro[df_banco_micro['Status_Item'] == "Pendente"].copy()
-
-                # Filtro 1 — Obra: a partir daqui o escopo vem "de graca" junto com a frente escolhida,
-                # em vez de ser um filtro solto e independente (a obra ja define quais escopos existem).
-                obras_disp = sorted(df_pend_base['Obra_Vinculada'].dropna().unique().tolist())
-                col_obra, col_frente = st.columns(2)
-                with col_obra:
-                    obra_filtro_sec1 = st.selectbox(
-                        "Obra:",
-                        ["Todas as obras"] + obras_disp,
-                        key="sec1_obra"
+            def _liberar_um_lote(item_id: int, numero_projeto: str):
+                conn = conectar_banco()
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM itens_detalhado WHERE Numero_Projeto=%s AND Num_OP IS NOT NULL",
+                        (numero_projeto,)
                     )
+                    seq = cursor.fetchone()[0] + 1
+                    num_op = f"OP-{numero_projeto}-{str(seq).zfill(3)}"
+                    cursor.execute(
+                        "UPDATE itens_detalhado SET Status_Item='Liberado para Fabrica', Num_OP=%s WHERE id=%s",
+                        (num_op, item_id)
+                    )
+                    conn.commit()
+                    _limpar_cache_geral()
+                    registrar_auditoria(st.session_state.usuario_nome, "LIBERAR_OPS", f"OP {num_op} liberada")
+                    st.toast(f"Liberado! Número da OP: {num_op}")
+                except Exception as e:
+                    conn.rollback()
+                    st.error(f"Erro: {e}")
+                finally:
+                    liberar_conexao(conn)
+                time.sleep(0.5)
+                st.rerun()
 
-                # Filtro 2 — Frente da obra escolhida (rotulo ja mostra o escopo). So aparece quando
-                # uma obra especifica e selecionada.
-                frente_filtro_sec1 = "Todas as frentes"
-                mapa_frentes_sec1 = {}
-                with col_frente:
-                    if obra_filtro_sec1 != "Todas as obras":
-                        opcoes_frente = ["Todas as frentes desta obra"]
-                        if not df_banco_macro.empty:
-                            for _, fr in df_banco_macro[df_banco_macro['Obra'] == obra_filtro_sec1].iterrows():
-                                rotulo = f"{fr['EDT']} — {fr.get('Tarefa','')} [{fr.get('Tipo_Escopo','—')}]"
-                                opcoes_frente.append(rotulo)
-                                mapa_frentes_sec1[rotulo] = fr['EDT']
-                        if not df_pend_base[
-                            (df_pend_base['Obra_Vinculada'] == obra_filtro_sec1) &
-                            (df_pend_base['EDT_Vinculado'] == 'AVULSO')
-                        ].empty:
-                            opcoes_frente.append("OP Avulsa / Suporte (sem frente)")
-                        frente_filtro_sec1 = st.selectbox("Frente:", opcoes_frente, key="sec1_frente")
-                    else:
-                        st.caption("Escolha uma obra pra filtrar por frente.")
-
-                # Aplicar filtros
-                df_pend = df_pend_base.copy()
-
-                if obra_filtro_sec1 != "Todas as obras":
-                    df_pend = df_pend[df_pend['Obra_Vinculada'] == obra_filtro_sec1]
-                    if frente_filtro_sec1 == "OP Avulsa / Suporte (sem frente)":
-                        df_pend = df_pend[df_pend['EDT_Vinculado'] == 'AVULSO']
-                    elif frente_filtro_sec1 in mapa_frentes_sec1:
-                        df_pend = df_pend[df_pend['EDT_Vinculado'] == mapa_frentes_sec1[frente_filtro_sec1]]
-
-                if not df_pend.empty:
-                    st.caption(f"{len(df_pend)} lote(s) pendente(s) encontrado(s)")
-                    df_pend['Selecionar'] = False
-                    cols_exib = [c for c in ['id', 'Obra_Vinculada', 'EDT_Vinculado', 'Cod_Lote',
-                                             'Tipo_Material', 'Numero_Projeto', 'Qtd_Caixas', 'M2_Item',
-                                             'Data_Producao_Programada', 'Romaneio_Chapas', 'Selecionar']
-                                 if c in df_pend.columns]
-                    df_ed = st.data_editor(df_pend[cols_exib], hide_index=True, use_container_width=True,
-                                           disabled=[c for c in cols_exib if c not in ('Selecionar', 'EDT_Vinculado', 'Cod_Lote')],
-                                           key="editor_lotes_pendentes")
-
-                    if st.button("💾 Salvar EDT/Lote editados"):
-                        alterados = 0
-                        conn_upd = conectar_banco()
-                        try:
-                            cursor_upd = conn_upd.cursor()
-                            for _, row_ed in df_ed.iterrows():
-                                row_orig = df_pend.loc[df_pend['id'] == row_ed['id']].iloc[0]
-                                if row_ed['EDT_Vinculado'] != row_orig['EDT_Vinculado'] or row_ed['Cod_Lote'] != row_orig['Cod_Lote']:
-                                    cursor_upd.execute(
-                                        "UPDATE itens_detalhado SET EDT_Vinculado=%s, Cod_Lote=%s WHERE id=%s",
-                                        (row_ed['EDT_Vinculado'], row_ed['Cod_Lote'], int(row_ed['id']))
-                                    )
-                                    alterados += 1
-                            conn_upd.commit()
-                        except Exception as e:
-                            conn_upd.rollback()
-                            st.error(f"Erro ao salvar: {e}")
-                        finally:
-                            liberar_conexao(conn_upd)
-                        if alterados:
-                            _limpar_cache_geral()
-                            st.toast(f"{alterados} lote(s) atualizado(s)!")
-                            time.sleep(0.3)
-                            st.rerun()
-                        else:
-                            st.info("Nenhuma alteração detectada.")
-
-                    ids_sel = df_ed[df_ed['Selecionar'] == True]['id'].tolist()
-                    st.caption("Numeração da OP: `OP-{nº do projeto}-{sequencial}`, gerada automaticamente na liberação.")
-                    if st.button("Liberar para producao"):
-                        if not ids_sel:
-                            st.warning("Selecione pelo menos um item.")
-                        else:
-                            df_sel = df_pend[df_pend['id'].isin(ids_sel)]
-                            sem_projeto = df_sel[df_sel['Numero_Projeto'].isna() | (df_sel['Numero_Projeto'] == '')]
-                            if not sem_projeto.empty:
-                                st.error(
-                                    "Não é possível liberar: os lotes a seguir não têm Nº do Projeto definido "
-                                    "(edite a frente ou o lote antes de liberar): " +
-                                    ", ".join(sem_projeto['Cod_Lote'].astype(str).tolist())
-                                )
-                            else:
-                                conn = conectar_banco()
-                                try:
-                                    cursor = conn.cursor()
-                                    seq_por_projeto = {}
-                                    for item_id in ids_sel:
-                                        numero_projeto = str(df_sel.loc[df_sel['id'] == item_id, 'Numero_Projeto'].iloc[0])
-                                        if numero_projeto not in seq_por_projeto:
-                                            cursor.execute(
-                                                "SELECT COUNT(*) FROM itens_detalhado WHERE Numero_Projeto=%s AND Num_OP IS NOT NULL",
-                                                (numero_projeto,)
-                                            )
-                                            seq_por_projeto[numero_projeto] = cursor.fetchone()[0]
-                                        seq_por_projeto[numero_projeto] += 1
-                                        num_op = f"OP-{numero_projeto}-{str(seq_por_projeto[numero_projeto]).zfill(3)}"
-                                        cursor.execute(
-                                            "UPDATE itens_detalhado SET Status_Item='Liberado para Fabrica', Num_OP=%s WHERE id=%s",
-                                            (num_op, item_id)
-                                        )
-                                    conn.commit()
-                                    _limpar_cache_geral()
-                                except Exception as e:
-                                    conn.rollback()
-                                    st.error(f"Erro: {e}")
-                                finally:
-                                    liberar_conexao(conn)
-                                registrar_auditoria(st.session_state.usuario_nome, "LIBERAR_OPS",
-                                    f"{len(ids_sel)} OP(s) liberadas — Obra: {obra_filtro_sec1} — Frente: {frente_filtro_sec1}")
-                                st.toast("OPs liberadas!")
-                                time.sleep(0.5)
-                                st.rerun()
-                else:
-                    st.markdown('<div class="empty-state"><div class="empty-icon">✅</div><h4>Tudo em dia!</h4><p>Nenhum lote pendente para este filtro.</p></div>', unsafe_allow_html=True)
+            if df_pend_base.empty:
+                st.markdown("### 📋 Lotes Pendentes")
+                st.markdown('<div class="empty-state"><div class="empty-icon">✅</div><h4>Tudo em dia!</h4><p>Nenhum lote esperando liberação no momento.</p></div>', unsafe_allow_html=True)
             else:
-                st.markdown('<div class="empty-state"><div class="empty-icon">📋</div><h4>Nenhum lote cadastrado</h4><p>Cadastre frentes no Painel de Engenharia para gerar lotes.</p></div>', unsafe_allow_html=True)
+                st.markdown(f"### 📋 Lotes Pendentes · {len(df_pend_base)} aguardando liberação")
+                st.caption("Escolha a obra (opcional) e clique em Liberar no lote que quiser mandar pra fábrica.")
+
+                obras_disp = sorted(df_pend_base['Obra_Vinculada'].dropna().unique().tolist())
+                obra_filtro_sec1 = st.selectbox("Obra:", ["Todas as obras"] + obras_disp, key="sec1_obra")
+                df_pend = df_pend_base if obra_filtro_sec1 == "Todas as obras" else df_pend_base[df_pend_base['Obra_Vinculada'] == obra_filtro_sec1]
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                cols_card = st.columns(3)
+                for i, (_, row) in enumerate(df_pend.sort_values('Obra_Vinculada').iterrows()):
+                    edt_row = row.get('EDT_Vinculado', '')
+                    numero_projeto_row = str(row.get('Numero_Projeto') or '')
+                    if edt_row and edt_row != 'AVULSO' and not df_banco_macro.empty:
+                        fr_row = df_banco_macro[df_banco_macro['EDT'] == edt_row]
+                        tag_frente = (
+                            f"🔗 {fr_row.iloc[0].get('Tarefa','')} · {fr_row.iloc[0].get('Tipo_Escopo','—')}"
+                            if not fr_row.empty else "🔗 Frente vinculada"
+                        )
+                    else:
+                        tag_frente = "🧩 Sem frente — suporte/avulso"
+                    with cols_card[i % 3]:
+                        with st.container(border=True):
+                            st.markdown(f"**{row['Obra_Vinculada']}**")
+                            st.caption(f"{row.get('Tipo_Material','—')} · Projeto {numero_projeto_row or '—'}")
+                            st.markdown(f"<span style='font-size:12px;color:#64748B;'>{tag_frente}</span>", unsafe_allow_html=True)
+                            if not numero_projeto_row:
+                                st.warning("Sem nº de projeto — edite a frente/projeto antes de liberar.", icon="⚠️")
+                            else:
+                                if st.button("✅ Liberar esta OP", key=f"liberar_{row['id']}", use_container_width=True):
+                                    _liberar_um_lote(int(row['id']), numero_projeto_row)
 
             st.markdown("<br>", unsafe_allow_html=True)
 
@@ -4405,21 +4366,23 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown("<br>", unsafe_allow_html=True)
 
             # ── CARD 3: OP AVULSA ─────────────────────────────────
-            with st.expander("➕ OP Avulsa  ·  Ancoragens, prisílias e materiais de apoio", expanded=False):
-                st.caption("Para ancoragens, prisilias, corte de perfil e outros materiais de apoio.")
-                av1, av2, av3 = st.columns(3)
-                with av1:
-                    obras_disp = sorted(df_banco_macro['Obra'].dropna().unique().tolist()) if not df_banco_macro.empty else []
-                    av_obra = st.selectbox("Obra:", obras_disp, key="av_obra")
-                with av2:
-                    av_escopo = st.selectbox("Tipo de Escopo:", ["ACM", "Esquadria-Vidro", "Terceirizada"], key="av_escopo")
-                with av3:
-                    av_projeto = st.text_input("Nº Projeto:", key="av_projeto", placeholder="Ex: 1068")
-
-                if av_projeto.strip():
-                    st.caption("Este item entra como **Pendente** e recebe o número da OP na liberação, em 'Liberar OPs da Semana'.")
+            with st.expander("➕ Lote sem frente  ·  Ancoragens, prisílias e materiais de apoio", expanded=False):
+                st.caption("Para ancoragens, prisilias, corte de perfil e outros materiais de apoio — não precisa de frente detalhada, mas precisa de um Projeto já cadastrado em 'Cadastrar Obra'.")
+                if df_projetos.empty:
+                    st.info("Cadastre uma Obra e um Projeto em 'Cadastrar Obra' antes de lançar um lote sem frente.")
+                    av_obra, av_projeto, av_escopo = None, None, None
                 else:
-                    st.caption("Informe o Nº do Projeto — ele é usado depois pra numerar a OP na liberação.")
+                    av1, av2, av3 = st.columns(3)
+                    with av1:
+                        obras_disp = sorted(df_projetos['Obra'].dropna().unique().tolist())
+                        av_obra = st.selectbox("Obra:", obras_disp, key="av_obra")
+                    with av2:
+                        projetos_av = sorted(df_projetos[df_projetos['Obra'] == av_obra]['Numero_Projeto'].unique().tolist())
+                        av_projeto = st.selectbox("Projeto:", projetos_av, key="av_projeto") if projetos_av else None
+                    with av3:
+                        av_escopo = st.selectbox("Tipo de Escopo:", ["ACM", "Esquadria-Vidro", "Terceirizada"], key="av_escopo")
+
+                    st.caption("Este item entra como **Pendente** e recebe o número da OP na liberação, em 'Liberar OPs da Semana'.")
 
                 # Lista de itens acumulados na sessão
                 if "av_itens" not in st.session_state:
@@ -4494,11 +4457,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 av_destino = st.radio("Destino:", ["Envio para Obra", "Uso Interno"],
                                        horizontal=True, key="av_destino")
 
-                if st.button("💾 Cadastrar OP Avulsa", key="btn_av", type="primary"):
+                if st.button("💾 Cadastrar Lote", key="btn_av", type="primary", disabled=df_projetos.empty):
                     if not st.session_state.av_itens:
                         st.error("Adicione ao menos um item antes de cadastrar.")
-                    elif not av_projeto.strip():
-                        st.error("Informe o número do projeto.")
+                    elif not av_projeto:
+                        st.error("Selecione o Projeto (cadastre um em 'Cadastrar Obra' se ainda não existir).")
                     else:
                         conn_av2 = conectar_banco()
                         try:
@@ -4513,7 +4476,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     VALUES (%s,'AVULSO',%s,NULL,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente',1,%s,%s,%s,%s)
                                 """, (
                                     av_obra,
-                                    f"AVULSO-{av_projeto.strip()}",
+                                    f"AVULSO-{av_projeto}",
                                     item["desc"],
                                     item["qtd"],
                                     item["m2"],
@@ -4521,11 +4484,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     av_dt_ini.strftime('%Y-%m-%d'),
                                     av_dt_fim.strftime('%Y-%m-%d'),
                                     av_dt_fim.strftime('%Y-%m-%d'),
-                                    f"PRJ-{av_projeto.strip()} | {av_pav}",
-                                    f"OP AVULSA — {av_escopo} | {'Envio para Obra' if av_destino == 'Envio para Obra' else 'Uso Interno'}",
+                                    f"PRJ-{av_projeto} | {av_pav}",
+                                    f"LOTE SEM FRENTE — {av_escopo} | {'Envio para Obra' if av_destino == 'Envio para Obra' else 'Uso Interno'}",
                                     1 if av_destino == "Envio para Obra" else 0,
                                     av_escopo,
-                                    av_projeto.strip()
+                                    av_projeto
                                 ))
                             conn_av2.commit()
                             _limpar_cache_geral()
@@ -4534,9 +4497,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             st.error(f"Erro: {e}")
                         finally:
                             liberar_conexao(conn_av2)
-                        registrar_auditoria(st.session_state.usuario_nome, "OP_AVULSA",
-                            f"Projeto {av_projeto.strip()} — {len(st.session_state.av_itens)} itens — {av_obra} — {av_destino} — Pendente")
-                        st.toast(f"OP Avulsa cadastrada como Pendente — {len(st.session_state.av_itens)} item(ns). Libere em 'Liberar OPs da Semana'.")
+                        registrar_auditoria(st.session_state.usuario_nome, "LOTE_SEM_FRENTE",
+                            f"Projeto {av_projeto} — {len(st.session_state.av_itens)} itens — {av_obra} — {av_destino} — Pendente")
+                        st.toast(f"Lote cadastrado como Pendente — {len(st.session_state.av_itens)} item(ns). Libere em 'Liberar OPs da Semana'.")
                         st.session_state.av_itens = []
                         time.sleep(0.5)
                         st.rerun()
@@ -4885,7 +4848,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
     # ==================================================
     elif nome_aba == "Cadastrar Obra":
         with aba_objeto:
-            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Cadastrar Obra</h2><p>Registre novas obras e frentes no cronograma macro</p></div><span class="page-icon">🏗️</span></div>', unsafe_allow_html=True)
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Cadastrar Obra</h2><p>Registre obras, projetos e frentes no cronograma macro</p></div><span class="page-icon">🏗️</span></div>', unsafe_allow_html=True)
             for k, v in [
                 ('mem_obra', ''), ('mem_frente', ''), ('mem_tarefa', ''),
                 ('mem_dt_ini', datetime.now().date()),
@@ -4894,96 +4857,144 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 if k not in st.session_state:
                     st.session_state[k] = v
 
-            with st.form("form_obra"):
-                nome_obra = st.text_input("Nome da Obra:", value=st.session_state.mem_obra).upper()
-                co1, co2  = st.columns(2)
-                with co1:
-                    escopo      = st.selectbox("Escopo:", ["ACM", "Esquadria-Vidro", "Terceirizada"])
-                with co2:
-                    num_projeto = st.text_input("Número do Projeto:", placeholder="Ex: 1068")
-
-                with st.expander("➕ Detalhar frente (opcional)", expanded=False):
-                    st.caption("Preencha só quando já souber a subdivisão, a metragem e as datas dessa etapa. "
-                               "Sem isso, a obra/escopo já fica pronta pra lançar OPs — o detalhamento pode ser adicionado depois.")
-                    frente = st.text_input("Frente Macro:", value=st.session_state.mem_frente)
-                    tarefa = st.text_input("Nome da Tarefa:", value=st.session_state.mem_tarefa)
-                    de1, de2 = st.columns(2)
-                    with de1:
-                        edt_cod = st.text_input("Codigo EDT (base, sem a subdivisao):")
-                    with de2:
-                        subdiv  = st.text_input("Subdivisao / Balancim:").upper()
-                    st.caption("O EDT salvo será o código base + a subdivisão, garantindo que cada subdivisão tenha um identificador único mesmo dentro da mesma etapa.")
-                    if escopo == "Esquadria-Vidro":
-                        peso_tot = st.number_input("Peso total (kg):", min_value=0.0, value=0.0,
-                                                    help="Deixe 0 se ainda não souber o total dessa etapa.")
-                        m2_tot = 0.0
-                    else:
-                        m2_tot = st.number_input("Metragem (m²):", min_value=0.0, value=0.0,
-                                                  help="Deixe 0 se ainda não souber o total dessa etapa.")
-                        peso_tot = 0.0
-                    dd1, dd2 = st.columns(2)
-                    with dd1:
-                        dt_ini = st.date_input("Inicio da Instalacao:", value=st.session_state.mem_dt_ini, format="DD/MM/YYYY")
-                    with dd2:
-                        dt_fim = st.date_input("Prazo Maximo Obra:", value=st.session_state.mem_dt_fim, format="DD/MM/YYYY")
-
-                if st.form_submit_button("Registrar Obra"):
-                    if not nome_obra.strip():
+            # ===== PASSO 1 — Obra + Projeto ==========================
+            st.markdown("### 1. Obra e Projeto")
+            st.caption("Toda obra é organizada em projetos — ex: Dona Lola pode ter os projetos 1063, 1068, 1072.")
+            obras_existentes = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
+            with st.form("form_projeto"):
+                fp1, fp2 = st.columns(2)
+                with fp1:
+                    obra_escolha = st.selectbox("Obra:", ["+ Nova obra"] + obras_existentes, key="obra_escolha_projeto")
+                    nome_obra_novo = st.text_input("Nome da nova obra:", value=st.session_state.mem_obra) if obra_escolha == "+ Nova obra" else obra_escolha
+                with fp2:
+                    numero_projeto_novo = st.text_input("Número do Projeto:", placeholder="Ex: 1068")
+                if st.form_submit_button("➕ Adicionar Projeto"):
+                    nome_obra_final = (nome_obra_novo or "").strip().upper()
+                    if not nome_obra_final:
                         st.error("Informe o nome da obra.")
-                    elif bool(edt_cod.strip()) != bool(subdiv.strip()):
-                        st.error("Preencha Código EDT e Subdivisão juntos, ou deixe os dois em branco para cadastrar só a obra/escopo.")
-                    elif edt_cod.strip() and subdiv.strip() and not tarefa.strip():
-                        st.error("Informe o nome da tarefa para detalhar a frente.")
+                    elif not numero_projeto_novo.strip():
+                        st.error("Informe o número do projeto.")
                     else:
-                        st.session_state.mem_obra   = nome_obra
-                        st.session_state.mem_frente = frente
-                        st.session_state.mem_tarefa = tarefa
-                        st.session_state.mem_dt_ini = dt_ini
-                        st.session_state.mem_dt_fim = dt_fim
-                        detalhado = bool(edt_cod.strip() and subdiv.strip())
+                        st.session_state.mem_obra = nome_obra_final
                         conn = conectar_banco()
                         try:
                             cursor = conn.cursor()
-                            if detalhado:
-                                edt_final = f"{edt_cod.strip()} [{subdiv.strip()}]"
-                                cursor.execute("""
-                                    INSERT INTO cronograma_macro
-                                    (Obra, EDT, Tipo_Escopo, Etapa_Macro, Subdivisao, Tarefa,
-                                     M2_Total_Tarefa, Peso_Total_Tarefa, Inicio_Previsto, Termino_Obra, Status,
-                                     Status_Engenharia, Numero_Projeto, Detalhado)
-                                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente','Aguardando Medicao In Loco',%s,TRUE)
-                                """, (nome_obra, edt_final, escopo, frente.strip(), subdiv.strip(), tarefa.strip(),
-                                      float(m2_tot) if m2_tot > 0 else None, float(peso_tot) if peso_tot > 0 else None,
-                                      dt_ini.strftime('%Y-%m-%d'),
-                                      dt_fim.strftime('%Y-%m-%d'), num_projeto.strip()))
-                                conn.commit()
-                                _limpar_cache_geral()
-                                registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_OBRA",
-                                    f"Obra: {nome_obra} | EDT: {edt_final} | {m2_tot}m² | {peso_tot}kg")
-                                st.toast("Frente detalhada registrada!")
-                            else:
-                                edt_final = f"{nome_obra.strip()}-{escopo}".upper().replace(" ", "-")
-                                cursor.execute("""
-                                    INSERT INTO cronograma_macro
-                                    (Obra, EDT, Tipo_Escopo, Etapa_Macro, Subdivisao, Tarefa,
-                                     M2_Total_Tarefa, Peso_Total_Tarefa, Inicio_Previsto, Termino_Obra, Status,
-                                     Status_Engenharia, Numero_Projeto, Detalhado)
-                                    VALUES (%s,%s,%s,'','',%s,NULL,NULL,NULL,NULL,'Pendente','Aguardando Medicao In Loco',%s,FALSE)
-                                    ON CONFLICT (EDT) DO NOTHING
-                                """, (nome_obra, edt_final, escopo, "Geral (sem detalhamento)", num_projeto.strip()))
-                                criado = cursor.rowcount > 0
-                                conn.commit()
-                                _limpar_cache_geral()
-                                registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_OBRA",
-                                    f"Obra: {nome_obra} | Escopo: {escopo} | sem detalhamento")
-                                st.toast("Obra/Escopo pronta para lançar OPs!" if criado else "Obra/Escopo já estava cadastrada — tudo certo.")
+                            cursor.execute(
+                                "INSERT INTO projetos (Obra, Numero_Projeto) VALUES (%s,%s) ON CONFLICT (Obra, Numero_Projeto) DO NOTHING",
+                                (nome_obra_final, numero_projeto_novo.strip())
+                            )
+                            criado = cursor.rowcount > 0
+                            conn.commit()
+                            _limpar_cache_geral()
+                            registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_PROJETO",
+                                f"Obra: {nome_obra_final} | Projeto: {numero_projeto_novo.strip()}")
+                            st.toast("Projeto adicionado!" if criado else "Esse projeto já estava cadastrado — tudo certo.")
                             time.sleep(0.4)
                             st.rerun()
                         except Exception as e:
                             conn.rollback()
-                            st.error(f"EDT '{edt_final}' ja existe ou erro: {e}")
+                            st.error(f"Erro: {e}")
                         finally:
                             liberar_conexao(conn)
+
+            if not df_projetos.empty:
+                st.dataframe(df_projetos[['Obra', 'Numero_Projeto']], hide_index=True, use_container_width=True)
+
+            st.markdown("---")
+            # ===== PASSO 2 — Frente (opcional) dentro de um Projeto ===
+            st.markdown("### 2. Frente (opcional) dentro de um Projeto")
+            st.caption("Preencha só quando já souber a subdivisão, a metragem/peso e as datas dessa etapa. "
+                       "Sem isso, o projeto/escopo já fica pronto pra lançar OPs — o detalhamento pode ser adicionado depois.")
+            if df_projetos.empty:
+                st.info("Cadastre um projeto no passo 1 antes de detalhar uma frente.")
+            else:
+                with st.form("form_frente"):
+                    ff1, ff2, ff3 = st.columns(3)
+                    with ff1:
+                        obra_frente = st.selectbox("Obra:", sorted(df_projetos['Obra'].unique().tolist()), key="obra_frente_sel")
+                    with ff2:
+                        projetos_da_obra = sorted(df_projetos[df_projetos['Obra'] == obra_frente]['Numero_Projeto'].unique().tolist())
+                        projeto_frente = st.selectbox("Projeto:", projetos_da_obra, key="projeto_frente_sel")
+                    with ff3:
+                        escopo = st.selectbox("Escopo:", ["ACM", "Esquadria-Vidro", "Terceirizada"], key="escopo_frente_sel")
+
+                    with st.expander("➕ Detalhar frente (opcional)", expanded=False):
+                        frente = st.text_input("Frente Macro:", value=st.session_state.mem_frente)
+                        tarefa = st.text_input("Nome da Tarefa:", value=st.session_state.mem_tarefa)
+                        de1, de2 = st.columns(2)
+                        with de1:
+                            edt_cod = st.text_input("Codigo EDT (base, sem a subdivisao):")
+                        with de2:
+                            subdiv  = st.text_input("Subdivisao / Balancim:").upper()
+                        st.caption("O EDT salvo será o código base + a subdivisão, garantindo que cada subdivisão tenha um identificador único mesmo dentro da mesma etapa.")
+                        if escopo == "Esquadria-Vidro":
+                            peso_tot = st.number_input("Peso total (kg):", min_value=0.0, value=0.0,
+                                                        help="Deixe 0 se ainda não souber o total dessa etapa.")
+                            m2_tot = 0.0
+                        else:
+                            m2_tot = st.number_input("Metragem (m²):", min_value=0.0, value=0.0,
+                                                      help="Deixe 0 se ainda não souber o total dessa etapa.")
+                            peso_tot = 0.0
+                        dd1, dd2 = st.columns(2)
+                        with dd1:
+                            dt_ini = st.date_input("Inicio da Instalacao:", value=st.session_state.mem_dt_ini, format="DD/MM/YYYY")
+                        with dd2:
+                            dt_fim = st.date_input("Prazo Maximo Obra:", value=st.session_state.mem_dt_fim, format="DD/MM/YYYY")
+
+                    if st.form_submit_button("Registrar"):
+                        if bool(edt_cod.strip()) != bool(subdiv.strip()):
+                            st.error("Preencha Código EDT e Subdivisão juntos, ou deixe os dois em branco para cadastrar só o projeto/escopo.")
+                        elif edt_cod.strip() and subdiv.strip() and not tarefa.strip():
+                            st.error("Informe o nome da tarefa para detalhar a frente.")
+                        else:
+                            st.session_state.mem_frente = frente
+                            st.session_state.mem_tarefa = tarefa
+                            st.session_state.mem_dt_ini = dt_ini
+                            st.session_state.mem_dt_fim = dt_fim
+                            detalhado = bool(edt_cod.strip() and subdiv.strip())
+                            conn = conectar_banco()
+                            try:
+                                cursor = conn.cursor()
+                                if detalhado:
+                                    edt_final = f"{edt_cod.strip()} [{subdiv.strip()}]"
+                                    cursor.execute("""
+                                        INSERT INTO cronograma_macro
+                                        (Obra, EDT, Tipo_Escopo, Etapa_Macro, Subdivisao, Tarefa,
+                                         M2_Total_Tarefa, Peso_Total_Tarefa, Inicio_Previsto, Termino_Obra, Status,
+                                         Status_Engenharia, Numero_Projeto, Detalhado)
+                                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente','Aguardando Medicao In Loco',%s,TRUE)
+                                    """, (obra_frente, edt_final, escopo, frente.strip(), subdiv.strip(), tarefa.strip(),
+                                          float(m2_tot) if m2_tot > 0 else None, float(peso_tot) if peso_tot > 0 else None,
+                                          dt_ini.strftime('%Y-%m-%d'),
+                                          dt_fim.strftime('%Y-%m-%d'), projeto_frente))
+                                    conn.commit()
+                                    _limpar_cache_geral()
+                                    registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_OBRA",
+                                        f"Obra: {obra_frente} | Projeto: {projeto_frente} | EDT: {edt_final} | {m2_tot}m² | {peso_tot}kg")
+                                    st.toast("Frente detalhada registrada!")
+                                else:
+                                    edt_final = f"{obra_frente}-{projeto_frente}-{escopo}".upper().replace(" ", "-")
+                                    cursor.execute("""
+                                        INSERT INTO cronograma_macro
+                                        (Obra, EDT, Tipo_Escopo, Etapa_Macro, Subdivisao, Tarefa,
+                                         M2_Total_Tarefa, Peso_Total_Tarefa, Inicio_Previsto, Termino_Obra, Status,
+                                         Status_Engenharia, Numero_Projeto, Detalhado)
+                                        VALUES (%s,%s,%s,'','',%s,NULL,NULL,NULL,NULL,'Pendente','Aguardando Medicao In Loco',%s,FALSE)
+                                        ON CONFLICT (EDT) DO NOTHING
+                                    """, (obra_frente, edt_final, escopo, "Geral (sem detalhamento)", projeto_frente))
+                                    criado = cursor.rowcount > 0
+                                    conn.commit()
+                                    _limpar_cache_geral()
+                                    registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_OBRA",
+                                        f"Obra: {obra_frente} | Projeto: {projeto_frente} | Escopo: {escopo} | sem detalhamento")
+                                    st.toast("Projeto/Escopo pronto para lançar OPs!" if criado else "Projeto/Escopo já estava cadastrado — tudo certo.")
+                                time.sleep(0.4)
+                                st.rerun()
+                            except Exception as e:
+                                conn.rollback()
+                                st.error(f"EDT '{edt_final}' ja existe ou erro: {e}")
+                            finally:
+                                liberar_conexao(conn)
 
             if not df_banco_macro.empty:
                 st.markdown("---")
@@ -5026,7 +5037,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 index=["ACM", "Esquadria-Vidro", "Terceirizada"].index(escopo_atual_edit)
                                       if escopo_atual_edit in ["ACM", "Esquadria-Vidro", "Terceirizada"] else 0
                             )
-                            projeto_edit = st.text_input("Número do Projeto:", value=str(row_edit.get('Numero_Projeto') or ''))
+                            projetos_obra_edit = sorted(df_projetos[df_projetos['Obra'] == obra_selecionada]['Numero_Projeto'].unique().tolist()) if not df_projetos.empty else []
+                            projeto_atual_edit = str(row_edit.get('Numero_Projeto') or '')
+                            if projeto_atual_edit and projeto_atual_edit not in projetos_obra_edit:
+                                projetos_obra_edit.append(projeto_atual_edit)
+                            projeto_edit = st.selectbox(
+                                "Número do Projeto:", projetos_obra_edit,
+                                index=projetos_obra_edit.index(projeto_atual_edit) if projeto_atual_edit in projetos_obra_edit else 0
+                            ) if projetos_obra_edit else ""
                         with fe2:
                             if escopo_edit == "Esquadria-Vidro":
                                 peso_edit = st.number_input(
