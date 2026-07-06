@@ -627,6 +627,11 @@ def inicializar_banco_de_dados():
                 quantidade NUMERIC NOT NULL
             )
         """)
+        cursor.execute("ALTER TABLE romaneios_manuais ADD COLUMN IF NOT EXISTS numero_projeto TEXT")
+        cursor.execute("ALTER TABLE romaneios_manuais ADD COLUMN IF NOT EXISTS etapa TEXT")
+        cursor.execute("ALTER TABLE romaneios_manuais_itens ADD COLUMN IF NOT EXISTS cod TEXT")
+        cursor.execute("ALTER TABLE romaneios_manuais_itens ADD COLUMN IF NOT EXISTS peso_kg NUMERIC")
+        cursor.execute("ALTER TABLE romaneios_manuais_itens ADD COLUMN IF NOT EXISTS unidade TEXT DEFAULT 'un'")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS usuarios (
                 id SERIAL PRIMARY KEY,
@@ -1567,21 +1572,24 @@ def deletar_arquivo_op(arquivo_id: int):
     finally:
         liberar_conexao(conn)
 
-def salvar_romaneio_manual(obra: str, data_recebimento, itens: list, usuario: str):
-    """itens: lista de dicts {'descricao':..., 'quantidade':...}"""
+def salvar_romaneio_manual(obra: str, data_recebimento, itens: list, usuario: str,
+                            numero_projeto: str = '', etapa: str = ''):
+    """itens: lista de dicts {'descricao':..., 'quantidade':..., 'cod':..., 'peso_kg':..., 'unidade':...}"""
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO romaneios_manuais (obra_vinculada, data_recebimento, criado_por) "
-            "VALUES (%s,%s,%s) RETURNING id",
-            (obra, data_recebimento, usuario)
+            "INSERT INTO romaneios_manuais (obra_vinculada, data_recebimento, criado_por, numero_projeto, etapa) "
+            "VALUES (%s,%s,%s,%s,%s) RETURNING id",
+            (obra, data_recebimento, usuario, numero_projeto, etapa)
         )
         romaneio_id = cursor.fetchone()[0]
         for item in itens:
             cursor.execute(
-                "INSERT INTO romaneios_manuais_itens (romaneio_id, descricao, quantidade) VALUES (%s,%s,%s)",
-                (romaneio_id, item['descricao'], item['quantidade'])
+                "INSERT INTO romaneios_manuais_itens (romaneio_id, descricao, quantidade, cod, peso_kg, unidade) "
+                "VALUES (%s,%s,%s,%s,%s,%s)",
+                (romaneio_id, item['descricao'], item['quantidade'],
+                 item.get('cod', ''), item.get('peso_kg', 0.0), item.get('unidade', 'un'))
             )
         conn.commit()
         return romaneio_id
@@ -1597,7 +1605,7 @@ def carregar_romaneios_manuais():
     try:
         return pd.read_sql_query(
             "SELECT r.id, r.obra_vinculada, r.data_recebimento, r.criado_por, r.criado_em, "
-            "COUNT(i.id) AS qtd_itens "
+            "r.numero_projeto, r.etapa, COUNT(i.id) AS qtd_itens "
             "FROM romaneios_manuais r LEFT JOIN romaneios_manuais_itens i ON i.romaneio_id = r.id "
             "GROUP BY r.id ORDER BY r.data_recebimento DESC, r.id DESC",
             conn
@@ -1611,7 +1619,7 @@ def carregar_itens_romaneio_manual(romaneio_id: int):
     conn = conectar_banco()
     try:
         return pd.read_sql_query(
-            "SELECT id, descricao, quantidade FROM romaneios_manuais_itens WHERE romaneio_id=%s ORDER BY id",
+            "SELECT id, descricao, quantidade, cod, peso_kg, unidade FROM romaneios_manuais_itens WHERE romaneio_id=%s ORDER BY id",
             conn, params=(romaneio_id,)
         )
     except Exception:
@@ -1633,7 +1641,24 @@ def excluir_romaneio_manual(romaneio_id: int):
     finally:
         liberar_conexao(conn)
 
-def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por: str) -> bytes:
+def _inserir_logo_cabecalho(ws, ultima_col_letra: str):
+    """Linha 1 em branco com o logo Passold (mesmo arquivo usado na barra lateral),
+    no lugar do texto 'PASSOLD SISTEMAS DE FACHADAS'."""
+    from openpyxl.styles import Font, Alignment
+    ws.row_dimensions[1].height = 56
+    try:
+        from openpyxl.drawing.image import Image as XLImage
+        logo_img = XLImage("assets/LOGO_BAUDENPASSOLD.png")
+        logo_img.width = 168
+        logo_img.height = 71
+        ws.add_image(logo_img, "A1")
+    except Exception:
+        ws["A1"] = "PASSOLD SISTEMAS DE FACHADAS"
+        ws["A1"].font = Font(name="Arial", size=14, bold=True)
+        ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+
+def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por: str,
+                                numero_projeto: str = '', etapa: str = '') -> bytes:
     """Gera o romaneio manual .xlsx com a lista de itens (sem OP vinculada)."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -1650,40 +1675,41 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
     fill_cab = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
     fill_sub = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
 
-    ws.column_dimensions['A'].width = 22
+    ws.column_dimensions['A'].width = 6
     ws.column_dimensions['B'].width = 30
-    ws.column_dimensions['C'].width = 16
-    ws.column_dimensions['D'].width = 16
+    ws.column_dimensions['C'].width = 20
+    ws.column_dimensions['D'].width = 12
+    ws.column_dimensions['E'].width = 12
+    ws.column_dimensions['F'].width = 12
+    ws.column_dimensions['G'].width = 12
 
-    ws.merge_cells("A1:D1")
-    ws["A1"] = "PASSOLD SISTEMAS DE FACHADAS"
-    ws["A1"].font = Font(name="Arial", size=14, bold=True, color="FFFFFF")
-    ws["A1"].fill = fill_cab
-    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[1].height = 30
+    ws.merge_cells("A1:G1")
+    _inserir_logo_cabecalho(ws, "G")
 
-    ws.merge_cells("A2:D2")
-    ws["A2"] = "ROMANEIO MANUAL (SEM OP VINCULADA)"
+    ws.merge_cells("A2:G2")
+    ws["A2"] = "ROMANEIO MANUAL"
     ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
     ws["A2"].fill = fill_cab
     ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
 
     infos = [
         ("Obra:", str(obra)),
+        ("Projeto:", str(numero_projeto or '—')),
+        ("Etapa:", str(etapa or '—')),
         ("Data de recebimento:", pd.to_datetime(data_recebimento).strftime('%d/%m/%Y')),
         ("Cadastrado por:", str(criado_por)),
     ]
     linha = 3
     for label, valor in infos:
         ws.cell(linha, 1, label).font = Font(name="Arial", size=11, bold=True)
-        ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=4)
+        ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=7)
         ws.cell(linha, 2, valor).font = Font(name="Arial", size=11)
-        for c in range(1, 5):
+        for c in range(1, 8):
             ws.cell(linha, c).border = borda
         linha += 1
 
     linha += 1
-    titulos = ["#", "DESCRIÇÃO DO MATERIAL", "QUANTIDADE", "CONFERIDO"]
+    titulos = ["#", "DESCRIÇÃO DO MATERIAL", "COD", "PESO (KG)", "UND MEDIDA", "QUANTIDADE", "CONFERIDO"]
     for col, titulo in enumerate(titulos, 1):
         cel = ws.cell(linha, col, titulo)
         cel.font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
@@ -1693,7 +1719,11 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
     linha += 1
 
     for i, (_, item) in enumerate(itens_df.iterrows(), 1):
-        dados = [i, item.get('descricao', ''), item.get('quantidade', 0), ""]
+        dados = [
+            i, item.get('descricao', ''), item.get('cod', '') or '',
+            float(item.get('peso_kg') or 0), item.get('unidade', '') or '',
+            item.get('quantidade', 0), ""
+        ]
         for col, val in enumerate(dados, 1):
             cel = ws.cell(linha, col, val)
             cel.font = Font(name="Arial", size=11)
@@ -1704,19 +1734,19 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
         linha += 1
 
     linha += 1
-    ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=2)
+    ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=5)
     ws.cell(linha, 1, "TOTAL DE ITENS:").font = Font(name="Arial", size=11, bold=True)
-    ws.cell(linha, 3, len(itens_df)).font = Font(name="Arial", size=11, bold=True)
-    for c in range(1, 5):
+    ws.cell(linha, 6, len(itens_df)).font = Font(name="Arial", size=11, bold=True)
+    for c in range(1, 8):
         ws.cell(linha, c).border = borda
 
     linha += 3
     assinaturas = ["Recebedor na Obra / Data", "Conferência Almoxarifado"]
     for ass in assinaturas:
-        ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=2)
+        ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=4)
         ws.cell(linha, 1).border = Border(bottom=bd)
         ws.cell(linha + 1, 1, ass).font = Font(name="Arial", size=10, bold=True)
-        ws.cell(linha, 3, "____/____/______").font = Font(name="Arial", size=11)
+        ws.cell(linha, 6, "____/____/______").font = Font(name="Arial", size=11)
         linha += 3
 
     buf = BytesIO()
@@ -2203,7 +2233,7 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
     buf.seek(0)
     return buf.getvalue()
 
-def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: str) -> bytes:
+def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: str, etapa: str = '') -> bytes:
     """Gera o romaneio .xlsx com as peças do lote."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -2228,11 +2258,7 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
 
     # Cabeçalho
     ws.merge_cells("A1:E1")
-    ws["A1"] = "PASSOLD SISTEMAS DE FACHADAS"
-    ws["A1"].font = Font(name="Arial", size=14, bold=True, color="FFFFFF")
-    ws["A1"].fill = fill_cab
-    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[1].height = 30
+    _inserir_logo_cabecalho(ws, "E")
 
     ws.merge_cells("A2:E2")
     ws["A2"] = "ROMANEIO DE DESPACHO"
@@ -2245,6 +2271,8 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
         ("OP:", str(lote_row.get('Num_OP', '—'))),
         ("Obra:", str(lote_row.get('Obra_Vinculada', '—'))),
         ("Lote:", str(lote_row.get('Cod_Lote', '—'))),
+        ("Projeto:", str(lote_row.get('Numero_Projeto') or '—')),
+        ("Etapa:", str(etapa or '—')),
         ("Endereço:", str(endereco_obra)),
         ("Digitado por:", str(digitado_por)),
         ("Data:", datetime.now(FUSO_BR).strftime('%d/%m/%Y')),
@@ -2297,8 +2325,20 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
     for c in range(1, 6):
         ws.cell(linha, c).border = borda
 
+    # Perguntas de conferência
+    linha += 2
+    perguntas = [
+        "Possui lista de componentes?",
+        "Envio de projeto/imagem complementar?",
+    ]
+    for pergunta in perguntas:
+        ws.cell(linha, 1, pergunta).font = Font(name="Calibri", size=11)
+        ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=3)
+        ws.cell(linha, 2, " SIM                                       NÃO").font = Font(name="Calibri", size=11, bold=True)
+        linha += 1
+
     # Assinaturas
-    linha += 3
+    linha += 2
     assinaturas = [
         "Conferência Interna",
         "Nome Motorista / Data",
@@ -5531,9 +5571,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if df_pecas_c.empty:
                                     st.warning("Sem peças para o romaneio")
                                 else:
+                                    etapa_c = ''
+                                    edt_c = row_c.get('EDT_Vinculado', '')
+                                    if edt_c and edt_c != 'AVULSO' and not df_banco_macro.empty:
+                                        fr_c = df_banco_macro[df_banco_macro['EDT'] == edt_c]
+                                        if not fr_c.empty:
+                                            etapa_c = str(fr_c.iloc[0].get('Tarefa') or '')
                                     rom_bytes = gerar_romaneio_xlsx(
                                         row_c, df_pecas_c, end_r,
-                                        st.session_state.usuario_nome
+                                        st.session_state.usuario_nome, etapa=etapa_c
                                     )
                                     st.download_button(
                                         label="🖨️ Emitir Romaneio",
@@ -5765,47 +5811,61 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             if "rom_itens" not in st.session_state:
                 st.session_state.rom_itens = []
 
-            obras_rom = sorted(df_banco_macro['Obra'].dropna().unique().tolist()) if not df_banco_macro.empty else []
+            obras_rom = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
             if not obras_rom:
-                st.info("Nenhuma obra cadastrada ainda.")
+                st.info("Nenhuma obra/projeto cadastrado ainda — cadastre em 'Cadastrar Obra'.")
             else:
-                rm1, rm2 = st.columns(2)
+                rm1, rm2, rm3 = st.columns(3)
                 with rm1:
                     rom_obra = st.selectbox("Obra:", obras_rom, key="rom_obra")
                 with rm2:
+                    projetos_rom = sorted(df_projetos[df_projetos['Obra'] == rom_obra]['Numero_Projeto'].unique().tolist())
+                    rom_projeto = st.selectbox("Projeto:", projetos_rom, key="rom_projeto") if projetos_rom else None
+                with rm3:
                     rom_data = st.date_input("Data de recebimento:", value=hoje_projeto().date(),
                                               format="DD/MM/YYYY", key="rom_data")
+                rom_etapa = st.text_input("Etapa:", key="rom_etapa", placeholder="Ex: 49º Pavimento - Estrutura")
 
                 st.markdown("**Adicionar item ao romaneio:**")
-                ri1, ri2, ri3 = st.columns([5, 2, 1])
+                ri1, ri2, ri3, ri4, ri5 = st.columns([4, 2, 2, 2, 2])
                 with ri1:
                     rom_desc = st.text_input("Descrição do material:", key="rom_desc",
                                               placeholder="Ex: Perfil de alumínio natural 6m")
                 with ri2:
-                    rom_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="rom_qtd")
+                    rom_cod = st.text_input("Cod:", key="rom_cod", placeholder="Ex: QUADRO TIPO-01")
                 with ri3:
-                    st.write("")
-                    st.write("")
-                    if st.button("➕ Adicionar", key="btn_add_rom_item"):
-                        if not rom_desc.strip():
-                            st.error("Informe a descrição do material antes de adicionar.")
-                        else:
-                            st.session_state.rom_itens.append({"descricao": rom_desc.strip(), "quantidade": rom_qtd})
-                            st.rerun()
+                    rom_peso = st.number_input("Peso (kg):", min_value=0.0, value=0.0, step=0.1, key="rom_peso")
+                with ri4:
+                    rom_unidade = st.selectbox("Und Medida:", ["UND", "KG", "M", "M²", "CX", "PÇ", "ROLO"], key="rom_unidade")
+                with ri5:
+                    rom_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="rom_qtd")
+                if st.button("➕ Adicionar", key="btn_add_rom_item"):
+                    if not rom_desc.strip():
+                        st.error("Informe a descrição do material antes de adicionar.")
+                    else:
+                        st.session_state.rom_itens.append({
+                            "descricao": rom_desc.strip(), "quantidade": rom_qtd,
+                            "cod": rom_cod.strip(), "peso_kg": rom_peso, "unidade": rom_unidade
+                        })
+                        st.rerun()
 
                 if st.session_state.rom_itens:
                     st.markdown("**Itens do romaneio:**")
                     for i, item in enumerate(st.session_state.rom_itens):
-                        col_desc, col_qtd, col_rem = st.columns([5, 2, 1])
+                        col_desc, col_cod, col_qtd, col_rem = st.columns([4, 3, 2, 1])
                         col_desc.write(f"{i+1}. {item['descricao']}")
-                        col_qtd.write(f"{item['quantidade']:g}")
+                        col_cod.write(item.get('cod', '') or '—')
+                        col_qtd.write(f"{item['quantidade']:g} {item.get('unidade','un')}")
                         with col_rem:
                             if st.button("🗑", key=f"rem_rom_item_{i}"):
                                 st.session_state.rom_itens.pop(i)
                                 st.rerun()
 
-                    if st.button("💾 Salvar Romaneio", type="primary", key="btn_salvar_rom_manual"):
-                        romaneio_id = salvar_romaneio_manual(rom_obra, rom_data, st.session_state.rom_itens, st.session_state.usuario_nome)
+                    if st.button("💾 Salvar Romaneio", type="primary", key="btn_salvar_rom_manual", disabled=not rom_projeto):
+                        romaneio_id = salvar_romaneio_manual(
+                            rom_obra, rom_data, st.session_state.rom_itens, st.session_state.usuario_nome,
+                            numero_projeto=rom_projeto or '', etapa=rom_etapa.strip()
+                        )
                         if romaneio_id:
                             registrar_auditoria(st.session_state.usuario_nome, "ROMANEIO_MANUAL",
                                 f"Romaneio manual #{romaneio_id} — Obra: {rom_obra} — {len(st.session_state.rom_itens)} item(ns)")
@@ -5835,11 +5895,13 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         f"({int(rm_row['qtd_itens'])} item(ns)) — por {rm_row['criado_por']}"
                     ):
                         df_itens_rom = carregar_itens_romaneio_manual(int(rm_row['id']))
-                        st.dataframe(df_itens_rom[['descricao', 'quantidade']], hide_index=True, use_container_width=True)
+                        st.caption(f"Projeto {rm_row.get('numero_projeto') or '—'} · {rm_row.get('etapa') or 'Sem etapa'}")
+                        st.dataframe(df_itens_rom[['descricao', 'cod', 'peso_kg', 'unidade', 'quantidade']], hide_index=True, use_container_width=True)
                         rmb1, rmb2 = st.columns(2)
                         with rmb1:
                             rom_bytes = gerar_romaneio_manual_xlsx(
-                                rm_row['obra_vinculada'], rm_row['data_recebimento'], df_itens_rom, rm_row['criado_por']
+                                rm_row['obra_vinculada'], rm_row['data_recebimento'], df_itens_rom, rm_row['criado_por'],
+                                numero_projeto=rm_row.get('numero_projeto') or '', etapa=rm_row.get('etapa') or ''
                             )
                             st.download_button(
                                 "🖨️ Emitir Romaneio", data=rom_bytes,
