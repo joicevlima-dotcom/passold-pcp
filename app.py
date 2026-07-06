@@ -4010,14 +4010,24 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         projetos_av = sorted(df_projetos[df_projetos['Obra'] == av_obra]['Numero_Projeto'].unique().tolist())
                         av_projeto = st.selectbox("Projeto:", projetos_av, key="av_projeto") if projetos_av else None
                     with av3:
-                        # Escopo vem travado do que ja foi cadastrado pra esse Obra+Projeto em
-                        # 'Cadastrar Obra', quando ha uma unica frente/escopo registrada — evita
-                        # escolher um escopo diferente do que a obra ja define.
-                        escopos_projeto = sorted(df_banco_macro[
-                            (df_banco_macro['Obra'] == av_obra) & (df_banco_macro['Numero_Projeto'] == av_projeto)
-                        ]['Tipo_Escopo'].dropna().unique().tolist()) if not df_banco_macro.empty and av_projeto else []
-                        if len(escopos_projeto) == 1:
-                            av_escopo = escopos_projeto[0]
+                        # Escopo vem travado do que ja foi cadastrado pra essa Obra em 'Cadastrar Obra',
+                        # quando ha um unico escopo registrado entre as frentes dela — evita escolher um
+                        # escopo diferente do que a obra ja define. Se a obra tiver frentes de mais de um
+                        # escopo (ex: ACM e Esquadria-Vidro), deixa escolher.
+                        def _normaliza_escopo(bruto):
+                            b = str(bruto or '').upper()
+                            if 'ESQUADRIA' in b or 'VIDRO' in b: return 'Esquadria-Vidro'
+                            if 'TERCEIRIZAD' in b: return 'Terceirizada'
+                            if 'ACM' in b: return 'ACM'
+                            return None
+                        escopos_obra = sorted(set(
+                            e for e in (
+                                _normaliza_escopo(v) for v in
+                                df_banco_macro[df_banco_macro['Obra'] == av_obra]['Tipo_Escopo'].dropna().tolist()
+                            ) if e
+                        )) if not df_banco_macro.empty and av_obra else []
+                        if len(escopos_obra) == 1:
+                            av_escopo = escopos_obra[0]
                             st.text_input("Tipo de Escopo:", value=av_escopo, disabled=True, key="av_escopo_travado")
                         else:
                             av_escopo = st.selectbox("Tipo de Escopo:", ["ACM", "Esquadria-Vidro", "Terceirizada"], key="av_escopo")
