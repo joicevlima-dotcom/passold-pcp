@@ -3097,16 +3097,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             )
             obra_tv = st.selectbox("Filtrar por obra:", obras_tv, key="sb_obra_tv")
 
-            st.markdown("### Previsão de Entrada em Produção")
-            st.caption("Lotes planejados no Vincular Datas — ainda não liberados oficialmente.")
             df_prev = df_banco_micro[df_banco_micro['Escopo'] == 'ACM'].copy() if not df_banco_micro.empty else pd.DataFrame()
             if obra_tv != "Todas as obras" and not df_prev.empty:
                 df_prev = df_prev[df_prev['Obra_Vinculada'] == obra_tv]
             df_prev_pend = df_prev[df_prev['Status_Item'] == 'Pendente'].copy() if not df_prev.empty else pd.DataFrame()
-            if df_prev_pend.empty:
-                st.info("Nenhuma previsão pendente.")
-            else:
-                blocos_semanais(df_prev_pend)
+            with st.expander(f"📋 Previsão de Entrada em Produção  ·  {len(df_prev_pend)} lote(s)", expanded=False):
+                st.caption("Lotes planejados no Vincular Datas — ainda não liberados oficialmente.")
+                if df_prev_pend.empty:
+                    st.info("Nenhuma previsão pendente.")
+                else:
+                    blocos_semanais(df_prev_pend)
 
             st.markdown("---")
             st.markdown("### Calendário de Produção — OPs Liberadas")
@@ -3635,17 +3635,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             )
             obra_esq = st.selectbox("Filtrar por obra:", obras_esq, key="sb_obra_esq")
 
-            st.markdown("### Previsão de Entrada em Produção")
-            st.caption("Lotes planejados ainda não liberados oficialmente.")
             df_prev_esq = df_banco_micro[df_banco_micro['Escopo'] == 'Esquadria-Vidro'].copy() if not df_banco_micro.empty else pd.DataFrame()
             if not df_prev_esq.empty:
                 if obra_esq != "Todas as obras":
                     df_prev_esq = df_prev_esq[df_prev_esq['Obra_Vinculada'] == obra_esq]
             df_prev_pend_esq = df_prev_esq[df_prev_esq['Status_Item'] == 'Pendente'].copy() if not df_prev_esq.empty else pd.DataFrame()
-            if df_prev_pend_esq.empty:
-                st.info("Nenhuma previsão pendente de Esquadrias.")
-            else:
-                blocos_semanais(df_prev_pend_esq)
+            with st.expander(f"📋 Previsão de Entrada em Produção  ·  {len(df_prev_pend_esq)} lote(s)", expanded=False):
+                st.caption("Lotes planejados ainda não liberados oficialmente.")
+                if df_prev_pend_esq.empty:
+                    st.info("Nenhuma previsão pendente de Esquadrias.")
+                else:
+                    blocos_semanais(df_prev_pend_esq)
 
             st.markdown("---")
             st.markdown("### Calendário de Produção — OPs Liberadas")
