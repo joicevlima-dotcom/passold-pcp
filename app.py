@@ -2515,19 +2515,23 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
     # Assinaturas
     linha += 1
     assinaturas = [
-        "Conferência Interna",
-        "Assinatura líder do setor",
-        "Nome Motorista / Data",
-        "Recebedor na Obra / Data",
-        "Engenheiro Responsável",
+        ("Conferência Interna", False),
+        ("Assinatura líder do setor", False),
+        ("Nome Motorista / Data", False),
+        ("Recebedor na Obra / Data", True),
+        ("Engenheiro Responsável", True),
     ]
-    for ass in assinaturas:
+    for ass, precisa_legivel in assinaturas:
         ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=3)
         ws.cell(linha, 1).border = Border(bottom=bd)
         ws.cell(linha, 1, "").font = Font(name="Arial", size=11)
         ws.cell(linha+1, 1, ass).font = Font(name="Arial", size=10, bold=True)
         ws.cell(linha, 4, "____/____/______").font = Font(name="Arial", size=11)
-        linha += 3
+        if precisa_legivel:
+            ws.cell(linha+2, 1, "Assinatura legível").font = Font(name="Arial", size=9)
+            linha += 4
+        else:
+            linha += 3
 
     buf = BytesIO()
     wb.save(buf)
