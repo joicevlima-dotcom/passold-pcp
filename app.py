@@ -2888,10 +2888,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         ini_ultima_semana = max(ini_ultima_semana, dt_ini)
                         dia = dt_ini
                         while dia <= dt_fim:
-                            r = row.to_dict()
-                            r['_dia'] = dia
-                            r['_pode_concluir'] = (dia >= ini_ultima_semana)
-                            registros_exp.append(r)
+                            if dia.weekday() < 5:  # sem producao aos finais de semana
+                                r = row.to_dict()
+                                r['_dia'] = dia
+                                r['_pode_concluir'] = (dia >= ini_ultima_semana)
+                                registros_exp.append(r)
                             dia += timedelta(days=1)
                     df_exp = pd.DataFrame(registros_exp) if registros_exp else pd.DataFrame()
 
@@ -3271,6 +3272,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             """, unsafe_allow_html=True)
 
             df_tv = carregar_micro()
+            def _eh_esquadria_acm_tv(tipo):
+                if not tipo: return False
+                return any(p in str(tipo).upper() for p in ["ESQUADRIA", "VIDRO", "ALUMINIO", "PERFIL"])
+            if not df_tv.empty:
+                df_tv = df_tv[~df_tv['Tipo_Material'].apply(_eh_esquadria_acm_tv)]
             if df_tv.empty:
                 st.markdown("<div style='text-align:center;padding:60px;color:#94A3B8;font-size:20px;'>Nenhum lote cadastrado.</div>", unsafe_allow_html=True)
             else:
@@ -3305,97 +3311,74 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     'concluido': {'border': '#15803D', 'bg': '#F0FDF4', 'tag': '✅ CONCLUÍDO','tag_color': '#15803D'},
                 }
 
-                urgentes = df_tv[df_tv['_urgencia'].isin(['vencido', 'critico'])]
-                demais   = df_tv[df_tv['_urgencia'].isin(['atencao', 'ok', 'sem_prazo', 'concluido'])]
-
-                if not urgentes.empty:
+                criticos = df_tv[df_tv['_urgencia'].isin(['vencido', 'critico'])]
+                if not criticos.empty:
                     st.markdown(f"""
                     <div style='background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:10px 18px;margin-bottom:16px;'>
-                        <span style='color:#DC2626;font-weight:700;font-size:15px;'>⚠️ {len(urgentes)} lote(s) crítico(s) ou vencido(s)</span>
+                        <span style='color:#DC2626;font-weight:700;font-size:15px;'>⚠️ {len(criticos)} lote(s) crítico(s) ou vencido(s)</span>
                     </div>
                     """, unsafe_allow_html=True)
-                    cols_urg = st.columns(min(len(urgentes), 3))
-                    for i, (_, row) in enumerate(urgentes.iterrows()):
-                        urg  = row['_urgencia']
-                        cfg  = URG_CONFIG[urg]
-                        dias = row['_dias_restantes']
-                        dias_txt  = f"Vencido há {abs(dias)}d" if dias < 0 else f"Faltam {dias} dia(s)"
-                        em, ec, _ = STATUS_EMOJI.get(row['Status_Item'], ('❓', '#64748B', '#F8FAFC'))
-                        prazo_fmt = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y') if prazo_valido(row['Data_Limite_Obra']) else '—'
-                        op_txt    = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
-                        with cols_urg[i % 3]:
-                            arqs_tv_urg = carregar_arquivos_op(int(row['id']))
-                            clipe_badge = f"<div style='margin-top:8px;font-size:12px;color:#475569;'>📎 {len(arqs_tv_urg)} arquivo(s)</div>" if arqs_tv_urg else ""
-                            st.markdown(f"""
-                            <div style='border:2px solid {cfg["border"]};background:{cfg["bg"]};border-radius:10px;padding:18px 20px;margin-bottom:4px;box-shadow:0 4px 12px rgba(0,0,0,0.10);'>
-                                <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;'>
-                                    <span style='font-size:11px;font-weight:700;color:{cfg["tag_color"]};border:1px solid {cfg["border"]};padding:2px 8px;border-radius:4px;'>{cfg["tag"]}</span>
-                                    <span style='font-size:11px;color:#64748B;font-weight:600;'>{dias_txt}</span>
-                                </div>
-                                <div style='font-size:20px;font-weight:800;color:#0F172A;margin-bottom:4px;'>{row["Obra_Vinculada"]}</div>
-                                <div style='font-size:13px;color:#475569;margin-bottom:12px;'>{row["Tipo_Material"]} · {row["Romaneio_Chapas"] or "—"}</div>
-                                <div style='display:grid;grid-template-columns:1fr 1fr;gap:8px;'>
-                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;'>OP</div><div style='font-size:15px;font-weight:700;color:#1E293B;'>{op_txt}</div></div>
-                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;'>M²</div><div style='font-size:15px;font-weight:700;color:#1E293B;'>{row["M2_Item"]:.2f}</div></div>
-                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;'>Status</div><div style='font-size:13px;font-weight:700;color:{ec};'>{em} {row["Status_Item"]}</div></div>
-                                    <div style='background:white;border-radius:6px;padding:8px 10px;'><div style='font-size:10px;color:#94A3B8;text-transform:uppercase;'>Prazo</div><div style='font-size:15px;font-weight:700;color:{cfg["tag_color"]};'>{prazo_fmt}</div></div>
-                                </div>
-                                {clipe_badge}
-                            </div>
-                            """, unsafe_allow_html=True)
-                            if arqs_tv_urg:
-                                with st.expander("📂 Ver arquivos", expanded=False):
-                                    for arq in arqs_tv_urg:
-                                        arq_id, arq_nome, arq_tipo, _, _ = arq
-                                        conteudo_arq = carregar_conteudo_arquivo(arq_id)
-                                        if conteudo_arq:
-                                            _, _, bytes_arq = conteudo_arq
-                                            st.download_button(
-                                                f"⬇️ {arq_nome}", data=bytes(bytes_arq),
-                                                file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
-                                                key=f"tv_urg_dl_{arq_id}"
-                                            )
 
-                if not demais.empty:
-                    st.markdown("---")
-                    st.markdown("<span style='font-size:15px;font-weight:700;color:#334155;'>📋 Demais lotes em andamento</span>", unsafe_allow_html=True)
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    hc = st.columns([2, 3, 2, 2, 2, 1])
-                    for col_h, label in zip(hc, ["OP", "OBRA / MATERIAL", "M²", "STATUS", "PRAZO", ""]):
-                        col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
-                    st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
-                    for _, row in demais.iterrows():
-                        urg = row['_urgencia']
-                        cfg = URG_CONFIG[urg]
-                        em, ec, ebg = STATUS_EMOJI.get(row['Status_Item'], ('❓', '#64748B', '#F8FAFC'))
-                        prazo_fmt = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y') if prazo_valido(row['Data_Limite_Obra']) else '—'
-                        dias      = row['_dias_restantes']
-                        dias_txt  = f"+{dias}d" if dias < 9999 else "—"
-                        op_txt    = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
-                        arqs_tv   = carregar_arquivos_op(int(row['id']))
-                        rc = st.columns([2, 3, 2, 2, 2, 1])
-                        rc[0].markdown(f"<span style='font-size:13px;font-weight:600;color:#1E293B;'>{op_txt}</span>", unsafe_allow_html=True)
-                        rc[1].markdown(f"<span style='font-size:13px;font-weight:700;color:#0F172A;'>{row['Obra_Vinculada']}</span><br><span style='font-size:11px;color:#64748B;'>{row['Tipo_Material']}</span>", unsafe_allow_html=True)
-                        rc[2].markdown(f"<span style='font-size:14px;font-weight:700;color:#1E293B;'>{row['M2_Item']:.2f}</span>", unsafe_allow_html=True)
-                        rc[3].markdown(f"<span style='background:{ebg};color:{ec};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{em} {row['Status_Item']}</span>", unsafe_allow_html=True)
-                        rc[4].markdown(f"<span style='font-size:13px;font-weight:700;color:{cfg['tag_color']};'>{prazo_fmt}</span><br><span style='font-size:11px;color:#94A3B8;'>{dias_txt}</span>", unsafe_allow_html=True)
-                        if arqs_tv:
-                            if rc[5].button(f"📎 {len(arqs_tv)}", key=f"tv_arq_btn_{row['id']}"):
-                                st.session_state[f"tv_arq_open_{row['id']}"] = not st.session_state.get(f"tv_arq_open_{row['id']}", False)
-                        st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
-                        if arqs_tv and st.session_state.get(f"tv_arq_open_{row['id']}", False):
-                            with st.container(border=True):
-                                st.markdown(f"**📂 Arquivos — {op_txt}**")
-                                for arq in arqs_tv:
-                                    arq_id, arq_nome, arq_tipo, arq_enviado_por, _ = arq
-                                    conteudo_arq = carregar_conteudo_arquivo(arq_id)
-                                    if conteudo_arq:
-                                        _, _, bytes_arq = conteudo_arq
-                                        st.download_button(
-                                            f"⬇️ {arq_nome}", data=bytes(bytes_arq),
-                                            file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
-                                            key=f"tv_dl_{arq_id}"
-                                        )
+                producao  = df_tv[df_tv['Status_Item'].isin(['Liberado para Fabrica', 'Parcialmente Concluido'])].sort_values('_dias_restantes')
+                pendentes = df_tv[df_tv['Status_Item'] == 'Pendente'].sort_values('_dias_restantes')
+                concluidos = df_tv[df_tv['Status_Item'] == 'Concluido'].sort_values('Data_Limite_Obra', ascending=False)
+
+                def _card_lote(row, key_prefix):
+                    urg  = row['_urgencia']
+                    cfg  = URG_CONFIG[urg]
+                    dias = row['_dias_restantes']
+                    dias_txt  = f"Vencido há {abs(dias)}d" if dias < 0 else (f"Faltam {dias} dia(s)" if dias < 9999 else "Sem prazo")
+                    em, ec, _ = STATUS_EMOJI.get(row['Status_Item'], ('❓', '#64748B', '#F8FAFC'))
+                    prazo_fmt = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y') if prazo_valido(row['Data_Limite_Obra']) else '—'
+                    op_txt    = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
+                    arqs_tv   = carregar_arquivos_op(int(row['id']))
+                    clipe_badge = f"<div style='margin-top:8px;font-size:11px;color:#475569;'>📎 {len(arqs_tv)} arquivo(s)</div>" if arqs_tv else ""
+                    st.markdown(f"""
+                    <div style='border:2px solid {cfg["border"]};background:{cfg["bg"]};border-radius:10px;padding:14px 16px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,0.08);'>
+                        <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
+                            <span style='font-size:11px;font-weight:700;color:{cfg["tag_color"]};border:1px solid {cfg["border"]};padding:2px 8px;border-radius:4px;'>{cfg["tag"]}</span>
+                            <span style='font-size:11px;color:#64748B;font-weight:600;'>{dias_txt}</span>
+                        </div>
+                        <div style='font-size:16px;font-weight:800;color:#0F172A;margin-bottom:2px;'>{row["Obra_Vinculada"]}</div>
+                        <div style='font-size:12px;color:#475569;margin-bottom:10px;'>{row["Tipo_Material"]} · {row["Romaneio_Chapas"] or "—"}</div>
+                        <div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;'>
+                            <div style='background:white;border-radius:6px;padding:6px 8px;'><div style='font-size:9px;color:#94A3B8;text-transform:uppercase;'>OP</div><div style='font-size:13px;font-weight:700;color:#1E293B;'>{op_txt}</div></div>
+                            <div style='background:white;border-radius:6px;padding:6px 8px;'><div style='font-size:9px;color:#94A3B8;text-transform:uppercase;'>M²</div><div style='font-size:13px;font-weight:700;color:#1E293B;'>{row["M2_Item"]:.2f}</div></div>
+                        </div>
+                        <div style='margin-top:8px;font-size:11px;font-weight:700;color:{cfg["tag_color"]};'>Prazo: {prazo_fmt}</div>
+                        {clipe_badge}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    if arqs_tv:
+                        with st.expander("📂 Ver arquivos", expanded=False):
+                            for arq in arqs_tv:
+                                arq_id, arq_nome, arq_tipo, _, _ = arq
+                                conteudo_arq = carregar_conteudo_arquivo(arq_id)
+                                if conteudo_arq:
+                                    _, _, bytes_arq = conteudo_arq
+                                    st.download_button(
+                                        f"⬇️ {arq_nome}", data=bytes(bytes_arq),
+                                        file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
+                                        key=f"tv_{key_prefix}_dl_{arq_id}"
+                                    )
+
+                col_prod, col_pend, col_conc = st.columns(3)
+                colunas_tv = [
+                    (col_prod, "prod", "#EFF6FF", "#1D4ED8", "🔧 EM PRODUÇÃO", producao,  "Nenhum lote em produção."),
+                    (col_pend, "pend", "#F1F5F9", "#475569", "⏳ PENDENTE",     pendentes, "Nenhum lote pendente."),
+                    (col_conc, "conc", "#F0FDF4", "#15803D", "✅ CONCLUÍDO",    concluidos, "Nenhum lote concluído."),
+                ]
+                for col, prefix, bg, fg, titulo, df_col, msg_vazio in colunas_tv:
+                    with col:
+                        st.markdown(f"""<div style='background:{bg};border-radius:8px;padding:8px 14px;margin-bottom:12px;text-align:center;'>
+                            <span style='color:{fg};font-weight:800;font-size:15px;'>{titulo}</span><br>
+                            <span style='color:{fg};font-size:22px;font-weight:800;'>{len(df_col)}</span>
+                        </div>""", unsafe_allow_html=True)
+                        if df_col.empty:
+                            st.markdown(f"<div style='text-align:center;color:#94A3B8;padding:20px;font-size:13px;'>{msg_vazio}</div>", unsafe_allow_html=True)
+                        else:
+                            for _, row in df_col.iterrows():
+                                _card_lote(row, f"{prefix}_{row['id']}")
 
             progress_val = (30 - segundos_restantes) / 30
             st.markdown("<br>", unsafe_allow_html=True)
@@ -3452,8 +3435,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         ini_ult = max((pd.to_datetime(dt_fim) - timedelta(days=6)).date(), dt_ini)
                         dia = dt_ini
                         while dia <= dt_fim:
-                            r = row.to_dict(); r['_dia'] = dia; r['_pode_concluir'] = (dia >= ini_ult)
-                            registros_exp_esq.append(r)
+                            if dia.weekday() < 5:  # sem producao aos finais de semana
+                                r = row.to_dict(); r['_dia'] = dia; r['_pode_concluir'] = (dia >= ini_ult)
+                                registros_exp_esq.append(r)
                             dia += timedelta(days=1)
                     df_exp_esq = pd.DataFrame(registros_exp_esq)
 
