@@ -702,15 +702,22 @@ def inicializar_banco_de_dados():
             )
         """)
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS insumos_saida (
+            CREATE TABLE IF NOT EXISTS saidas_insumos (
                 id SERIAL PRIMARY KEY,
                 data_saida DATE NOT NULL,
-                descricao TEXT NOT NULL,
-                quantidade NUMERIC NOT NULL,
-                unidade TEXT DEFAULT 'un',
+                obra TEXT,
                 destino TEXT,
                 registrado_por TEXT,
                 criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS saidas_insumos_itens (
+                id SERIAL PRIMARY KEY,
+                saida_id INTEGER REFERENCES saidas_insumos(id) ON DELETE CASCADE,
+                descricao TEXT NOT NULL,
+                quantidade NUMERIC NOT NULL,
+                unidade TEXT DEFAULT 'un'
             )
         """)
         # ── TABELAS DO SISTEMA DE MEDIÇÃO ──────────────────────────
@@ -1679,6 +1686,26 @@ def _inserir_logo_cabecalho(ws, ultima_col_letra: str):
         ws["A1"].font = Font(name="Arial", size=14, bold=True)
         ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
 
+def _inserir_aviso_conferencia(ws, linha: int, ultima_col_letra: str) -> int:
+    """Bloco de aviso de conferencia, igual em todos os romaneios. Retorna a proxima linha livre."""
+    from openpyxl.styles import Alignment
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+    from openpyxl.cell.text import InlineFont
+    normal  = InlineFont(rFont="Arial", sz=10)
+    negrito = InlineFont(rFont="Arial", sz=10, b=True)
+    ws.merge_cells(f"A{linha}:{ultima_col_letra}{linha+2}")
+    cell = ws[f"A{linha}"]
+    cell.value = CellRichText(
+        TextBlock(normal, "Favor "), TextBlock(negrito, "conferir"),
+        TextBlock(normal, " todos os itens constantes neste romaneio antes de assinar o recebimento.\n"),
+        TextBlock(normal, "Certifique-se de que os materiais recebidos estejam em "),
+        TextBlock(negrito, "perfeito estado"), TextBlock(normal, " e em conformidade com o documento.\n"),
+        TextBlock(negrito, "Não serão aceitas"), TextBlock(normal, " reclamações após o recebimento da mercadoria."),
+    )
+    cell.alignment = Alignment(wrap_text=True, vertical="top")
+    ws.row_dimensions[linha].height = 55
+    return linha + 3
+
 def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por: str,
                                 numero_projeto: str = '', etapa: str = '') -> bytes:
     """Gera o romaneio manual .xlsx com a lista de itens (sem OP vinculada)."""
@@ -1762,7 +1789,10 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
     for c in range(1, 8):
         ws.cell(linha, c).border = borda
 
-    linha += 3
+    linha += 2
+    linha = _inserir_aviso_conferencia(ws, linha, "G")
+
+    linha += 1
     assinaturas = ["Recebedor na Obra / Data", "Conferência Almoxarifado"]
     for ass in assinaturas:
         ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=4)
@@ -2055,32 +2085,56 @@ def registrar_romaneio_componentes_emitido(item_id: int, num_op: str, obra: str,
         liberar_conexao(conn)
 
 @st.cache_data(ttl=15)
-def carregar_insumos_saida():
+def carregar_saidas_insumos():
     conn = conectar_banco()
     try:
-        return pd.read_sql_query("SELECT * FROM insumos_saida ORDER BY data_saida DESC, id DESC", conn)
+        return pd.read_sql_query("""
+            SELECT s.id, s.data_saida, s.obra, s.destino, s.registrado_por, s.criado_em,
+                   COUNT(i.id) AS qtd_itens
+            FROM saidas_insumos s LEFT JOIN saidas_insumos_itens i ON i.saida_id = s.id
+            GROUP BY s.id ORDER BY s.data_saida DESC, s.id DESC
+        """, conn)
     except Exception:
         return pd.DataFrame()
     finally:
         liberar_conexao(conn)
 
-def salvar_insumo_saida(data_saida, descricao: str, quantidade: float, unidade: str, destino: str, usuario: str):
-    """Registro simples de saida de insumo do almoxarifado — sem controle de entrada/saldo,
-    so pra dar visibilidade do que saiu, quando e pra onde."""
+@st.cache_data(ttl=15)
+def carregar_itens_saida_insumos(saida_id: int):
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            "SELECT id, descricao, quantidade, unidade FROM saidas_insumos_itens WHERE saida_id=%s ORDER BY id",
+            conn, params=(saida_id,)
+        )
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
+def salvar_saida_insumos(data_saida, obra: str, destino: str, itens: list, usuario: str):
+    """Saida de insumos (parafuso, broca, lima etc) do almoxarifado — igual qualquer outra
+    saida de material, so que manual porque nao esta vinculada a uma OP. Obra e opcional."""
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO insumos_saida (data_saida, descricao, quantidade, unidade, destino, registrado_por)
-            VALUES (%s,%s,%s,%s,%s,%s)
-        """, (data_saida, descricao, quantidade, unidade, destino, usuario))
+            INSERT INTO saidas_insumos (data_saida, obra, destino, registrado_por)
+            VALUES (%s,%s,%s,%s) RETURNING id
+        """, (data_saida, obra or None, destino, usuario))
+        saida_id = cursor.fetchone()[0]
+        for item in itens:
+            cursor.execute("""
+                INSERT INTO saidas_insumos_itens (saida_id, descricao, quantidade, unidade)
+                VALUES (%s,%s,%s,%s)
+            """, (saida_id, item['descricao'], item['quantidade'], item['unidade']))
         conn.commit()
-        carregar_insumos_saida.clear()
-        return True
+        carregar_saidas_insumos.clear()
+        return saida_id
     except Exception as e:
         conn.rollback()
-        st.error(f"Erro ao registrar saída de insumo: {e}")
-        return False
+        st.error(f"Erro ao registrar saída de insumos: {e}")
+        return None
     finally:
         liberar_conexao(conn)
 
@@ -2438,8 +2492,9 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
     for c in range(1, 6):
         ws.cell(linha, c).border = borda
 
-    # Perguntas de conferência
+    # Perguntas de conferência (com borda ao redor do bloco inteiro)
     linha += 2
+    linha_perguntas_ini = linha
     perguntas = [
         "Possui lista de componentes?",
         "Envio de projeto/imagem complementar?",
@@ -2449,11 +2504,19 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
         ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=3)
         ws.cell(linha, 2, " SIM                                       NÃO").font = Font(name="Calibri", size=11, bold=True)
         linha += 1
+    for r in range(linha_perguntas_ini, linha):
+        for c in range(1, 4):
+            ws.cell(r, c).border = borda
+
+    # Aviso de conferência (igual em todos os romaneios)
+    linha += 2
+    linha = _inserir_aviso_conferencia(ws, linha, "E")
 
     # Assinaturas
-    linha += 2
+    linha += 1
     assinaturas = [
         "Conferência Interna",
+        "Assinatura líder do setor",
         "Nome Motorista / Data",
         "Recebedor na Obra / Data",
         "Engenheiro Responsável",
@@ -2547,7 +2610,10 @@ def gerar_romaneio_componentes_xlsx(obra: str, num_op: str, cod_lote: str, compo
     for c in range(1, 5):
         ws.cell(linha, c).border = borda
 
-    linha += 3
+    linha += 2
+    linha = _inserir_aviso_conferencia(ws, linha, "D")
+
+    linha += 1
     assinaturas = ["Almoxarifado", "Recebedor / Produção"]
     for ass in assinaturas:
         ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=2)
@@ -2555,6 +2621,93 @@ def gerar_romaneio_componentes_xlsx(obra: str, num_op: str, cod_lote: str, compo
         ws.cell(linha+1, 1, ass).font = Font(name="Arial", size=10, bold=True)
         ws.cell(linha, 3, "____/____/______").font = Font(name="Arial", size=11)
         linha += 3
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+def gerar_romaneio_insumos_xlsx(saida_row, itens_df) -> bytes:
+    """Romaneio de saida de insumos (parafuso, broca, lima etc) do almoxarifado —
+    igual qualquer outra saida de material, so que manual, sem OP vinculada."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from io import BytesIO
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Romaneio"
+    ws.sheet_view.showGridLines = False
+    ws.page_setup.orientation = "portrait"
+
+    bd = Side(style='thin', color="000000")
+    borda = Border(left=bd, right=bd, top=bd, bottom=bd)
+    fill_cab = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    fill_sub = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+
+    ws.column_dimensions['A'].width = 30
+    ws.column_dimensions['B'].width = 16
+    ws.column_dimensions['C'].width = 16
+
+    ws.merge_cells("A1:C1")
+    _inserir_logo_cabecalho(ws, "C")
+
+    ws.merge_cells("A2:C2")
+    ws["A2"] = "ROMANEIO DE SAÍDA DE INSUMOS"
+    ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+    ws["A2"].fill = fill_cab
+    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    infos = [
+        ("Data:", pd.to_datetime(saida_row.get('data_saida')).strftime('%d/%m/%Y')),
+        ("Obra:", str(saida_row.get('obra') or '—')),
+        ("Destino:", str(saida_row.get('destino') or '—')),
+        ("Registrado por:", str(saida_row.get('registrado_por') or '—')),
+    ]
+    linha = 3
+    for label, valor in infos:
+        ws.cell(linha, 1, label).font = Font(name="Arial", size=11, bold=True)
+        ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=3)
+        ws.cell(linha, 2, valor).font = Font(name="Arial", size=11)
+        for c in range(1, 4):
+            ws.cell(linha, c).border = borda
+        linha += 1
+
+    linha += 1
+    titulos = ["DESCRIÇÃO DO INSUMO", "QUANTIDADE", "UNIDADE"]
+    for col, titulo in enumerate(titulos, 1):
+        cel = ws.cell(linha, col, titulo)
+        cel.font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        cel.fill = fill_cab
+        cel.alignment = Alignment(horizontal="center", vertical="center")
+        cel.border = borda
+    linha += 1
+
+    for i, (_, item) in enumerate(itens_df.iterrows()):
+        dados = [item.get('descricao', ''), item.get('quantidade', 0), item.get('unidade', '')]
+        for col, val in enumerate(dados, 1):
+            cel = ws.cell(linha, col, val)
+            cel.font = Font(name="Arial", size=11)
+            cel.alignment = Alignment(horizontal="center", vertical="center")
+            cel.border = borda
+            if i % 2 == 0:
+                cel.fill = fill_sub
+        linha += 1
+
+    linha += 1
+    ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=1)
+    ws.cell(linha, 1, "TOTAL DE ITENS:").font = Font(name="Arial", size=11, bold=True)
+    ws.cell(linha, 2, len(itens_df)).font = Font(name="Arial", size=11, bold=True)
+    for c in range(1, 4):
+        ws.cell(linha, c).border = borda
+
+    linha += 2
+    linha = _inserir_aviso_conferencia(ws, linha, "C")
+
+    linha += 1
+    ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=2)
+    ws.cell(linha, 1).border = Border(bottom=bd)
+    ws.cell(linha+1, 1, "Retirado por / Data").font = Font(name="Arial", size=10, bold=True)
 
     buf = BytesIO()
     wb.save(buf)
@@ -6059,46 +6212,88 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
             st.markdown("---")
             with st.expander("📤 Saída de Insumos  ·  materiais de consumo/apoio", expanded=False):
-                st.caption("Registro simples do que saiu do almoxarifado — sem controle de estoque, só pra acompanhar.")
+                st.caption("Saída de material manual (parafuso, broca, lima etc) — igual qualquer outra saída, só que sem OP vinculada. Obra é opcional.")
                 obras_insumo = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
-                ii1, ii2 = st.columns(2)
+                ii1, ii2, ii3 = st.columns(3)
                 with ii1:
                     insumo_data = st.date_input("Data de saída:", value=hoje_projeto().date(), format="DD/MM/YYYY", key="insumo_data")
                 with ii2:
-                    insumo_destino = st.selectbox("Destino:", ["Uso Interno / Produção"] + obras_insumo, key="insumo_destino")
-                ii3, ii4, ii5 = st.columns([4, 2, 2])
+                    insumo_obra = st.selectbox("Obra (opcional):", ["— Sem obra vinculada —"] + obras_insumo, key="insumo_obra")
                 with ii3:
-                    insumo_desc = st.text_input("Descrição do insumo:", key="insumo_desc",
-                                                 placeholder="Ex: Parafuso M6, Silicone, Fita dupla face...")
+                    insumo_destino = st.text_input("Destino:", key="insumo_destino", placeholder="Ex: Produção, Obra tal, Manutenção...")
+
+                if "insumo_itens" not in st.session_state:
+                    st.session_state.insumo_itens = []
+
+                st.markdown("**Adicionar item:**")
+                ii4, ii5, ii6, ii7 = st.columns([4, 2, 2, 1])
                 with ii4:
-                    insumo_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="insumo_qtd")
+                    insumo_desc = st.text_input("Descrição do insumo:", key="insumo_desc",
+                                                 placeholder="Ex: Parafuso M6, Broca 8mm, Lima...")
                 with ii5:
+                    insumo_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="insumo_qtd")
+                with ii6:
                     insumo_unidade = st.selectbox("Unidade:", ["un", "kg", "m", "cx", "pç", "rolo", "L"], key="insumo_unidade")
-                if st.button("➕ Registrar Saída", key="btn_salvar_insumo", type="primary"):
-                    if not insumo_desc.strip():
-                        st.error("Informe a descrição do insumo.")
-                    else:
-                        if salvar_insumo_saida(insumo_data, insumo_desc.strip(), insumo_qtd, insumo_unidade,
-                                               insumo_destino, st.session_state.usuario_nome):
-                            registrar_auditoria(st.session_state.usuario_nome, "SAIDA_INSUMO",
-                                f"{insumo_desc.strip()} — {insumo_qtd:g} {insumo_unidade} — Destino: {insumo_destino}")
+                with ii7:
+                    st.write("")
+                    st.write("")
+                    if st.button("➕", key="btn_add_insumo_item"):
+                        if not insumo_desc.strip():
+                            st.error("Informe a descrição do insumo.")
+                        else:
+                            st.session_state.insumo_itens.append({
+                                "descricao": insumo_desc.strip(), "quantidade": insumo_qtd, "unidade": insumo_unidade
+                            })
+                            st.rerun()
+
+                if st.session_state.insumo_itens:
+                    st.markdown("**Itens desta saída:**")
+                    for i, item in enumerate(st.session_state.insumo_itens):
+                        col_desc, col_qtd, col_rem = st.columns([5, 2, 1])
+                        col_desc.write(f"{i+1}. {item['descricao']}")
+                        col_qtd.write(f"{item['quantidade']:g} {item['unidade']}")
+                        with col_rem:
+                            if st.button("🗑", key=f"rem_insumo_item_{i}"):
+                                st.session_state.insumo_itens.pop(i)
+                                st.rerun()
+
+                    if st.button("💾 Registrar Saída", key="btn_salvar_insumo", type="primary"):
+                        obra_final = None if insumo_obra == "— Sem obra vinculada —" else insumo_obra
+                        saida_id = salvar_saida_insumos(
+                            insumo_data, obra_final, insumo_destino.strip(),
+                            st.session_state.insumo_itens, st.session_state.usuario_nome
+                        )
+                        if saida_id:
+                            registrar_auditoria(st.session_state.usuario_nome, "SAIDA_INSUMOS",
+                                f"Saída #{saida_id} — {len(st.session_state.insumo_itens)} item(ns) — Destino: {insumo_destino.strip()}")
+                            st.session_state.insumo_itens = []
                             st.toast("Saída registrada!")
                             time.sleep(0.3)
                             st.rerun()
+                else:
+                    st.caption("Nenhum item adicionado ainda.")
 
+                st.markdown("---")
                 st.markdown("#### Histórico de Saídas")
-                df_insumos = carregar_insumos_saida()
-                if df_insumos.empty:
+                df_saidas = carregar_saidas_insumos()
+                if df_saidas.empty:
                     st.caption("Nenhuma saída registrada ainda.")
                 else:
-                    df_insumos_show = df_insumos.copy()
-                    df_insumos_show['data_saida'] = pd.to_datetime(df_insumos_show['data_saida']).dt.strftime('%d/%m/%Y')
-                    st.dataframe(
-                        df_insumos_show[['data_saida', 'descricao', 'quantidade', 'unidade', 'destino', 'registrado_por']]
-                            .rename(columns={'data_saida': 'Data', 'descricao': 'Descrição', 'quantidade': 'Qtd',
-                                             'unidade': 'Un', 'destino': 'Destino', 'registrado_por': 'Registrado por'}),
-                        hide_index=True, use_container_width=True
-                    )
+                    for _, saida_row in df_saidas.iterrows():
+                        with st.expander(
+                            f"{pd.to_datetime(saida_row['data_saida']).strftime('%d/%m/%Y')} — "
+                            f"{saida_row.get('obra') or 'Sem obra'} — {saida_row.get('destino') or '—'} "
+                            f"({int(saida_row['qtd_itens'])} item(ns)) — por {saida_row['registrado_por']}"
+                        ):
+                            df_itens_saida = carregar_itens_saida_insumos(int(saida_row['id']))
+                            st.dataframe(df_itens_saida[['descricao', 'quantidade', 'unidade']], hide_index=True, use_container_width=True)
+                            rom_insumo_bytes = gerar_romaneio_insumos_xlsx(saida_row, df_itens_saida)
+                            st.download_button(
+                                "🖨️ Emitir Romaneio", data=rom_insumo_bytes,
+                                file_name=f"Romaneio_Insumos_{pd.to_datetime(saida_row['data_saida']).strftime('%Y%m%d')}_{int(saida_row['id'])}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"dl_saida_insumo_{saida_row['id']}"
+                            )
 
     # ==================================================
     # ROMANEIO MANUAL (sem OP vinculada)
