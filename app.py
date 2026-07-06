@@ -3332,20 +3332,20 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     prazo_fmt = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y') if prazo_valido(row['Data_Limite_Obra']) else '—'
                     op_txt    = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
                     arqs_tv   = carregar_arquivos_op(int(row['id']))
-                    clipe_badge = f"<div style='margin-top:8px;font-size:11px;color:#475569;'>📎 {len(arqs_tv)} arquivo(s)</div>" if arqs_tv else ""
+                    clipe_badge = f"<div style='margin-top:6px;font-size:10px;color:#475569;'>📎 {len(arqs_tv)} arquivo(s)</div>" if arqs_tv else ""
                     st.markdown(f"""
-                    <div style='border:2px solid {cfg["border"]};background:{cfg["bg"]};border-radius:10px;padding:14px 16px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,0.08);'>
-                        <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
-                            <span style='font-size:11px;font-weight:700;color:{cfg["tag_color"]};border:1px solid {cfg["border"]};padding:2px 8px;border-radius:4px;'>{cfg["tag"]}</span>
-                            <span style='font-size:11px;color:#64748B;font-weight:600;'>{dias_txt}</span>
+                    <div style='border:1.5px solid {cfg["border"]};background:{cfg["bg"]};border-radius:8px;padding:10px 12px;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,0.06);'>
+                        <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;'>
+                            <span style='font-size:10px;font-weight:700;color:{cfg["tag_color"]};border:1px solid {cfg["border"]};padding:1px 6px;border-radius:4px;'>{cfg["tag"]}</span>
+                            <span style='font-size:10px;color:#64748B;font-weight:600;'>{dias_txt}</span>
                         </div>
-                        <div style='font-size:16px;font-weight:800;color:#0F172A;margin-bottom:2px;'>{row["Obra_Vinculada"]}</div>
-                        <div style='font-size:12px;color:#475569;margin-bottom:10px;'>{row["Tipo_Material"]} · {row["Romaneio_Chapas"] or "—"}</div>
-                        <div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;'>
-                            <div style='background:white;border-radius:6px;padding:6px 8px;'><div style='font-size:9px;color:#94A3B8;text-transform:uppercase;'>OP</div><div style='font-size:13px;font-weight:700;color:#1E293B;'>{op_txt}</div></div>
-                            <div style='background:white;border-radius:6px;padding:6px 8px;'><div style='font-size:9px;color:#94A3B8;text-transform:uppercase;'>M²</div><div style='font-size:13px;font-weight:700;color:#1E293B;'>{row["M2_Item"]:.2f}</div></div>
+                        <div style='font-size:14px;font-weight:800;color:#0F172A;margin-bottom:2px;'>{row["Obra_Vinculada"]}</div>
+                        <div style='font-size:11px;color:#475569;margin-bottom:8px;'>{row["Tipo_Material"]} · {row["Romaneio_Chapas"] or "—"}</div>
+                        <div style='display:grid;grid-template-columns:1fr 1fr;gap:5px;'>
+                            <div style='background:white;border-radius:5px;padding:5px 7px;'><div style='font-size:8px;color:#94A3B8;text-transform:uppercase;'>OP</div><div style='font-size:12px;font-weight:700;color:#1E293B;'>{op_txt}</div></div>
+                            <div style='background:white;border-radius:5px;padding:5px 7px;'><div style='font-size:8px;color:#94A3B8;text-transform:uppercase;'>M²</div><div style='font-size:12px;font-weight:700;color:#1E293B;'>{row["M2_Item"]:.2f}</div></div>
                         </div>
-                        <div style='margin-top:8px;font-size:11px;font-weight:700;color:{cfg["tag_color"]};'>Prazo: {prazo_fmt}</div>
+                        <div style='margin-top:6px;font-size:10px;font-weight:700;color:{cfg["tag_color"]};'>Prazo: {prazo_fmt}</div>
                         {clipe_badge}
                     </div>
                     """, unsafe_allow_html=True)
@@ -3370,15 +3370,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 ]
                 for col, prefix, bg, fg, titulo, df_col, msg_vazio in colunas_tv:
                     with col:
-                        st.markdown(f"""<div style='background:{bg};border-radius:8px;padding:8px 14px;margin-bottom:12px;text-align:center;'>
-                            <span style='color:{fg};font-weight:800;font-size:15px;'>{titulo}</span><br>
-                            <span style='color:{fg};font-size:22px;font-weight:800;'>{len(df_col)}</span>
-                        </div>""", unsafe_allow_html=True)
-                        if df_col.empty:
-                            st.markdown(f"<div style='text-align:center;color:#94A3B8;padding:20px;font-size:13px;'>{msg_vazio}</div>", unsafe_allow_html=True)
-                        else:
-                            for _, row in df_col.iterrows():
-                                _card_lote(row, f"{prefix}_{row['id']}")
+                        with st.container(border=True):
+                            st.markdown(f"""<div style='background:{bg};border-top:3px solid {fg};border-radius:6px;padding:6px 12px;margin-bottom:10px;text-align:center;'>
+                                <span style='color:{fg};font-weight:800;font-size:13px;'>{titulo}</span><br>
+                                <span style='color:{fg};font-size:19px;font-weight:800;'>{len(df_col)}</span>
+                            </div>""", unsafe_allow_html=True)
+                            if df_col.empty:
+                                st.markdown(f"<div style='text-align:center;color:#94A3B8;padding:16px;font-size:12px;'>{msg_vazio}</div>", unsafe_allow_html=True)
+                            else:
+                                for _, row in df_col.iterrows():
+                                    _card_lote(row, f"{prefix}_{row['id']}")
 
             progress_val = (30 - segundos_restantes) / 30
             st.markdown("<br>", unsafe_allow_html=True)
