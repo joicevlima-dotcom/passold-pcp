@@ -4571,7 +4571,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         conn_av2 = conectar_banco()
                         try:
                             cursor_av2 = conn_av2.cursor()
-                            cursor_av2.execute("SELECT COUNT(*) FROM itens_detalhado WHERE EDT_Vinculado='AVULSO'")
+                            cursor_av2.execute(
+                                "SELECT COUNT(DISTINCT Cod_Lote) FROM itens_detalhado WHERE Cod_Lote ~ '^OP-[0-9]+ - '"
+                            )
                             seq_av = cursor_av2.fetchone()[0] + 1
                             cod_lote_av = f"OP-{str(seq_av).zfill(2)} - {av_projeto} - {av_obra}"
                             for item in st.session_state.av_itens:
