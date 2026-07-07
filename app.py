@@ -600,6 +600,18 @@ def inicializar_banco_de_dados():
             )
         """)
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS arquivos_romaneio_devolvido (
+                id SERIAL PRIMARY KEY,
+                tipo_origem TEXT NOT NULL,
+                origem_id INTEGER NOT NULL,
+                nome_arquivo TEXT NOT NULL,
+                tipo_arquivo TEXT,
+                conteudo BYTEA NOT NULL,
+                enviado_por TEXT,
+                enviado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS romaneios_manuais (
                 id SERIAL PRIMARY KEY,
                 obra_vinculada TEXT NOT NULL,
@@ -1537,7 +1549,7 @@ def resetar_banco_dados_completo(usuario=None):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
-        for tabela in ['arquivos_op', 'arquivos_solicitacao_op', 'solicitacoes_op', 'op_pecas', 'componentes_op',
+        for tabela in ['arquivos_op', 'arquivos_romaneio_devolvido', 'arquivos_solicitacao_op', 'solicitacoes_op', 'op_pecas', 'componentes_op',
                        'cronograma_macro', 'itens_detalhado', 'solicitacoes_prazo', 'logistica_envios',
                        'medicao_historico', 'medicao_subdivisoes', 'medicao_servicos', 'medicao_obras', 'auditoria_log']:
             cursor.execute(f"DELETE FROM {tabela}")
@@ -1605,6 +1617,76 @@ def deletar_arquivo_op(arquivo_id: int):
     try:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM arquivos_op WHERE id=%s", (arquivo_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao deletar arquivo: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
+def salvar_arquivo_romaneio_devolvido(tipo_origem: str, origem_id: int, nome: str, tipo: str, conteudo: bytes, usuario: str):
+    """tipo_origem: 'OP' (item de itens_detalhado) ou 'INSUMO' (saida de saidas_insumos)."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO arquivos_romaneio_devolvido (tipo_origem, origem_id, nome_arquivo, tipo_arquivo, conteudo, enviado_por) VALUES (%s,%s,%s,%s,%s,%s)",
+            (tipo_origem, origem_id, nome, tipo, conteudo, usuario)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar arquivo: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
+def carregar_arquivos_romaneio_devolvido(tipo_origem: str, origem_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, nome_arquivo, tipo_arquivo, enviado_por, enviado_em FROM arquivos_romaneio_devolvido "
+            "WHERE tipo_origem=%s AND origem_id=%s ORDER BY enviado_em DESC",
+            (tipo_origem, origem_id)
+        )
+        return cursor.fetchall()
+    except Exception:
+        return []
+    finally:
+        liberar_conexao(conn)
+
+def carregar_status_romaneios_devolvidos():
+    """Conjunto de (tipo_origem, origem_id) que ja tem pelo menos 1 anexo — evita 1 query por linha na listagem."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT tipo_origem, origem_id FROM arquivos_romaneio_devolvido")
+        return set(cursor.fetchall())
+    except Exception:
+        return set()
+    finally:
+        liberar_conexao(conn)
+
+def carregar_conteudo_arquivo_romaneio_devolvido(arquivo_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT nome_arquivo, tipo_arquivo, conteudo FROM arquivos_romaneio_devolvido WHERE id=%s", (arquivo_id,))
+        return cursor.fetchone()
+    except Exception:
+        return None
+    finally:
+        liberar_conexao(conn)
+
+def deletar_arquivo_romaneio_devolvido(arquivo_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM arquivos_romaneio_devolvido WHERE id=%s", (arquivo_id,))
         conn.commit()
         return True
     except Exception as e:
@@ -3000,6 +3082,7 @@ GRUPOS_NAV = {
         "Logistica":      ("🚚  Logística",       ["Master","Logistica"]),
         "Almoxarifado":   ("📦  Almoxarifado",    ["Master","Almoxarifado"]),
         "Romaneio Manual": ("📋  Romaneio Manual", ["Master","Almoxarifado","PCP"]),
+        "Romaneios Devolvidos": ("🗂️  Romaneios Devolvidos", ["Master"]),
     },
     "📊  Relatórios": {
         "Relatorio Geral":    ("📊  Relatório Geral",    ["Master","Diretoria","PCP","Medicao"]),
@@ -3145,6 +3228,7 @@ _ICONES_ACAO = {
     "GERAR_LOTE": "⚙️", "EXCLUIR_LOTE": "🗑️",
     "CADASTRAR_OBRA": "🏗️", "CADASTRAR_FRENTE": "📐",
     "ENVIO_TOTAL": "🚚", "DESPACHO_LOGISTICA": "🚚",
+    "ROMANEIO_DEVOLVIDO": "🗂️",
 }
 
 # Filtros de notificação por setor — cada setor vê só o que lhe interessa
@@ -3175,6 +3259,7 @@ _TITULOS_NOTIF = {
     "EXCLUIR_FRENTE":         "Frente excluída",
     "EXCLUIR_LOTE":           "Lote excluído",
     "CRIAR_USUARIO":          "Novo usuário criado",
+    "ROMANEIO_DEVOLVIDO":     "Romaneio devolvido anexado",
 }
 
 _ACOES_AUDITORIA = ["LOGIN", "LOGOUT"]   # só Master vê no painel de auditoria
@@ -6483,6 +6568,105 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     st.toast("Romaneio removido.")
                                     time.sleep(0.3)
                                     st.rerun()
+
+    # ==================================================
+    # ROMANEIOS DEVOLVIDOS — controle de conferencia (Master)
+    # ==================================================
+    elif nome_aba == "Romaneios Devolvidos":
+        with aba_objeto:
+            if setor != "Master":
+                st.error("⛔ Acesso negado. Apenas usuários Master podem acessar esta página.")
+                st.stop()
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Romaneios Devolvidos</h2><p>Controle de romaneios de OP e de Insumos que voltaram assinados da obra/produção</p></div><span class="page-icon">🗂️</span></div>', unsafe_allow_html=True)
+
+            status_rd = carregar_status_romaneios_devolvidos()
+            filtro_rd = st.radio("Mostrar:", ["Pendentes", "Todos"], horizontal=True, key="rd_filtro_status")
+
+            def _bloco_anexo_rd(tipo_origem: str, origem_id: int, key_prefix: str):
+                arqs_rd = carregar_arquivos_romaneio_devolvido(tipo_origem, origem_id)
+                with st.expander(f"📎 Anexos ({len(arqs_rd)})", expanded=False):
+                    up_rd = st.file_uploader(
+                        "Anexar romaneio assinado (foto ou PDF):",
+                        type=["pdf", "png", "jpg", "jpeg"], key=f"rd_up_{key_prefix}"
+                    )
+                    if up_rd is not None:
+                        if st.button("💾 Salvar", key=f"rd_btn_{key_prefix}", type="primary"):
+                            ok_rd = salvar_arquivo_romaneio_devolvido(
+                                tipo_origem, origem_id, up_rd.name, up_rd.type or "",
+                                up_rd.read(), st.session_state.usuario_nome
+                            )
+                            if ok_rd:
+                                registrar_auditoria(st.session_state.usuario_nome, "ROMANEIO_DEVOLVIDO",
+                                    f"Tipo: {tipo_origem} | ID: {origem_id} | Arquivo: {up_rd.name}")
+                                st.toast("✅ Romaneio devolvido anexado!")
+                                time.sleep(0.3)
+                                st.rerun()
+                    if arqs_rd:
+                        for arq_rd in arqs_rd:
+                            arq_id, arq_nome, arq_tipo, arq_por, arq_em = arq_rd
+                            cra, crb, crc = st.columns([4, 2, 1])
+                            cra.markdown(f"📄 **{html_escape(arq_nome)}**")
+                            crb.caption(f"{arq_por} — {pd.to_datetime(arq_em).strftime('%d/%m/%Y %H:%M')}")
+                            with crc:
+                                cont_rd = carregar_conteudo_arquivo_romaneio_devolvido(arq_id)
+                                if cont_rd:
+                                    _, _, bytes_rd = cont_rd
+                                    st.download_button(
+                                        "⬇️", data=bytes(bytes_rd), file_name=arq_nome,
+                                        mime=arq_tipo or "application/octet-stream", key=f"rd_dl_{key_prefix}_{arq_id}"
+                                    )
+                            if st.button("🗑️ Remover", key=f"rd_del_{key_prefix}_{arq_id}"):
+                                deletar_arquivo_romaneio_devolvido(arq_id)
+                                st.toast("Anexo removido.")
+                                time.sleep(0.3)
+                                st.rerun()
+                    else:
+                        st.caption("Nenhum anexo ainda.")
+
+            tab_rd_op, tab_rd_ins = st.tabs(["📋 Romaneios de OP / Peças", "📦 Romaneios de Insumos"])
+
+            with tab_rd_op:
+                df_rd_op = df_banco_micro[df_banco_micro['Num_OP'].notna()].copy() if not df_banco_micro.empty else pd.DataFrame()
+                if not df_rd_op.empty:
+                    df_rd_op['_devolvido'] = df_rd_op['id'].apply(lambda i: ('OP', int(i)) in status_rd)
+                    if filtro_rd == "Pendentes":
+                        df_rd_op = df_rd_op[~df_rd_op['_devolvido']]
+                    df_rd_op = df_rd_op.sort_values('Data_Despacho', ascending=False, na_position='last')
+                if df_rd_op.empty:
+                    st.info("Nenhum romaneio de OP pendente de devolução." if filtro_rd == "Pendentes" else "Nenhum romaneio de OP encontrado.")
+                else:
+                    for _, row_rd in df_rd_op.iterrows():
+                        item_id_rd = int(row_rd['id'])
+                        badge_rd = "🟢 Devolvido assinado" if row_rd['_devolvido'] else "🔴 Pendente"
+                        with st.container(border=True):
+                            crop1, crop2 = st.columns([4, 1])
+                            with crop1:
+                                st.markdown(f"**{row_rd['Num_OP']}** — {row_rd['Obra_Vinculada']} · {row_rd.get('Cod_Lote','')}")
+                                st.caption(f"{row_rd.get('Tipo_Material','—')}")
+                            with crop2:
+                                st.markdown(badge_rd)
+                            _bloco_anexo_rd('OP', item_id_rd, f"op_{item_id_rd}")
+
+            with tab_rd_ins:
+                df_rd_ins = carregar_saidas_insumos()
+                if not df_rd_ins.empty:
+                    df_rd_ins['_devolvido'] = df_rd_ins['id'].apply(lambda i: ('INSUMO', int(i)) in status_rd)
+                    if filtro_rd == "Pendentes":
+                        df_rd_ins = df_rd_ins[~df_rd_ins['_devolvido']]
+                if df_rd_ins.empty:
+                    st.info("Nenhuma saída de insumos pendente de devolução." if filtro_rd == "Pendentes" else "Nenhuma saída de insumos encontrada.")
+                else:
+                    for _, row_ri in df_rd_ins.iterrows():
+                        saida_id_rd = int(row_ri['id'])
+                        badge_ri = "🟢 Devolvido assinado" if row_ri['_devolvido'] else "🔴 Pendente"
+                        with st.container(border=True):
+                            cins1, cins2 = st.columns([4, 1])
+                            with cins1:
+                                st.markdown(f"**Saída #{saida_id_rd}** — {row_ri.get('obra') or 'Sem obra vinculada'} · {row_ri.get('destino','')}")
+                                st.caption(f"{pd.to_datetime(row_ri['data_saida']).strftime('%d/%m/%Y')} · {int(row_ri.get('qtd_itens') or 0)} item(ns) · {row_ri.get('registrado_por','—')}")
+                            with cins2:
+                                st.markdown(badge_ri)
+                            _bloco_anexo_rd('INSUMO', saida_id_rd, f"ins_{saida_id_rd}")
 
     # ==================================================
     # SISTEMA DE MEDICAO — agora 100% no banco
