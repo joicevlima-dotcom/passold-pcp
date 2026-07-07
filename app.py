@@ -4313,91 +4313,138 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
     elif nome_aba == "Painel TV — Esquadrias":
         with aba_objeto:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Painel TV — Esquadrias</h2><p>Visão de chão de fábrica para exibição em televisão</p></div><span class="page-icon">📺</span></div>', unsafe_allow_html=True)
-
-            if not df_banco_micro.empty:
-                df_tv_esq = df_banco_micro[
-                    df_banco_micro['Status_Item'].isin(["Liberado para Fabrica","Parcialmente Concluido"]) &
-                    (df_banco_micro['Escopo'] == 'Esquadria-Vidro')
-                ].copy()
-            else:
-                df_tv_esq = pd.DataFrame()
-
-            hoje_ts = pd.Timestamp.now().normalize()
-            if not df_tv_esq.empty:
-                df_tv_esq['_limite'] = pd.to_datetime(df_tv_esq['Data_Limite_Obra'], errors='coerce')
-                df_tv_esq['_dias_rest'] = (df_tv_esq['_limite'] - hoje_ts).dt.days
-                urgentes_esq = df_tv_esq[df_tv_esq['_dias_rest'] <= 5].copy()
+            if 'tv_esq_last_refresh' not in st.session_state:
+                st.session_state.tv_esq_last_refresh = time.time()
+            agora_esq   = time.time()
+            elapsed_esq = agora_esq - st.session_state.tv_esq_last_refresh
+            segundos_restantes_esq = max(0, int(30 - elapsed_esq))
 
             st.markdown(f"""
-            <div style='background:linear-gradient(135deg,#0F172A 0%,#1E3A8A 100%);
-                        padding:18px 28px;border-radius:12px;display:flex;
-                        align-items:center;justify-content:space-between;margin-bottom:24px;'>
+            <div style='background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 100%);
+                        padding: 18px 28px; border-radius: 12px; display: flex;
+                        align-items: center; justify-content: space-between; margin-bottom: 24px;'>
                 <div>
-                    <div style='color:#FFFFFF;font-size:2rem;font-weight:800;letter-spacing:-0.03em;'>
-                        Producao — Esquadrias & Vidro
-                    </div>
-                    <div style='color:#94A3B8;font-size:1rem;margin-top:4px;'>
-                        {hoje_ts.strftime('%d/%m/%Y')} &nbsp;|&nbsp; {len(df_tv_esq)} lote(s) ativos
-                    </div>
+                    <span style='color:#FFFFFF;font-size:26px;font-weight:800;letter-spacing:-0.03em;'>
+                        Passold — Painel de Produção Esquadrias
+                    </span><br>
+                    <span style='color:#93C5FD;font-size:13px;'>
+                        {datetime.now(FUSO_BR).strftime('%d/%m/%Y  %H:%M')}
+                    </span>
+                </div>
+                <div style='text-align:right;'>
+                    <span style='color:#94A3B8;font-size:12px;'>Atualiza em</span><br>
+                    <span style='color:#FCD34D;font-size:22px;font-weight:700;'>{segundos_restantes_esq}s</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
+            df_tv_esq = carregar_micro()
             if not df_tv_esq.empty:
-                tv_k1, tv_k2, tv_k3, tv_k4 = st.columns(4)
-                tv_k1.metric("Lotes ativos", len(df_tv_esq))
-                tv_k2.metric("Total unidades", int(df_tv_esq['Qtd_Caixas'].sum()))
-                kg_col = df_tv_esq['Peso_Kg'].sum() if 'Peso_Kg' in df_tv_esq.columns else 0
-                tv_k3.metric("Total kg", f"{kg_col:,.2f}")
-                tv_k4.metric("Criticos (≤5 dias)", len(urgentes_esq) if not df_tv_esq.empty else 0)
-                st.markdown("---")
+                df_tv_esq = df_tv_esq[df_tv_esq['Escopo'] == 'Esquadria-Vidro']
+            if df_tv_esq.empty:
+                st.markdown("<div style='text-align:center;padding:60px;color:#94A3B8;font-size:20px;'>Nenhum lote de Esquadrias/Vidro cadastrado.</div>", unsafe_allow_html=True)
+            else:
+                def urgencia_esq(row):
+                    if row.get('Status_Item') == 'Concluido': return 'concluido'
+                    prazo = row.get('Data_Limite_Obra')
+                    if not prazo_valido(prazo): return 'sem_prazo'
+                    dias = (pd.to_datetime(prazo).normalize() - hoje_projeto()).days
+                    if dias < 0:   return 'vencido'
+                    if dias <= 3:  return 'critico'
+                    if dias <= 5:  return 'atencao'
+                    return 'ok'
 
-                if not urgentes_esq.empty:
+                df_tv_esq['_urgencia'] = df_tv_esq.apply(urgencia_esq, axis=1)
+                df_tv_esq['_dias_restantes'] = df_tv_esq['Data_Limite_Obra'].apply(
+                    lambda x: (pd.to_datetime(x).normalize() - hoje_projeto()).days if prazo_valido(x) else 9999
+                )
+                df_tv_esq = df_tv_esq.sort_values('_dias_restantes')
+
+                URG_CONFIG_ESQ = {
+                    'vencido':   {'border': '#DC2626', 'bg': '#FEF2F2', 'tag': '🔴 VENCIDO',  'tag_color': '#DC2626'},
+                    'critico':   {'border': '#DC2626', 'bg': '#FEF2F2', 'tag': '🔴 CRÍTICO',  'tag_color': '#DC2626'},
+                    'atencao':   {'border': '#D97706', 'bg': '#FFFBEB', 'tag': '🟡 URGENTE',  'tag_color': '#D97706'},
+                    'ok':        {'border': '#1D4ED8', 'bg': '#EFF6FF', 'tag': '🔵 OK',       'tag_color': '#1D4ED8'},
+                    'sem_prazo': {'border': '#94A3B8', 'bg': '#F8FAFC', 'tag': '⚪ SEM PRAZO','tag_color': '#94A3B8'},
+                    'concluido': {'border': '#15803D', 'bg': '#F0FDF4', 'tag': '✅ CONCLUÍDO','tag_color': '#15803D'},
+                }
+
+                criticos_esq = df_tv_esq[df_tv_esq['_urgencia'].isin(['vencido', 'critico'])]
+                if not criticos_esq.empty:
                     st.markdown(f"""
                     <div style='background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:10px 18px;margin-bottom:16px;'>
-                        <span style='color:#DC2626;font-weight:700;font-size:15px;'>⚠️ {len(urgentes_esq)} lote(s) crítico(s) ou vencido(s)</span>
-                    </div>""", unsafe_allow_html=True)
+                        <span style='color:#DC2626;font-weight:700;font-size:15px;'>⚠️ {len(criticos_esq)} lote(s) crítico(s) ou vencido(s)</span>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-                cols_tv_esq = st.columns(3)
-                for i, (_, row) in enumerate(df_tv_esq.sort_values('_dias_rest').iterrows()):
-                    dias = row['_dias_rest']
-                    if dias < 0:    cfg = {"border":"#DC2626","bg":"#FEF2F2","tag":"VENCIDO","tag_color":"#DC2626"}
-                    elif dias <= 3: cfg = {"border":"#DC2626","bg":"#FEF2F2","tag":"CRITICO","tag_color":"#DC2626"}
-                    elif dias <= 5: cfg = {"border":"#D97706","bg":"#FFFBEB","tag":"URGENTE","tag_color":"#D97706"}
-                    else:           cfg = {"border":"#3B82F6","bg":"#EFF6FF","tag":"OK","tag_color":"#3B82F6"}
-                    kg_v = row.get('Peso_Kg', 0.0) or 0.0
-                    with cols_tv_esq[i % 3]:
-                        st.markdown(f"""
-                        <div style='border:2px solid {cfg["border"]};background:{cfg["bg"]};border-radius:10px;
-                                    padding:18px 20px;margin-bottom:12px;box-shadow:0 4px 12px rgba(0,0,0,0.10);'>
-                            <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;'>
-                                <span style='font-size:11px;font-weight:700;color:{cfg["tag_color"]};border:1px solid {cfg["border"]};
-                                             padding:2px 8px;border-radius:4px;'>{cfg["tag"]}</span>
-                                <span style='font-size:11px;color:#64748B;'>{int(dias)} dias</span>
-                            </div>
-                            <div style='font-size:1.1rem;font-weight:700;color:#0F172A;margin-bottom:4px;'>{row['Cod_Lote']}</div>
-                            <div style='font-size:0.85rem;color:#475569;margin-bottom:8px;'>{row['Obra_Vinculada']} — {row['Tipo_Material']}</div>
-                            <div style='display:flex;gap:12px;'>
-                                <span style='background:#F1F5F9;padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>
-                                    {int(row['Qtd_Caixas'])} un
-                                </span>
-                                <span style='background:#F1F5F9;padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>
-                                    {kg_v:.2f} kg
-                                </span>
-                            </div>
-                            <div style='margin-top:10px;font-size:11px;color:#64748B;'>
-                                Limite: {pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')}
-                            </div>
-                        </div>""", unsafe_allow_html=True)
+                producao_esq   = df_tv_esq[df_tv_esq['Status_Item'].isin(['Liberado para Fabrica', 'Parcialmente Concluido'])].sort_values('_dias_restantes')
+                pendentes_esq  = df_tv_esq[df_tv_esq['Status_Item'] == 'Pendente'].sort_values('_dias_restantes')
+                concluidos_esq = df_tv_esq[df_tv_esq['Status_Item'] == 'Concluido'].sort_values('Data_Limite_Obra', ascending=False)
 
-                if "tv_esq_last_refresh" not in st.session_state:
-                    st.session_state.tv_esq_last_refresh = time.time()
-                segundos_restantes_esq = max(0, 300 - int(time.time() - st.session_state.tv_esq_last_refresh))
-                st.caption(f"Auto-refresh em {segundos_restantes_esq}s")
-                if segundos_restantes_esq == 0:
-                    st.session_state.tv_esq_last_refresh = time.time(); st.rerun()
-            else:
-                st.info("Nenhum lote de Esquadrias/Vidro em produção no momento.")
+                def _card_lote_esq(row, key_prefix):
+                    urg  = row['_urgencia']
+                    cfg  = URG_CONFIG_ESQ[urg]
+                    dias = row['_dias_restantes']
+                    dias_txt  = f"Vencido há {abs(dias)}d" if dias < 0 else (f"Faltam {dias} dia(s)" if dias < 9999 else "Sem prazo")
+                    prazo_fmt = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y') if prazo_valido(row['Data_Limite_Obra']) else '—'
+                    op_txt    = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
+                    kg_v      = row.get('Peso_Kg', 0.0) or 0.0
+                    arqs_tv   = carregar_arquivos_op(int(row['id']))
+                    clipe_badge = f"<div style='margin-top:6px;font-size:10px;color:#475569;'>📎 {len(arqs_tv)} arquivo(s)</div>" if arqs_tv else ""
+                    st.markdown(f"""
+                    <div style='border:1.5px solid {cfg["border"]};background:{cfg["bg"]};border-radius:8px;padding:10px 12px;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,0.06);'>
+                        <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;'>
+                            <span style='font-size:10px;font-weight:700;color:{cfg["tag_color"]};border:1px solid {cfg["border"]};padding:1px 6px;border-radius:4px;'>{cfg["tag"]}</span>
+                            <span style='font-size:10px;color:#64748B;font-weight:600;'>{dias_txt}</span>
+                        </div>
+                        <div style='font-size:14px;font-weight:800;color:#0F172A;margin-bottom:2px;'>{row["Obra_Vinculada"]}</div>
+                        <div style='font-size:11px;color:#475569;margin-bottom:8px;'>{row["Cod_Lote"]} · {row["Tipo_Material"]}</div>
+                        <div style='display:grid;grid-template-columns:1fr 1fr;gap:5px;'>
+                            <div style='background:white;border-radius:5px;padding:5px 7px;'><div style='font-size:8px;color:#94A3B8;text-transform:uppercase;'>OP</div><div style='font-size:12px;font-weight:700;color:#1E293B;'>{op_txt}</div></div>
+                            <div style='background:white;border-radius:5px;padding:5px 7px;'><div style='font-size:8px;color:#94A3B8;text-transform:uppercase;'>KG</div><div style='font-size:12px;font-weight:700;color:#1E293B;'>{kg_v:.2f}</div></div>
+                        </div>
+                        <div style='margin-top:6px;font-size:10px;font-weight:700;color:{cfg["tag_color"]};'>Prazo: {prazo_fmt}</div>
+                        {clipe_badge}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    if arqs_tv:
+                        with st.expander("📂 Ver arquivos", expanded=False):
+                            for arq in arqs_tv:
+                                arq_id, arq_nome, arq_tipo, _, _ = arq
+                                conteudo_arq = carregar_conteudo_arquivo(arq_id)
+                                if conteudo_arq:
+                                    _, _, bytes_arq = conteudo_arq
+                                    st.download_button(
+                                        f"⬇️ {arq_nome}", data=bytes(bytes_arq),
+                                        file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
+                                        key=f"tvesq_{key_prefix}_dl_{arq_id}"
+                                    )
+
+                col_prod_e, col_pend_e, col_conc_e = st.columns(3)
+                colunas_tv_esq = [
+                    (col_prod_e, "prod", "#EFF6FF", "#1D4ED8", "🔧 EM PRODUÇÃO", producao_esq,   "Nenhum lote em produção."),
+                    (col_pend_e, "pend", "#F1F5F9", "#475569", "⏳ PENDENTE",     pendentes_esq,  "Nenhum lote pendente."),
+                    (col_conc_e, "conc", "#F0FDF4", "#15803D", "✅ CONCLUÍDO",    concluidos_esq, "Nenhum lote concluído."),
+                ]
+                for col, prefix, bg, fg, titulo, df_col, msg_vazio in colunas_tv_esq:
+                    with col:
+                        with st.container(border=True):
+                            st.markdown(f"""<div style='background:{bg};border-top:3px solid {fg};border-radius:6px;padding:6px 12px;margin-bottom:10px;text-align:center;'>
+                                <span style='color:{fg};font-weight:800;font-size:13px;'>{titulo}</span><br>
+                                <span style='color:{fg};font-size:19px;font-weight:800;'>{len(df_col)}</span>
+                            </div>""", unsafe_allow_html=True)
+                            if df_col.empty:
+                                st.markdown(f"<div style='text-align:center;color:#94A3B8;padding:16px;font-size:12px;'>{msg_vazio}</div>", unsafe_allow_html=True)
+                            else:
+                                for _, row in df_col.iterrows():
+                                    _card_lote_esq(row, f"{prefix}_{row['id']}")
+
+            progress_val_esq = (30 - segundos_restantes_esq) / 30
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.progress(progress_val_esq, text=f"Próxima atualização em {segundos_restantes_esq}s")
+            if segundos_restantes_esq == 0:
+                st.session_state.tv_esq_last_refresh = time.time()
+                st.rerun()
 
     # ==================================================
     # LIBERAR OPS
