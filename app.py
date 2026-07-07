@@ -3168,7 +3168,7 @@ _TITULOS_NOTIF = {
     "CADASTRAR_OBRA":         "Nova obra cadastrada",
     "CADASTRAR_FRENTE":       "Nova frente cadastrada",
     "VINCULAR_SOLICITACAO_OP":"Solicitação vinculada a OP",
-    "OP_AVULSA":              "OP avulsa lançada",
+    "OP_AVULSA":              "OP sem frente lançada",
     "ENVIO_TOTAL":            "Envio total registrado",
     "DESPACHO_LOGISTICA":     "Despacho logístico registrado",
     "EXCLUIR_OBRA":           "Obra excluída",
@@ -4571,6 +4571,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         conn_av2 = conectar_banco()
                         try:
                             cursor_av2 = conn_av2.cursor()
+                            cursor_av2.execute("SELECT COUNT(*) FROM itens_detalhado WHERE EDT_Vinculado='AVULSO'")
+                            seq_av = cursor_av2.fetchone()[0] + 1
+                            cod_lote_av = f"OP-{str(seq_av).zfill(2)} - {av_projeto} - {av_obra}"
                             for item in st.session_state.av_itens:
                                 cursor_av2.execute("""
                                     INSERT INTO itens_detalhado
@@ -4581,7 +4584,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     VALUES (%s,'AVULSO',%s,NULL,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente',1,%s,%s,%s,%s,%s)
                                 """, (
                                     av_obra,
-                                    f"AVULSO-{av_projeto}",
+                                    cod_lote_av,
                                     item["desc"],
                                     item["qtd"],
                                     item["m2"],
@@ -4673,7 +4676,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             tipo_esc_edt  = normaliza_escopo(row_lote.get('Escopo')) or 'ACM'
                             num_proj_edt  = str(row_lote.get('Numero_Projeto', '') or '')
                             if edt_lote == 'AVULSO':
-                                st.info("OP Avulsa — sem vínculo com etapa do cronograma.")
+                                st.info("OP sem frente — sem vínculo com etapa do cronograma.")
 
                         st.markdown("---")
                         df_pecas_existentes = carregar_pecas_lote(lote_id)
@@ -5093,7 +5096,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if not fr_row.empty else "🔗 Frente vinculada"
                             )
                         else:
-                            tag_frente = "🧩 Sem frente — suporte/avulso"
+                            tag_frente = "🧩 Sem frente — suporte"
                         with cols_card[i % 3]:
                             with st.container(border=True):
                                 st.markdown(f"**{row['Obra_Vinculada']}**")
@@ -7173,14 +7176,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     key="dl_rel_xlsx"
                 )
 
-            # ── Seção: OPs Avulsas ────────────────────────────────
+            # ── Seção: OPs sem frente ─────────────────────────────
             st.markdown("---")
-            with st.expander("OPs Avulsas cadastradas", expanded=False):
+            with st.expander("OPs sem frente cadastradas", expanded=False):
                 df_avulsas = df_banco_micro_rel[df_banco_micro_rel['EDT_Vinculado'].str.startswith('AVULSO', na=False)].copy() if not df_banco_micro_rel.empty else pd.DataFrame()
                 if filtro_obra_rel != "Todas" and not df_avulsas.empty:
                     df_avulsas = df_avulsas[df_avulsas['Obra_Vinculada'] == filtro_obra_rel]
                 if df_avulsas.empty:
-                    st.info("Nenhuma OP avulsa encontrada.")
+                    st.info("Nenhuma OP sem frente encontrada.")
                 else:
                     cols_av = ['Obra_Vinculada','Num_OP','Tipo_Material','Qtd_Caixas','M2_Item',
                                'Data_Producao_Programada','Data_Limite_Obra','Status_Item','Romaneio_Chapas']
@@ -7189,5 +7192,5 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     for col_dt in ['Ini Prod.','Limite']:
                         df_avulsas[col_dt] = pd.to_datetime(df_avulsas[col_dt], errors='coerce').dt.strftime('%d/%m/%Y')
                     st.dataframe(df_avulsas.style.format({'m²': '{:.2f}'}), hide_index=True, use_container_width=True)
-                    st.caption(f"{len(df_avulsas)} OP(s) avulsa(s) encontrada(s).")
+                    st.caption(f"{len(df_avulsas)} OP(s) sem frente encontrada(s).")
 
