@@ -996,6 +996,20 @@ def prazo_valido(valor) -> bool:
     except Exception:
         return False
 
+def normaliza_escopo(bruto):
+    """Reduz um Tipo_Escopo/Escopo bruto (pode vir sujo de dado legado) para um dos
+    3 valores canonicos usados em toda a aplicacao. Mesmas palavras-chave do CASE
+    SQL de backfill (Tipo_Material ~* 'ESQUADRIA|VIDRO|ALUMINIO|PERFIL') para as
+    duas classificacoes nunca divergirem."""
+    b = str(bruto or '').upper()
+    if any(p in b for p in ('ESQUADRIA', 'VIDRO', 'ALUMINIO', 'PERFIL')):
+        return 'Esquadria-Vidro'
+    if 'TERCEIRIZAD' in b:
+        return 'Terceirizada'
+    if 'ACM' in b:
+        return 'ACM'
+    return None
+
 # ========================================================
 # FUNÇÕES DE BANCO — com cache, pool e try/finally
 # ========================================================
@@ -4414,15 +4428,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         # quando ha um unico escopo registrado entre as frentes dela — evita escolher um
                         # escopo diferente do que a obra ja define. Se a obra tiver frentes de mais de um
                         # escopo (ex: ACM e Esquadria-Vidro), deixa escolher.
-                        def _normaliza_escopo(bruto):
-                            b = str(bruto or '').upper()
-                            if 'ESQUADRIA' in b or 'VIDRO' in b: return 'Esquadria-Vidro'
-                            if 'TERCEIRIZAD' in b: return 'Terceirizada'
-                            if 'ACM' in b: return 'ACM'
-                            return None
                         escopos_obra = sorted(set(
                             e for e in (
-                                _normaliza_escopo(v) for v in
+                                normaliza_escopo(v) for v in
                                 df_banco_macro[df_banco_macro['Obra'] == av_obra]['Tipo_Escopo'].dropna().tolist()
                             ) if e
                         )) if not df_banco_macro.empty and av_obra else []
@@ -4590,7 +4598,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             fr_edt = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
                             if not fr_edt.empty:
                                 macro_row_sel = fr_edt.iloc[0]
-                                tipo_esc_edt  = str(macro_row_sel.get('Tipo_Escopo', 'ACM') or 'ACM')
+                                tipo_esc_edt  = normaliza_escopo(macro_row_sel.get('Tipo_Escopo')) or 'ACM'
                                 num_proj_edt  = str(macro_row_sel.get('Numero_Projeto', '') or '')
                                 se1, se2, se3, se4 = st.columns(4)
                                 se1.metric("Etapa", edt_lote)
@@ -4615,7 +4623,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 num_proj_edt  = ""
                         else:
                             macro_row_sel = {}
-                            tipo_esc_edt  = str(row_lote.get('Escopo') or 'ACM')
+                            tipo_esc_edt  = normaliza_escopo(row_lote.get('Escopo')) or 'ACM'
                             num_proj_edt  = str(row_lote.get('Numero_Projeto', '') or '')
                             if edt_lote == 'AVULSO':
                                 st.info("OP Avulsa — sem vínculo com etapa do cronograma.")
@@ -4645,7 +4653,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 obs_op = st.text_area("Observações:", key="obs_op",
                                                        placeholder="Informações adicionais para a produção...")
                                 campos_extras = {"observacoes": obs_op, "material": row_lote.get('Tipo_Material', '')}
-                                if tipo_esc_edt.upper() == "ACM":
+                                if tipo_esc_edt == "ACM":
                                     gf1, gf2 = st.columns(2)
                                     with gf1:
                                         qtd_folhas = st.text_input("Qtd Folhas Projeto:", key="op_folhas", placeholder="Ex: 2")
@@ -4656,7 +4664,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         "dificuldade": row_lote.get('Dificuldade', '—'),
                                         "material": row_lote.get('Tipo_Material', 'ACM')
                                     })
-                                elif "ESQUADRIA" in tipo_esc_edt.upper() or "VIDRO" in tipo_esc_edt.upper():
+                                elif tipo_esc_edt == "Esquadria-Vidro":
                                     gf1, gf2 = st.columns(2)
                                     with gf1:
                                         peso_total = st.text_input("Peso Total (kg):", key="op_peso", placeholder="Ex: 67,08kg")
@@ -4664,7 +4672,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         qtd_folhas = st.text_input("Qtd Folhas Projeto:", key="op_folhas2", placeholder="Ex: 2")
                                     campos_extras.update({
                                         "peso_total": peso_total, "qtd_folhas": qtd_folhas,
-                                        "material": "PERFIL EM ALUMINIO"
+                                        "material": row_lote.get('Tipo_Material') or "PERFIL EM ALUMINIO"
                                     })
                                 else:
                                     empresa  = st.text_input("Empresa Responsável:", key="op_empresa")
@@ -5483,14 +5491,22 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     edt_edit = frente_edit_sel.split(" — ")[0].strip()
                     row_edit = df_banco_macro[df_banco_macro['EDT'] == edt_edit].iloc[0]
                     escopo_atual_edit = row_edit.get('Tipo_Escopo')
+                    escopo_atual_edit_norm = normaliza_escopo(escopo_atual_edit)
+                    if escopo_atual_edit_norm is None and escopo_atual_edit:
+                        st.warning(
+                            f"⚠️ O escopo salvo para esta frente ('{escopo_atual_edit}') não é um dos valores "
+                            "reconhecidos (ACM / Esquadria-Vidro / Terceirizada). Confirme manualmente o valor "
+                            "correto no campo abaixo — se salvar sem revisar, o escopo real desta frente será "
+                            "sobrescrito."
+                        )
                     with st.form("form_editar_frente"):
                         fe1, fe2 = st.columns(2)
                         with fe1:
                             tarefa_edit = st.text_input("Tarefa:", value=str(row_edit.get('Tarefa') or ''))
                             escopo_edit = st.selectbox(
                                 "Escopo:", ["ACM", "Esquadria-Vidro", "Terceirizada"],
-                                index=["ACM", "Esquadria-Vidro", "Terceirizada"].index(escopo_atual_edit)
-                                      if escopo_atual_edit in ["ACM", "Esquadria-Vidro", "Terceirizada"] else 0
+                                index=["ACM", "Esquadria-Vidro", "Terceirizada"].index(escopo_atual_edit_norm)
+                                      if escopo_atual_edit_norm in ["ACM", "Esquadria-Vidro", "Terceirizada"] else 0
                             )
                             projetos_obra_edit = sorted(df_projetos[df_projetos['Obra'] == obra_selecionada]['Numero_Projeto'].unique().tolist()) if not df_projetos.empty else []
                             projeto_atual_edit = str(row_edit.get('Numero_Projeto') or '')
