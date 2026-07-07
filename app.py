@@ -5421,10 +5421,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             if df_projetos.empty:
                 st.info("Cadastre um projeto no passo 1 antes de detalhar uma frente.")
             else:
+                # Obra fica fora do form: precisa disparar rerun imediato ao trocar,
+                # senao a lista de Projetos (que depende dela) nao se atualiza —
+                # widgets dentro de um st.form so recalculam no submit.
+                obra_frente = st.selectbox("Obra:", sorted(df_projetos['Obra'].unique().tolist()), key="obra_frente_sel")
                 with st.form("form_frente"):
-                    ff1, ff2, ff3 = st.columns(3)
-                    with ff1:
-                        obra_frente = st.selectbox("Obra:", sorted(df_projetos['Obra'].unique().tolist()), key="obra_frente_sel")
+                    ff2, ff3 = st.columns(2)
                     with ff2:
                         projetos_da_obra = sorted(df_projetos[df_projetos['Obra'] == obra_frente]['Numero_Projeto'].unique().tolist())
                         projeto_frente = st.selectbox("Projeto:", projetos_da_obra, key="projeto_frente_sel")
