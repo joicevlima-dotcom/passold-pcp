@@ -6623,7 +6623,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     else:
                         st.caption("Nenhum anexo ainda.")
 
-            tab_rd_op, tab_rd_ins = st.tabs(["📋 Romaneios de OP / Peças", "📦 Romaneios de Insumos"])
+            tab_rd_op, tab_rd_comp, tab_rd_ins = st.tabs([
+                "📋 Romaneios de OP / Peças", "🧩 Romaneios de Componentes", "📦 Romaneios de Insumos"
+            ])
 
             with tab_rd_op:
                 df_rd_op = df_banco_micro[df_banco_micro['Num_OP'].notna()].copy() if not df_banco_micro.empty else pd.DataFrame()
@@ -6646,6 +6648,28 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             with crop2:
                                 st.markdown(badge_rd)
                             _bloco_anexo_rd('OP', item_id_rd, f"op_{item_id_rd}")
+
+            with tab_rd_comp:
+                df_rd_comp = carregar_romaneios_componentes_emitidos()
+                if not df_rd_comp.empty:
+                    df_rd_comp['_devolvido'] = df_rd_comp['item_id'].apply(lambda i: ('COMPONENTES', int(i)) in status_rd)
+                    if filtro_rd == "Pendentes":
+                        df_rd_comp = df_rd_comp[~df_rd_comp['_devolvido']]
+                    df_rd_comp = df_rd_comp.sort_values('emitido_em', ascending=False)
+                if df_rd_comp.empty:
+                    st.info("Nenhum romaneio de componentes pendente de devolução." if filtro_rd == "Pendentes" else "Nenhum romaneio de componentes emitido ainda.")
+                else:
+                    for _, row_rc in df_rd_comp.iterrows():
+                        item_id_rc = int(row_rc['item_id'])
+                        badge_rc = "🟢 Devolvido assinado" if row_rc['_devolvido'] else "🔴 Pendente"
+                        with st.container(border=True):
+                            ccmp1, ccmp2 = st.columns([4, 1])
+                            with ccmp1:
+                                st.markdown(f"**{row_rc['num_op']}** — {row_rc.get('obra','')}")
+                                st.caption(f"Emitido em {pd.to_datetime(row_rc['emitido_em']).strftime('%d/%m/%Y %H:%M')} por {row_rc.get('emitido_por','—')}")
+                            with ccmp2:
+                                st.markdown(badge_rc)
+                            _bloco_anexo_rd('COMPONENTES', item_id_rc, f"comp_{item_id_rc}")
 
             with tab_rd_ins:
                 df_rd_ins = carregar_saidas_insumos()
