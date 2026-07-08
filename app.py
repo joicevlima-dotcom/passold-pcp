@@ -1041,6 +1041,48 @@ def carregar_projetos():
     df.columns = [c.replace('_', ' ').title().replace(' ', '_') if c != 'id' else c for c in df.columns]
     return df
 
+def editar_numero_projeto(obra: str, projeto_antigo: str, projeto_novo: str):
+    """Renomeia um Numero_Projeto, propagando pra todas as tabelas que guardam copia do
+    valor como texto (nao ha FK): projetos, cronograma_macro, itens_detalhado,
+    saidas_insumos, romaneios_manuais. Se o numero novo ja existir pra mesma obra
+    (duplicata), so remove o registro velho de 'projetos' — as outras tabelas ja
+    passam a apontar pro mesmo texto, entao viram uma mescla."""
+    projeto_novo = projeto_novo.strip()
+    if not projeto_novo:
+        return False, "Informe o novo número do projeto."
+    if projeto_novo == projeto_antigo:
+        return False, "O novo número é igual ao atual."
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM projetos WHERE Obra=%s AND Numero_Projeto=%s", (obra, projeto_novo))
+        ja_existe = cursor.fetchone() is not None
+        if ja_existe:
+            cursor.execute("DELETE FROM projetos WHERE Obra=%s AND Numero_Projeto=%s", (obra, projeto_antigo))
+        else:
+            cursor.execute("UPDATE projetos SET Numero_Projeto=%s WHERE Obra=%s AND Numero_Projeto=%s",
+                            (projeto_novo, obra, projeto_antigo))
+        cursor.execute("UPDATE cronograma_macro SET Numero_Projeto=%s WHERE Obra=%s AND Numero_Projeto=%s",
+                        (projeto_novo, obra, projeto_antigo))
+        cursor.execute("UPDATE itens_detalhado SET Numero_Projeto=%s WHERE Obra_Vinculada=%s AND Numero_Projeto=%s",
+                        (projeto_novo, obra, projeto_antigo))
+        cursor.execute("UPDATE saidas_insumos SET numero_projeto=%s WHERE obra=%s AND numero_projeto=%s",
+                        (projeto_novo, obra, projeto_antigo))
+        cursor.execute("UPDATE romaneios_manuais SET numero_projeto=%s WHERE obra_vinculada=%s AND numero_projeto=%s",
+                        (projeto_novo, obra, projeto_antigo))
+        conn.commit()
+        carregar_projetos.clear()
+        _limpar_cache_geral()
+        carregar_saidas_insumos.clear()
+        carregar_romaneios_manuais.clear()
+        msg = "Projetos mesclados — já existia um cadastrado com esse número." if ja_existe else "Número do projeto atualizado em todos os registros!"
+        return True, msg
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao renomear projeto: {e}"
+    finally:
+        liberar_conexao(conn)
+
 @st.cache_data(ttl=30)
 def carregar_macro():
     conn = conectar_banco()
@@ -3277,7 +3319,7 @@ _ICONES_ACAO = {
     "GERAR_LOTE": "⚙️", "EXCLUIR_LOTE": "🗑️",
     "CADASTRAR_OBRA": "🏗️", "CADASTRAR_FRENTE": "📐",
     "ENVIO_TOTAL": "🚚", "DESPACHO_LOGISTICA": "🚚",
-    "ROMANEIO_DEVOLVIDO": "🗂️",
+    "ROMANEIO_DEVOLVIDO": "🗂️", "EDITAR_PROJETO": "✏️",
 }
 
 # Filtros de notificação por setor — cada setor vê só o que lhe interessa
@@ -3309,6 +3351,7 @@ _TITULOS_NOTIF = {
     "EXCLUIR_LOTE":           "Lote excluído",
     "CRIAR_USUARIO":          "Novo usuário criado",
     "ROMANEIO_DEVOLVIDO":     "Romaneio devolvido anexado",
+    "EDITAR_PROJETO":         "Número de projeto editado",
 }
 
 _ACOES_AUDITORIA = ["LOGIN", "LOGOUT"]   # só Master vê no painel de auditoria
@@ -5544,6 +5587,28 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
             if not df_projetos.empty:
                 st.dataframe(df_projetos[['Obra', 'Numero_Projeto']], hide_index=True, use_container_width=True)
+
+                with st.expander("✏️ Editar número de um Projeto", expanded=False):
+                    st.caption("Corrige o número/nome de um projeto já cadastrado — atualiza automaticamente em todas as "
+                               "frentes, lotes, saídas de insumos e romaneios manuais que já referenciam esse projeto.")
+                    obra_edit_proj = st.selectbox("Obra:", obras_existentes, key="obra_edit_proj_sel")
+                    projetos_da_obra_edit = sorted(df_projetos[df_projetos['Obra'] == obra_edit_proj]['Numero_Projeto'].unique().tolist())
+                    with st.form("form_editar_projeto"):
+                        proj_atual_edit = st.selectbox("Projeto atual:", projetos_da_obra_edit, key="proj_atual_edit_sel") if projetos_da_obra_edit else None
+                        proj_novo_edit = st.text_input("Novo número/nome do projeto:", placeholder="Ex: 1068 - Esquadrias")
+                        if st.form_submit_button("💾 Salvar novo número"):
+                            if not proj_atual_edit:
+                                st.error("Não há projeto cadastrado para essa obra.")
+                            else:
+                                ok_edit_proj, msg_edit_proj = editar_numero_projeto(obra_edit_proj, proj_atual_edit, proj_novo_edit)
+                                if ok_edit_proj:
+                                    registrar_auditoria(st.session_state.usuario_nome, "EDITAR_PROJETO",
+                                        f"Obra: {obra_edit_proj} | {proj_atual_edit} → {proj_novo_edit.strip()}")
+                                    st.toast(f"✅ {msg_edit_proj}")
+                                    time.sleep(0.4)
+                                    st.rerun()
+                                else:
+                                    st.error(msg_edit_proj)
 
             st.markdown("---")
             # ===== PASSO 2 — Frente (opcional) dentro de um Projeto ===
