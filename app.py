@@ -733,6 +733,10 @@ def inicializar_banco_de_dados():
                 unidade TEXT DEFAULT 'un'
             )
         """)
+        cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS status_item TEXT DEFAULT 'Aguardando Conferencia'")
+        cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS observacao TEXT")
+        cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS conferido_por TEXT")
+        cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS conferido_em TEXT")
         # ── TABELAS DO SISTEMA DE MEDIÇÃO ──────────────────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS medicao_obras (
@@ -2205,11 +2209,42 @@ def carregar_itens_saida_insumos(saida_id: int):
     conn = conectar_banco()
     try:
         return pd.read_sql_query(
-            "SELECT id, descricao, quantidade, unidade FROM saidas_insumos_itens WHERE saida_id=%s ORDER BY id",
+            "SELECT id, descricao, quantidade, unidade, status_item, observacao "
+            "FROM saidas_insumos_itens WHERE saida_id=%s ORDER BY id",
             conn, params=(saida_id,)
         )
     except Exception:
         return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=15)
+def carregar_todos_itens_insumos():
+    """Todos os itens de saida de insumos, de todas as saidas — usado pra somar os
+    contadores Aguardando/Disponivel/Indisponivel na aba de Romaneios de Insumos."""
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query("SELECT * FROM saidas_insumos_itens ORDER BY saida_id, id", conn)
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
+def atualizar_item_insumo(item_id: int, status: str, obs: str, usuario: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE saidas_insumos_itens
+            SET status_item=%s, observacao=%s, conferido_por=%s, conferido_em=%s
+            WHERE id=%s
+        """, (status, obs, usuario, datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M'), item_id))
+        conn.commit()
+        carregar_itens_saida_insumos.clear()
+        carregar_todos_itens_insumos.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao atualizar item: {e}")
     finally:
         liberar_conexao(conn)
 
@@ -2231,6 +2266,7 @@ def salvar_saida_insumos(data_saida, obra: str, destino: str, itens: list, usuar
             """, (saida_id, item['descricao'], item['quantidade'], item['unidade']))
         conn.commit()
         carregar_saidas_insumos.clear()
+        carregar_todos_itens_insumos.clear()
         return saida_id
     except Exception as e:
         conn.rollback()
@@ -6275,185 +6311,246 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
     # ==================================================
     elif nome_aba == "Almoxarifado":
         with aba_objeto:
-            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Almoxarifado</h2><p>Conferência e controle de componentes recebidos</p></div><span class="page-icon">📦</span></div>', unsafe_allow_html=True)
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Almoxarifado</h2><p>Conferência e controle de materiais recebidos</p></div><span class="page-icon">📦</span></div>', unsafe_allow_html=True)
             st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
-            df_ops_comp = carregar_todas_ops_com_componentes()
 
-            if df_ops_comp.empty:
-                st.info("Nenhuma OP com lista de componentes cadastrada ainda.")
-            else:
-                conn_alm = conectar_banco()
-                try:
-                    todos_comps = pd.read_sql_query("SELECT * FROM componentes_op ORDER BY item_id, id", conn_alm)
-                finally:
-                    liberar_conexao(conn_alm)
+            tab_alm_op, tab_alm_ins = st.tabs(["📋 Romaneios com Vínculo a OP", "📦 Romaneios de Insumos"])
 
-                n_aguard  = len(todos_comps[todos_comps['status_item'] == 'Aguardando Conferencia'])
-                n_ok      = len(todos_comps[todos_comps['status_item'] == 'Disponivel'])
-                n_falta   = len(todos_comps[todos_comps['status_item'] == 'Indisponivel'])
-                c1, c2, c3 = st.columns(3)
-                c1.metric("⏳ Aguardando", n_aguard)
-                c2.metric("✅ Disponíveis", n_ok)
-                c3.metric("❌ Indisponíveis", n_falta)
-                st.markdown("---")
+            with tab_alm_op:
+                df_ops_comp = carregar_todas_ops_com_componentes()
 
-                df_rom_emitidos = carregar_romaneios_componentes_emitidos()
+                if df_ops_comp.empty:
+                    st.info("Nenhuma OP com lista de componentes cadastrada ainda.")
+                else:
+                    conn_alm = conectar_banco()
+                    try:
+                        todos_comps = pd.read_sql_query("SELECT * FROM componentes_op ORDER BY item_id, id", conn_alm)
+                    finally:
+                        liberar_conexao(conn_alm)
 
-                for _, op_row in df_ops_comp.iterrows():
-                    df_comp = carregar_componentes_op(int(op_row['item_id']))
-                    if df_comp.empty:
-                        continue
-                    n_total   = len(df_comp)
-                    n_conf    = len(df_comp[df_comp['status_item'] != 'Aguardando Conferencia'])
-                    n_indisp  = len(df_comp[df_comp['status_item'] == 'Indisponivel'])
-                    if n_indisp > 0:   css_bar = "bar-danger"; icone = "❌"
-                    elif n_conf == n_total: css_bar = "bar-ok"; icone = "✅"
-                    else:              css_bar = "bar-warn";  icone = "⏳"
+                    n_aguard  = len(todos_comps[todos_comps['status_item'] == 'Aguardando Conferencia'])
+                    n_ok      = len(todos_comps[todos_comps['status_item'] == 'Disponivel'])
+                    n_falta   = len(todos_comps[todos_comps['status_item'] == 'Indisponivel'])
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("⏳ Aguardando", n_aguard)
+                    c2.metric("✅ Disponíveis", n_ok)
+                    c3.metric("❌ Indisponíveis", n_falta)
+                    st.markdown("---")
 
-                    with st.expander(
-                        f"{icone} OP: {op_row['num_op']} — {op_row['cod_lote']} | {op_row['obra_vinculada']}  "
-                        f"({n_conf}/{n_total} conferidos{f' — {n_indisp} FALTANDO' if n_indisp > 0 else ''})",
-                        expanded=(n_indisp > 0 or n_conf < n_total)
-                    ):
-                        hc = st.columns([4, 2, 2, 3, 2])
-                        for col_h, label in zip(hc, ["COMPONENTE", "QTD", "UN", "STATUS", "AÇÃO"]):
-                            col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
-                        st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
+                    df_rom_emitidos = carregar_romaneios_componentes_emitidos()
 
-                        for _, comp in df_comp.iterrows():
-                            st_item = comp['status_item']
-                            if st_item == 'Disponivel':     cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
-                            elif st_item == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
-                            else:                           cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
-                            rc = st.columns([4, 2, 2, 3, 2])
-                            rc[0].markdown(f"**{comp['nome_componente']}**")
-                            rc[1].markdown(f"`{comp['quantidade']}`")
-                            rc[2].markdown(f"{comp['unidade']}")
-                            rc[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {st_item}</span>", unsafe_allow_html=True)
-                            with rc[4]:
-                                acao = st.selectbox(
-                                    "", ["Aguardando Conferencia", "Disponivel", "Indisponivel"],
-                                    index=["Aguardando Conferencia", "Disponivel", "Indisponivel"].index(st_item),
-                                    key=f"alm_st_{comp['id']}", label_visibility="collapsed"
+                    for _, op_row in df_ops_comp.iterrows():
+                        df_comp = carregar_componentes_op(int(op_row['item_id']))
+                        if df_comp.empty:
+                            continue
+                        n_total   = len(df_comp)
+                        n_conf    = len(df_comp[df_comp['status_item'] != 'Aguardando Conferencia'])
+                        n_indisp  = len(df_comp[df_comp['status_item'] == 'Indisponivel'])
+                        if n_indisp > 0:   icone = "❌"
+                        elif n_conf == n_total: icone = "✅"
+                        else:              icone = "⏳"
+
+                        with st.expander(
+                            f"{icone} OP: {op_row['num_op']} — {op_row['cod_lote']} | {op_row['obra_vinculada']}  "
+                            f"({n_conf}/{n_total} conferidos{f' — {n_indisp} FALTANDO' if n_indisp > 0 else ''})",
+                            expanded=(n_indisp > 0 or n_conf < n_total)
+                        ):
+                            hc = st.columns([4, 2, 2, 3, 2])
+                            for col_h, label in zip(hc, ["COMPONENTE", "QTD", "UN", "STATUS", "AÇÃO"]):
+                                col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
+                            st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
+
+                            for _, comp in df_comp.iterrows():
+                                st_item = comp['status_item']
+                                if st_item == 'Disponivel':     cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
+                                elif st_item == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
+                                else:                           cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
+                                rc = st.columns([4, 2, 2, 3, 2])
+                                rc[0].markdown(f"**{comp['nome_componente']}**")
+                                rc[1].markdown(f"`{comp['quantidade']}`")
+                                rc[2].markdown(f"{comp['unidade']}")
+                                rc[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {st_item}</span>", unsafe_allow_html=True)
+                                with rc[4]:
+                                    acao = st.selectbox(
+                                        "", ["Aguardando Conferencia", "Disponivel", "Indisponivel"],
+                                        index=["Aguardando Conferencia", "Disponivel", "Indisponivel"].index(st_item),
+                                        key=f"alm_st_{comp['id']}", label_visibility="collapsed"
+                                    )
+                                    if acao != st_item:
+                                        atualizar_componente(comp['id'], acao, comp.get('observacao') or '', st.session_state.usuario_nome)
+                                        st.rerun()
+                                obs_atual = comp.get('observacao') or ''
+                                obs_nova  = st.text_input(f"Obs — {comp['nome_componente']}:", value=obs_atual,
+                                                          key=f"alm_obs_{comp['id']}", placeholder="Ex: em falta, previsão 20/06...")
+                                if obs_nova != obs_atual:
+                                    atualizar_componente(comp['id'], st_item, obs_nova, st.session_state.usuario_nome)
+                                st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
+
+                            if n_indisp > 0:
+                                itens_falt = df_comp[df_comp['status_item'] == 'Indisponivel']['nome_componente'].tolist()
+                                st.error(f"⚠️ Itens em falta: {', '.join(itens_falt)}")
+                            elif n_conf == n_total:
+                                st.success("✅ Todos os componentes conferidos e disponíveis!")
+
+                            # ── Emitir romaneio (só com os itens Disponível) ──
+                            item_id_op = int(op_row['item_id'])
+                            df_disponiveis = df_comp[df_comp['status_item'] == 'Disponivel']
+                            ja_emitido = df_rom_emitidos[df_rom_emitidos['item_id'] == item_id_op] if not df_rom_emitidos.empty else pd.DataFrame()
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            if not ja_emitido.empty:
+                                emitido_em_fmt = pd.to_datetime(ja_emitido.iloc[0]['emitido_em']).strftime('%d/%m/%Y %H:%M')
+                                st.caption(f"✅ Romaneio emitido em {emitido_em_fmt} por {ja_emitido.iloc[0]['emitido_por']}")
+                            if df_disponiveis.empty:
+                                st.caption("Nenhum item Disponível ainda pra emitir romaneio.")
+                            else:
+                                rom_comp_bytes = gerar_romaneio_componentes_xlsx(
+                                    op_row['obra_vinculada'], op_row['num_op'], op_row['cod_lote'],
+                                    df_disponiveis, st.session_state.usuario_nome
                                 )
-                                if acao != st_item:
-                                    atualizar_componente(comp['id'], acao, comp.get('observacao') or '', st.session_state.usuario_nome)
-                                    st.rerun()
-                            obs_atual = comp.get('observacao') or ''
-                            obs_nova  = st.text_input(f"Obs — {comp['nome_componente']}:", value=obs_atual,
-                                                      key=f"alm_obs_{comp['id']}", placeholder="Ex: em falta, previsão 20/06...")
-                            if obs_nova != obs_atual:
-                                atualizar_componente(comp['id'], st_item, obs_nova, st.session_state.usuario_nome)
-                            st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
+                                st.download_button(
+                                    "🖨️ Emitir Romaneio" if ja_emitido.empty else "🖨️ Reemitir Romaneio",
+                                    data=rom_comp_bytes,
+                                    file_name=f"Romaneio_Componentes_{op_row['num_op']}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key=f"dl_rom_comp_{item_id_op}",
+                                    on_click=registrar_romaneio_componentes_emitido,
+                                    args=(item_id_op, op_row['num_op'], op_row['obra_vinculada'], st.session_state.usuario_nome)
+                                )
 
-                        if n_indisp > 0:
-                            itens_falt = df_comp[df_comp['status_item'] == 'Indisponivel']['nome_componente'].tolist()
-                            st.error(f"⚠️ Itens em falta: {', '.join(itens_falt)}")
-                        elif n_conf == n_total:
-                            st.success("✅ Todos os componentes conferidos e disponíveis!")
+            with tab_alm_ins:
+                df_todos_ins = carregar_todos_itens_insumos()
+                if not df_todos_ins.empty:
+                    n_aguard_ins = len(df_todos_ins[df_todos_ins['status_item'] == 'Aguardando Conferencia'])
+                    n_ok_ins     = len(df_todos_ins[df_todos_ins['status_item'] == 'Disponivel'])
+                    n_falta_ins  = len(df_todos_ins[df_todos_ins['status_item'] == 'Indisponivel'])
+                    ci1, ci2, ci3 = st.columns(3)
+                    ci1.metric("⏳ Aguardando", n_aguard_ins)
+                    ci2.metric("✅ Disponíveis", n_ok_ins)
+                    ci3.metric("❌ Indisponíveis", n_falta_ins)
+                    st.markdown("---")
 
-                        # ── Emitir romaneio (só com os itens Disponível) ──
-                        item_id_op = int(op_row['item_id'])
-                        df_disponiveis = df_comp[df_comp['status_item'] == 'Disponivel']
-                        ja_emitido = df_rom_emitidos[df_rom_emitidos['item_id'] == item_id_op] if not df_rom_emitidos.empty else pd.DataFrame()
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        if not ja_emitido.empty:
-                            emitido_em_fmt = pd.to_datetime(ja_emitido.iloc[0]['emitido_em']).strftime('%d/%m/%Y %H:%M')
-                            st.caption(f"✅ Romaneio emitido em {emitido_em_fmt} por {ja_emitido.iloc[0]['emitido_por']}")
-                        if df_disponiveis.empty:
-                            st.caption("Nenhum item Disponível ainda pra emitir romaneio.")
-                        else:
-                            rom_comp_bytes = gerar_romaneio_componentes_xlsx(
-                                op_row['obra_vinculada'], op_row['num_op'], op_row['cod_lote'],
-                                df_disponiveis, st.session_state.usuario_nome
-                            )
-                            st.download_button(
-                                "🖨️ Emitir Romaneio" if ja_emitido.empty else "🖨️ Reemitir Romaneio",
-                                data=rom_comp_bytes,
-                                file_name=f"Romaneio_Componentes_{op_row['num_op']}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key=f"dl_rom_comp_{item_id_op}",
-                                on_click=registrar_romaneio_componentes_emitido,
-                                args=(item_id_op, op_row['num_op'], op_row['obra_vinculada'], st.session_state.usuario_nome)
-                            )
+                with st.expander("➕ Nova Saída de Insumos", expanded=df_todos_ins.empty):
+                    st.caption("Saída de material manual (parafuso, broca, lima etc) — igual qualquer outra saída, só que sem OP vinculada. Obra é opcional.")
+                    obras_insumo = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
+                    ii1, ii2, ii3 = st.columns(3)
+                    with ii1:
+                        insumo_data = st.date_input("Data de saída:", value=hoje_projeto().date(), format="DD/MM/YYYY", key="insumo_data")
+                    with ii2:
+                        insumo_obra = st.selectbox("Obra (opcional):", ["— Sem obra vinculada —"] + obras_insumo, key="insumo_obra")
+                    with ii3:
+                        insumo_destino = st.text_input("Destino:", key="insumo_destino", placeholder="Ex: Produção, Obra tal, Manutenção...")
 
-            st.markdown("---")
-            with st.expander("📤 Saída de Insumos  ·  materiais de consumo/apoio", expanded=False):
-                st.caption("Saída de material manual (parafuso, broca, lima etc) — igual qualquer outra saída, só que sem OP vinculada. Obra é opcional.")
-                obras_insumo = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
-                ii1, ii2, ii3 = st.columns(3)
-                with ii1:
-                    insumo_data = st.date_input("Data de saída:", value=hoje_projeto().date(), format="DD/MM/YYYY", key="insumo_data")
-                with ii2:
-                    insumo_obra = st.selectbox("Obra (opcional):", ["— Sem obra vinculada —"] + obras_insumo, key="insumo_obra")
-                with ii3:
-                    insumo_destino = st.text_input("Destino:", key="insumo_destino", placeholder="Ex: Produção, Obra tal, Manutenção...")
+                    if "insumo_itens" not in st.session_state:
+                        st.session_state.insumo_itens = []
 
-                if "insumo_itens" not in st.session_state:
-                    st.session_state.insumo_itens = []
-
-                st.markdown("**Adicionar item:**")
-                ii4, ii5, ii6, ii7 = st.columns([4, 2, 2, 1])
-                with ii4:
-                    insumo_desc = st.text_input("Descrição do insumo:", key="insumo_desc",
-                                                 placeholder="Ex: Parafuso M6, Broca 8mm, Lima...")
-                with ii5:
-                    insumo_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="insumo_qtd")
-                with ii6:
-                    insumo_unidade = st.selectbox("Unidade:", ["un", "kg", "m", "cx", "pç", "rolo", "L"], key="insumo_unidade")
-                with ii7:
-                    st.write("")
-                    st.write("")
-                    if st.button("➕", key="btn_add_insumo_item"):
-                        if not insumo_desc.strip():
-                            st.error("Informe a descrição do insumo.")
-                        else:
-                            st.session_state.insumo_itens.append({
-                                "descricao": insumo_desc.strip(), "quantidade": insumo_qtd, "unidade": insumo_unidade
-                            })
-                            st.rerun()
-
-                if st.session_state.insumo_itens:
-                    st.markdown("**Itens desta saída:**")
-                    for i, item in enumerate(st.session_state.insumo_itens):
-                        col_desc, col_qtd, col_rem = st.columns([5, 2, 1])
-                        col_desc.write(f"{i+1}. {item['descricao']}")
-                        col_qtd.write(f"{item['quantidade']:g} {item['unidade']}")
-                        with col_rem:
-                            if st.button("🗑", key=f"rem_insumo_item_{i}"):
-                                st.session_state.insumo_itens.pop(i)
+                    st.markdown("**Adicionar item:**")
+                    ii4, ii5, ii6, ii7 = st.columns([4, 2, 2, 1])
+                    with ii4:
+                        insumo_desc = st.text_input("Descrição do insumo:", key="insumo_desc",
+                                                     placeholder="Ex: Parafuso M6, Broca 8mm, Lima...")
+                    with ii5:
+                        insumo_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="insumo_qtd")
+                    with ii6:
+                        insumo_unidade = st.selectbox("Unidade:", ["un", "kg", "m", "cx", "pç", "rolo", "L"], key="insumo_unidade")
+                    with ii7:
+                        st.write("")
+                        st.write("")
+                        if st.button("➕", key="btn_add_insumo_item"):
+                            if not insumo_desc.strip():
+                                st.error("Informe a descrição do insumo.")
+                            else:
+                                st.session_state.insumo_itens.append({
+                                    "descricao": insumo_desc.strip(), "quantidade": insumo_qtd, "unidade": insumo_unidade
+                                })
                                 st.rerun()
 
-                    if st.button("💾 Registrar Saída", key="btn_salvar_insumo", type="primary"):
-                        obra_final = None if insumo_obra == "— Sem obra vinculada —" else insumo_obra
-                        saida_id = salvar_saida_insumos(
-                            insumo_data, obra_final, insumo_destino.strip(),
-                            st.session_state.insumo_itens, st.session_state.usuario_nome
-                        )
-                        if saida_id:
-                            registrar_auditoria(st.session_state.usuario_nome, "SAIDA_INSUMOS",
-                                f"Saída #{saida_id} — {len(st.session_state.insumo_itens)} item(ns) — Destino: {insumo_destino.strip()}")
-                            st.session_state.insumo_itens = []
-                            st.toast("Saída registrada!")
-                            time.sleep(0.3)
-                            st.rerun()
-                else:
-                    st.caption("Nenhum item adicionado ainda.")
+                    if st.session_state.insumo_itens:
+                        st.markdown("**Itens desta saída:**")
+                        for i, item in enumerate(st.session_state.insumo_itens):
+                            col_desc, col_qtd, col_rem = st.columns([5, 2, 1])
+                            col_desc.write(f"{i+1}. {item['descricao']}")
+                            col_qtd.write(f"{item['quantidade']:g} {item['unidade']}")
+                            with col_rem:
+                                if st.button("🗑", key=f"rem_insumo_item_{i}"):
+                                    st.session_state.insumo_itens.pop(i)
+                                    st.rerun()
+
+                        if st.button("💾 Registrar Saída", key="btn_salvar_insumo", type="primary"):
+                            obra_final = None if insumo_obra == "— Sem obra vinculada —" else insumo_obra
+                            saida_id = salvar_saida_insumos(
+                                insumo_data, obra_final, insumo_destino.strip(),
+                                st.session_state.insumo_itens, st.session_state.usuario_nome
+                            )
+                            if saida_id:
+                                registrar_auditoria(st.session_state.usuario_nome, "SAIDA_INSUMOS",
+                                    f"Saída #{saida_id} — {len(st.session_state.insumo_itens)} item(ns) — Destino: {insumo_destino.strip()}")
+                                st.session_state.insumo_itens = []
+                                st.toast("Saída registrada!")
+                                time.sleep(0.3)
+                                st.rerun()
+                    else:
+                        st.caption("Nenhum item adicionado ainda.")
 
                 st.markdown("---")
-                st.markdown("#### Histórico de Saídas")
+                st.markdown("#### Histórico e Conferência de Saídas")
+                st.caption("A via física continua sendo emitida normalmente — a conferência abaixo (Disponível/Indisponível) é o controle digital, sem precisar editar o romaneio na mão depois.")
                 df_saidas = carregar_saidas_insumos()
                 if df_saidas.empty:
                     st.caption("Nenhuma saída registrada ainda.")
                 else:
                     for _, saida_row in df_saidas.iterrows():
+                        df_itens_saida = carregar_itens_saida_insumos(int(saida_row['id']))
+                        n_total_ins = len(df_itens_saida)
+                        n_conf_ins  = len(df_itens_saida[df_itens_saida['status_item'] != 'Aguardando Conferencia']) if n_total_ins else 0
+                        n_indisp_ins = len(df_itens_saida[df_itens_saida['status_item'] == 'Indisponivel']) if n_total_ins else 0
+                        if n_indisp_ins > 0:            icone_ins = "❌"
+                        elif n_total_ins and n_conf_ins == n_total_ins: icone_ins = "✅"
+                        else:                            icone_ins = "⏳"
+
                         with st.expander(
-                            f"{pd.to_datetime(saida_row['data_saida']).strftime('%d/%m/%Y')} — "
+                            f"{icone_ins} {pd.to_datetime(saida_row['data_saida']).strftime('%d/%m/%Y')} — "
                             f"{saida_row.get('obra') or 'Sem obra'} — {saida_row.get('destino') or '—'} "
-                            f"({int(saida_row['qtd_itens'])} item(ns)) — por {saida_row['registrado_por']}"
+                            f"({n_conf_ins}/{n_total_ins} conferidos{f' — {n_indisp_ins} FALTANDO' if n_indisp_ins > 0 else ''}) — por {saida_row['registrado_por']}",
+                            expanded=(n_indisp_ins > 0 or n_conf_ins < n_total_ins)
                         ):
-                            df_itens_saida = carregar_itens_saida_insumos(int(saida_row['id']))
-                            st.dataframe(df_itens_saida[['descricao', 'quantidade', 'unidade']], hide_index=True, use_container_width=True)
+                            hci = st.columns([4, 2, 2, 3, 2])
+                            for col_h, label in zip(hci, ["INSUMO", "QTD", "UN", "STATUS", "AÇÃO"]):
+                                col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
+                            st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
+
+                            for _, item_ins in df_itens_saida.iterrows():
+                                st_ins = item_ins['status_item']
+                                if st_ins == 'Disponivel':     cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
+                                elif st_ins == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
+                                else:                           cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
+                                rci = st.columns([4, 2, 2, 3, 2])
+                                rci[0].markdown(f"**{item_ins['descricao']}**")
+                                rci[1].markdown(f"`{item_ins['quantidade']}`")
+                                rci[2].markdown(f"{item_ins['unidade']}")
+                                rci[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {st_ins}</span>", unsafe_allow_html=True)
+                                with rci[4]:
+                                    acao_ins = st.selectbox(
+                                        "", ["Aguardando Conferencia", "Disponivel", "Indisponivel"],
+                                        index=["Aguardando Conferencia", "Disponivel", "Indisponivel"].index(st_ins),
+                                        key=f"alm_ins_st_{item_ins['id']}", label_visibility="collapsed"
+                                    )
+                                    if acao_ins != st_ins:
+                                        atualizar_item_insumo(int(item_ins['id']), acao_ins, item_ins.get('observacao') or '', st.session_state.usuario_nome)
+                                        st.rerun()
+                                obs_atual_ins = item_ins.get('observacao') or ''
+                                obs_nova_ins  = st.text_input(f"Obs — {item_ins['descricao']}:", value=obs_atual_ins,
+                                                          key=f"alm_ins_obs_{item_ins['id']}", placeholder="Ex: em falta, previsão 20/06...")
+                                if obs_nova_ins != obs_atual_ins:
+                                    atualizar_item_insumo(int(item_ins['id']), st_ins, obs_nova_ins, st.session_state.usuario_nome)
+                                st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
+
+                            if n_indisp_ins > 0:
+                                itens_falt_ins = df_itens_saida[df_itens_saida['status_item'] == 'Indisponivel']['descricao'].tolist()
+                                st.error(f"⚠️ Itens em falta: {', '.join(itens_falt_ins)}")
+                            elif n_total_ins and n_conf_ins == n_total_ins:
+                                st.success("✅ Todos os itens conferidos e disponíveis!")
+
+                            st.markdown("<br>", unsafe_allow_html=True)
                             rom_insumo_bytes = gerar_romaneio_insumos_xlsx(saida_row, df_itens_saida)
                             st.download_button(
                                 "🖨️ Emitir Romaneio", data=rom_insumo_bytes,
