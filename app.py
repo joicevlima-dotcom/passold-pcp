@@ -2118,8 +2118,10 @@ def carregar_todas_ops_com_componentes():
     conn = conectar_banco()
     try:
         df = pd.read_sql_query("""
-            SELECT DISTINCT item_id, Obra_Vinculada, Cod_Lote, Num_OP
-            FROM componentes_op ORDER BY Obra_Vinculada, Cod_Lote
+            SELECT DISTINCT c.item_id, c.Obra_Vinculada, c.Cod_Lote, c.Num_OP, i.Numero_Projeto
+            FROM componentes_op c
+            LEFT JOIN itens_detalhado i ON i.id = c.item_id
+            ORDER BY c.Obra_Vinculada, c.Cod_Lote
         """, conn)
     finally:
         liberar_conexao(conn)
@@ -2683,7 +2685,8 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
     buf.seek(0)
     return buf.getvalue()
 
-def gerar_romaneio_componentes_xlsx(obra: str, num_op: str, cod_lote: str, componentes_disponiveis_df, emitido_por: str) -> bytes:
+def gerar_romaneio_componentes_xlsx(obra: str, num_op: str, cod_lote: str, componentes_disponiveis_df, emitido_por: str,
+                                     numero_projeto: str = '') -> bytes:
     """Romaneio com os componentes de uma OP ja conferidos e DISPONIVEIS — e o que
     realmente sai do almoxarifado junto com a OP. Indisponiveis nao entram aqui."""
     from openpyxl import Workbook
@@ -2718,6 +2721,7 @@ def gerar_romaneio_componentes_xlsx(obra: str, num_op: str, cod_lote: str, compo
     infos = [
         ("OP:", str(num_op or '—')),
         ("Obra:", str(obra or '—')),
+        ("Nº do Projeto:", str(numero_projeto or '—')),
         ("Lote:", str(cod_lote or '—')),
         ("Emitido por:", str(emitido_por)),
         ("Data:", datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M')),
@@ -6348,7 +6352,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         else:              icone = "⏳"
 
                         with st.expander(
-                            f"{icone} OP: {op_row['num_op']} — {op_row['cod_lote']} | {op_row['obra_vinculada']}  "
+                            f"{icone} OP: {op_row['num_op']} — {op_row['cod_lote']} | {op_row['obra_vinculada']}"
+                            f"{' (Proj. ' + str(op_row['numero_projeto']) + ')' if op_row.get('numero_projeto') else ''}  "
                             f"({n_conf}/{n_total} conferidos{f' — {n_indisp} FALTANDO' if n_indisp > 0 else ''})",
                             expanded=(n_indisp > 0 or n_conf < n_total)
                         ):
@@ -6402,7 +6407,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             else:
                                 rom_comp_bytes = gerar_romaneio_componentes_xlsx(
                                     op_row['obra_vinculada'], op_row['num_op'], op_row['cod_lote'],
-                                    df_disponiveis, st.session_state.usuario_nome
+                                    df_disponiveis, st.session_state.usuario_nome,
+                                    numero_projeto=op_row.get('numero_projeto') or ''
                                 )
                                 st.download_button(
                                     "🖨️ Emitir Romaneio" if ja_emitido.empty else "🖨️ Reemitir Romaneio",
