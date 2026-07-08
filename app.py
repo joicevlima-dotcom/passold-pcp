@@ -1076,7 +1076,6 @@ def editar_numero_projeto(obra: str, projeto_antigo: str, projeto_novo: str):
         carregar_projetos.clear()
         _limpar_cache_geral()
         carregar_saidas_insumos.clear()
-        carregar_romaneios_manuais.clear()
         msg = "Projetos mesclados — já existia um cadastrado com esse número." if ja_existe else "Número do projeto atualizado em todos os registros!"
         return True, msg
     except Exception as e:
