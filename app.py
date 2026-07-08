@@ -2742,7 +2742,7 @@ def gerar_romaneio_componentes_xlsx(obra: str, num_op: str, cod_lote: str, compo
     linha += 1
 
     for i, (_, comp) in enumerate(componentes_disponiveis_df.iterrows()):
-        dados = [comp.get('nome_componente', ''), comp.get('quantidade', 0), comp.get('unidade', ''), "✔ DISPONÍVEL"]
+        dados = [comp.get('nome_componente', ''), comp.get('quantidade', 0), comp.get('unidade', ''), "✔ ENVIADO"]
         for col, val in enumerate(dados, 1):
             cel = ws.cell(linha, col, val)
             cel.font = Font(name="Arial", size=11)
@@ -2790,13 +2790,14 @@ def gerar_romaneio_insumos_xlsx(saida_row, itens_df) -> bytes:
     fill_sub = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
 
     ws.column_dimensions['A'].width = 30
-    ws.column_dimensions['B'].width = 16
-    ws.column_dimensions['C'].width = 16
+    ws.column_dimensions['B'].width = 14
+    ws.column_dimensions['C'].width = 14
+    ws.column_dimensions['D'].width = 16
 
-    ws.merge_cells("A1:C1")
-    _inserir_logo_cabecalho(ws, "C")
+    ws.merge_cells("A1:D1")
+    _inserir_logo_cabecalho(ws, "D")
 
-    ws.merge_cells("A2:C2")
+    ws.merge_cells("A2:D2")
     ws["A2"] = "ROMANEIO DE SAÍDA DE INSUMOS"
     ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
     ws["A2"].fill = fill_cab
@@ -2812,14 +2813,14 @@ def gerar_romaneio_insumos_xlsx(saida_row, itens_df) -> bytes:
     linha = 3
     for label, valor in infos:
         ws.cell(linha, 1, label).font = Font(name="Arial", size=11, bold=True)
-        ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=3)
+        ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=4)
         ws.cell(linha, 2, valor).font = Font(name="Arial", size=11)
-        for c in range(1, 4):
+        for c in range(1, 5):
             ws.cell(linha, c).border = borda
         linha += 1
 
     linha += 1
-    titulos = ["DESCRIÇÃO DO INSUMO", "QUANTIDADE", "UNIDADE"]
+    titulos = ["DESCRIÇÃO DO INSUMO", "QUANTIDADE", "UNIDADE", "STATUS"]
     for col, titulo in enumerate(titulos, 1):
         cel = ws.cell(linha, col, titulo)
         cel.font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
@@ -2829,7 +2830,7 @@ def gerar_romaneio_insumos_xlsx(saida_row, itens_df) -> bytes:
     linha += 1
 
     for i, (_, item) in enumerate(itens_df.iterrows()):
-        dados = [item.get('descricao', ''), item.get('quantidade', 0), item.get('unidade', '')]
+        dados = [item.get('descricao', ''), item.get('quantidade', 0), item.get('unidade', ''), "✔ ENVIADO"]
         for col, val in enumerate(dados, 1):
             cel = ws.cell(linha, col, val)
             cel.font = Font(name="Arial", size=11)
@@ -2843,15 +2844,15 @@ def gerar_romaneio_insumos_xlsx(saida_row, itens_df) -> bytes:
     ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=1)
     ws.cell(linha, 1, "TOTAL DE ITENS:").font = Font(name="Arial", size=11, bold=True)
     ws.cell(linha, 2, len(itens_df)).font = Font(name="Arial", size=11, bold=True)
-    for c in range(1, 4):
+    for c in range(1, 5):
         ws.cell(linha, c).border = borda
 
     linha += 2
-    linha = _inserir_aviso_conferencia(ws, linha, "C")
+    linha = _inserir_aviso_conferencia(ws, linha, "D")
 
     linha += 1
     assinaturas = [("Almoxarifado", False), ("Recebido em obra", True)]
-    _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=2, col_data=3)
+    _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=2, col_data=4)
 
     buf = BytesIO()
     wb.save(buf)
@@ -6426,18 +6427,22 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     st.markdown("---")
 
                 with st.expander("➕ Nova Saída de Insumos", expanded=df_todos_ins.empty):
-                    st.caption("Saída de material manual (parafuso, broca, lima etc) — igual qualquer outra saída, só que sem OP vinculada. Obra é opcional.")
+                    st.caption("Saída de material manual (parafuso, broca, lima etc) — igual qualquer outra saída, sem OP vinculada. Obra e Projeto são obrigatórios.")
                     obras_insumo = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
+                    if not obras_insumo:
+                        st.info("Cadastre uma Obra e um Projeto em 'Cadastrar Obra' antes de registrar uma saída de insumos.")
                     ii1, ii2, ii3, ii4 = st.columns(4)
                     with ii1:
                         insumo_data = st.date_input("Data de saída:", value=hoje_projeto().date(), format="DD/MM/YYYY", key="insumo_data")
                     with ii2:
-                        insumo_obra = st.selectbox("Obra (opcional):", ["— Sem obra vinculada —"] + obras_insumo, key="insumo_obra")
+                        insumo_obra = st.selectbox("Obra:", obras_insumo, key="insumo_obra") if obras_insumo else None
                     with ii3:
                         projetos_insumo = sorted(
                             df_projetos[df_projetos['Obra'] == insumo_obra]['Numero_Projeto'].unique().tolist()
-                        ) if insumo_obra != "— Sem obra vinculada —" and not df_projetos.empty else []
+                        ) if insumo_obra else []
                         insumo_projeto = st.selectbox("Projeto:", projetos_insumo, key="insumo_projeto") if projetos_insumo else None
+                        if insumo_obra and not projetos_insumo:
+                            st.caption("⚠️ Cadastre um projeto pra essa obra em 'Cadastrar Obra'.")
                     with ii4:
                         insumo_destino = st.text_input("Destino:", key="insumo_destino", placeholder="Ex: Produção, Obra tal, Manutenção...")
 
@@ -6476,12 +6481,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     st.session_state.insumo_itens.pop(i)
                                     st.rerun()
 
-                        if st.button("💾 Registrar Saída", key="btn_salvar_insumo", type="primary"):
-                            obra_final = None if insumo_obra == "— Sem obra vinculada —" else insumo_obra
+                        if st.button("💾 Registrar Saída", key="btn_salvar_insumo", type="primary",
+                                     disabled=not (insumo_obra and insumo_projeto)):
                             saida_id = salvar_saida_insumos(
-                                insumo_data, obra_final, insumo_destino.strip(),
+                                insumo_data, insumo_obra, insumo_destino.strip(),
                                 st.session_state.insumo_itens, st.session_state.usuario_nome,
-                                numero_projeto=insumo_projeto or ''
+                                numero_projeto=insumo_projeto
                             )
                             if saida_id:
                                 registrar_auditoria(st.session_state.usuario_nome, "SAIDA_INSUMOS",
