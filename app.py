@@ -1044,9 +1044,9 @@ def carregar_projetos():
 def editar_numero_projeto(obra: str, projeto_antigo: str, projeto_novo: str):
     """Renomeia um Numero_Projeto, propagando pra todas as tabelas que guardam copia do
     valor como texto (nao ha FK): projetos, cronograma_macro, itens_detalhado,
-    saidas_insumos, romaneios_manuais. Se o numero novo ja existir pra mesma obra
-    (duplicata), so remove o registro velho de 'projetos' — as outras tabelas ja
-    passam a apontar pro mesmo texto, entao viram uma mescla."""
+    saidas_insumos, romaneios_manuais, solicitacoes_op. Se o numero novo ja existir pra
+    mesma obra (duplicata), so remove o registro velho de 'projetos' — as outras tabelas
+    ja passam a apontar pro mesmo texto, entao viram uma mescla."""
     projeto_novo = projeto_novo.strip()
     if not projeto_novo:
         return False, "Informe o novo número do projeto."
@@ -1069,6 +1069,8 @@ def editar_numero_projeto(obra: str, projeto_antigo: str, projeto_novo: str):
         cursor.execute("UPDATE saidas_insumos SET numero_projeto=%s WHERE obra=%s AND numero_projeto=%s",
                         (projeto_novo, obra, projeto_antigo))
         cursor.execute("UPDATE romaneios_manuais SET numero_projeto=%s WHERE obra_vinculada=%s AND numero_projeto=%s",
+                        (projeto_novo, obra, projeto_antigo))
+        cursor.execute("UPDATE solicitacoes_op SET numero_projeto=%s WHERE obra=%s AND numero_projeto=%s",
                         (projeto_novo, obra, projeto_antigo))
         conn.commit()
         carregar_projetos.clear()
