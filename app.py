@@ -641,6 +641,7 @@ def inicializar_banco_de_dados():
         """)
         cursor.execute("ALTER TABLE romaneios_manuais ADD COLUMN IF NOT EXISTS numero_projeto TEXT")
         cursor.execute("ALTER TABLE romaneios_manuais ADD COLUMN IF NOT EXISTS etapa TEXT")
+        cursor.execute("ALTER TABLE romaneios_manuais ADD COLUMN IF NOT EXISTS terceirizado BOOLEAN DEFAULT FALSE")
         cursor.execute("ALTER TABLE romaneios_manuais_itens ADD COLUMN IF NOT EXISTS cod TEXT")
         cursor.execute("ALTER TABLE romaneios_manuais_itens ADD COLUMN IF NOT EXISTS peso_kg NUMERIC")
         cursor.execute("ALTER TABLE romaneios_manuais_itens ADD COLUMN IF NOT EXISTS unidade TEXT DEFAULT 'un'")
@@ -1697,15 +1698,15 @@ def deletar_arquivo_romaneio_devolvido(arquivo_id: int):
         liberar_conexao(conn)
 
 def salvar_romaneio_manual(obra: str, data_recebimento, itens: list, usuario: str,
-                            numero_projeto: str = '', etapa: str = ''):
+                            numero_projeto: str = '', etapa: str = '', terceirizado: bool = False):
     """itens: lista de dicts {'descricao':..., 'quantidade':..., 'cod':..., 'peso_kg':..., 'unidade':...}"""
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO romaneios_manuais (obra_vinculada, data_recebimento, criado_por, numero_projeto, etapa) "
-            "VALUES (%s,%s,%s,%s,%s) RETURNING id",
-            (obra, data_recebimento, usuario, numero_projeto, etapa)
+            "INSERT INTO romaneios_manuais (obra_vinculada, data_recebimento, criado_por, numero_projeto, etapa, terceirizado) "
+            "VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+            (obra, data_recebimento, usuario, numero_projeto, etapa, terceirizado)
         )
         romaneio_id = cursor.fetchone()[0]
         for item in itens:
@@ -1729,7 +1730,7 @@ def carregar_romaneios_manuais():
     try:
         return pd.read_sql_query(
             "SELECT r.id, r.obra_vinculada, r.data_recebimento, r.criado_por, r.criado_em, "
-            "r.numero_projeto, r.etapa, COUNT(i.id) AS qtd_itens "
+            "r.numero_projeto, r.etapa, r.terceirizado, COUNT(i.id) AS qtd_itens "
             "FROM romaneios_manuais r LEFT JOIN romaneios_manuais_itens i ON i.romaneio_id = r.id "
             "GROUP BY r.id ORDER BY r.data_recebimento DESC, r.id DESC",
             conn
@@ -1803,7 +1804,7 @@ def _inserir_aviso_conferencia(ws, linha: int, ultima_col_letra: str) -> int:
     return linha + 3
 
 def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por: str,
-                                numero_projeto: str = '', etapa: str = '') -> bytes:
+                                numero_projeto: str = '', etapa: str = '', terceirizado: bool = False) -> bytes:
     """Gera o romaneio manual .xlsx com a lista de itens (sem OP vinculada)."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -1832,7 +1833,7 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
     _inserir_logo_cabecalho(ws, "G")
 
     ws.merge_cells("A2:G2")
-    ws["A2"] = "ROMANEIO MANUAL"
+    ws["A2"] = "ROMANEIO MANUAL - TERCERIZADO" if terceirizado else "ROMANEIO MANUAL"
     ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
     ws["A2"].fill = fill_cab
     ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
@@ -1889,7 +1890,11 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
     linha = _inserir_aviso_conferencia(ws, linha, "G")
 
     linha += 1
-    assinaturas = ["Recebedor na Obra / Data", "Conferência Almoxarifado"]
+    assinaturas = (
+        ["Conferência interna", "Recebimento terceiro / Assinatura legível"]
+        if terceirizado else
+        ["Recebedor na Obra / Data", "Conferência Almoxarifado"]
+    )
     for ass in assinaturas:
         ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=4)
         ws.cell(linha, 1).border = Border(bottom=bd)
@@ -6481,6 +6486,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 with rm3:
                     rom_data = st.date_input("Data de recebimento:", value=hoje_projeto().date(),
                                               format="DD/MM/YYYY", key="rom_data")
+                rom_terceirizado = st.toggle("📦 Envio para terceiro?", key="rom_terceirizado",
+                                              help="Marca esse romaneio como Manual - Terceirizado: muda o título e as assinaturas do documento emitido.")
                 rom_etapa = st.text_input("Etapa:", key="rom_etapa", placeholder="Ex: 49º Pavimento - Estrutura")
 
                 st.markdown("**Adicionar item ao romaneio:**")
@@ -6521,7 +6528,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     if st.button("💾 Salvar Romaneio", type="primary", key="btn_salvar_rom_manual", disabled=not rom_projeto):
                         romaneio_id = salvar_romaneio_manual(
                             rom_obra, rom_data, st.session_state.rom_itens, st.session_state.usuario_nome,
-                            numero_projeto=rom_projeto or '', etapa=rom_etapa.strip()
+                            numero_projeto=rom_projeto or '', etapa=rom_etapa.strip(), terceirizado=rom_terceirizado
                         )
                         if romaneio_id:
                             registrar_auditoria(st.session_state.usuario_nome, "ROMANEIO_MANUAL",
@@ -6547,9 +6554,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 if df_rom_manual.empty:
                     st.caption("Nenhum romaneio para essa obra ainda.")
                 for _, rm_row in df_rom_manual.iterrows():
+                    rm_terc = bool(rm_row.get('terceirizado', False))
+                    tag_terc = "  🏭 Terceirizado" if rm_terc else ""
                     with st.expander(
                         f"{rm_row['obra_vinculada']} — {pd.to_datetime(rm_row['data_recebimento']).strftime('%d/%m/%Y')} "
-                        f"({int(rm_row['qtd_itens'])} item(ns)) — por {rm_row['criado_por']}"
+                        f"({int(rm_row['qtd_itens'])} item(ns)) — por {rm_row['criado_por']}{tag_terc}"
                     ):
                         df_itens_rom = carregar_itens_romaneio_manual(int(rm_row['id']))
                         st.caption(f"Projeto {rm_row.get('numero_projeto') or '—'} · {rm_row.get('etapa') or 'Sem etapa'}")
@@ -6558,7 +6567,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         with rmb1:
                             rom_bytes = gerar_romaneio_manual_xlsx(
                                 rm_row['obra_vinculada'], rm_row['data_recebimento'], df_itens_rom, rm_row['criado_por'],
-                                numero_projeto=rm_row.get('numero_projeto') or '', etapa=rm_row.get('etapa') or ''
+                                numero_projeto=rm_row.get('numero_projeto') or '', etapa=rm_row.get('etapa') or '',
+                                terceirizado=rm_terc
                             )
                             st.download_button(
                                 "🖨️ Emitir Romaneio", data=rom_bytes,
