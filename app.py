@@ -2363,15 +2363,22 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
     ws.column_dimensions['E'].width = 12
     ws.column_dimensions['F'].width = 12
 
-    tipo_escopo = str(macro_row.get('Tipo_Escopo', 'ACM') or 'ACM')
+    # O escopo do LOTE (itens_detalhado.Escopo) manda mais que o da frente
+    # (cronograma_macro.Tipo_Escopo): uma frente pode ser predominantemente ACM
+    # mas ter um lote especifico que a Esquadria produz (ex: perfis de sobra) —
+    # sem essa prioridade, a OP saia sempre com o modelo da frente, errado pro lote.
+    tipo_escopo = normaliza_escopo(lote_row.get('Escopo')) or normaliza_escopo(macro_row.get('Tipo_Escopo')) or 'ACM'
     num_projeto  = str(macro_row.get('Numero_Projeto', '') or '')
+
+    TITULOS_OP_ESCOPO = {"ACM": "ACM", "Esquadria-Vidro": "ESQUADRIAS", "Terceirizada": "TERCEIRIZADA"}
+    titulo_escopo = TITULOS_OP_ESCOPO.get(tipo_escopo, tipo_escopo.upper())
 
     # ── CABEÇALHO ──────────────────────────────────────────
     ws.merge_cells("A1:F1")
     _inserir_logo_cabecalho(ws, "F")
 
     ws.merge_cells("A2:F2")
-    ws["A2"] = f"ORDEM DE PRODUÇÃO — {tipo_escopo.upper()}"
+    ws["A2"] = f"ORDEM DE PRODUÇÃO — {titulo_escopo}"
     ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
     ws["A2"].fill = fill_az
     ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
@@ -2403,13 +2410,13 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
     linha = linha_inicio + 8
 
     # ── CAMPOS ESPECÍFICOS POR TIPO ────────────────────────
-    if tipo_escopo.upper() == "ACM":
+    if tipo_escopo == "ACM":
         info_row(ws, linha,   "ÁREA TOTAL (m²):", f"{campos_extras.get('area_total', lote_row.get('M2_Item', 0)):.2f} m²")
         info_row(ws, linha+1, "DIFICULDADE:",     campos_extras.get('dificuldade', lote_row.get('Dificuldade', '—')))
         info_row(ws, linha+2, "QTD CHAPAS:",      lote_row.get('Qtd_Caixas', '—'))
         info_row(ws, linha+3, "QTD FOLHAS PROJ:", campos_extras.get('qtd_folhas', '—'))
         linha += 4
-    elif "ESQUADRIA" in tipo_escopo.upper() or "VIDRO" in tipo_escopo.upper():
+    elif tipo_escopo == "Esquadria-Vidro":
         info_row(ws, linha,   "PESO TOTAL:",      campos_extras.get('peso_total', '—'))
         info_row(ws, linha+1, "QTD FOLHAS PROJ:", campos_extras.get('qtd_folhas', '—'))
         linha += 2
