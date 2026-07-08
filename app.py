@@ -1807,6 +1807,26 @@ def _inserir_aviso_conferencia(ws, linha: int, ultima_col_letra: str) -> int:
     ws.row_dimensions[linha].height = 55
     return linha + 3
 
+def _inserir_assinaturas(ws, linha: int, assinaturas: list, col_fim_bloco: int, col_data: int) -> int:
+    """Bloco de assinaturas padrao, igual em todos os romaneios: linha em branco com borda
+    inferior pra assinar, label em negrito embaixo, campo de data ao lado, e "Assinatura
+    legível" em fonte menor quando o item precisa (quem recebe fisicamente o material —
+    obra, terceiro — ao contrario de conferencias so internas). assinaturas: lista de
+    (label, precisa_legivel). Retorna a proxima linha livre."""
+    from openpyxl.styles import Font, Border, Side
+    bd = Side(style='thin', color="000000")
+    for label, precisa_legivel in assinaturas:
+        ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=col_fim_bloco)
+        ws.cell(linha, 1).border = Border(bottom=bd)
+        ws.cell(linha + 1, 1, label).font = Font(name="Arial", size=10, bold=True)
+        ws.cell(linha, col_data, "____/____/______").font = Font(name="Arial", size=11)
+        if precisa_legivel:
+            ws.cell(linha + 2, 1, "Assinatura legível").font = Font(name="Arial", size=9)
+            linha += 4
+        else:
+            linha += 3
+    return linha
+
 def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por: str,
                                 numero_projeto: str = '', etapa: str = '', terceirizado: bool = False) -> bytes:
     """Gera o romaneio manual .xlsx com a lista de itens (sem OP vinculada)."""
@@ -1895,16 +1915,11 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
 
     linha += 1
     assinaturas = (
-        ["Conferência interna", "Recebimento terceiro / Assinatura legível"]
+        [("Conferência interna", False), ("Recebimento terceiro", True)]
         if terceirizado else
-        ["Recebedor na Obra / Data", "Conferência Almoxarifado"]
+        [("Recebedor na Obra", True), ("Conferência Almoxarifado", False)]
     )
-    for ass in assinaturas:
-        ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=4)
-        ws.cell(linha, 1).border = Border(bottom=bd)
-        ws.cell(linha + 1, 1, ass).font = Font(name="Arial", size=10, bold=True)
-        ws.cell(linha, 6, "____/____/______").font = Font(name="Arial", size=11)
-        linha += 3
+    _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=4, col_data=6)
 
     buf = BytesIO()
     wb.save(buf)
@@ -2531,13 +2546,8 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
         linha += 2
 
     # ── ASSINATURAS ────────────────────────────────────────
-    assinaturas = ["Responsável PCP", "Responsável Produção", "Conferência"]
-    for ass in assinaturas:
-        ws.merge_cells(f"A{linha}:D{linha}")
-        ws.cell(linha, 1).border = bd_bot
-        ws.cell(linha+1, 1, ass).font = Font(name="Arial", size=10, bold=True)
-        ws.cell(linha, 5, "____/____/______").font = Font(name="Arial", size=10)
-        linha += 3
+    assinaturas = [("Responsável PCP", False), ("Responsável Produção", False), ("Conferência", False)]
+    _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=4, col_data=5)
 
     buf = BytesIO()
     wb.save(buf)
@@ -2665,17 +2675,7 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
         ("Recebedor na Obra / Data", True),
         ("Engenheiro Responsável", True),
     ]
-    for ass, precisa_legivel in assinaturas:
-        ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=3)
-        ws.cell(linha, 1).border = Border(bottom=bd)
-        ws.cell(linha, 1, "").font = Font(name="Arial", size=11)
-        ws.cell(linha+1, 1, ass).font = Font(name="Arial", size=10, bold=True)
-        ws.cell(linha, 4, "____/____/______").font = Font(name="Arial", size=11)
-        if precisa_legivel:
-            ws.cell(linha+2, 1, "Assinatura legível").font = Font(name="Arial", size=9)
-            linha += 4
-        else:
-            linha += 3
+    _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=3, col_data=4)
 
     buf = BytesIO()
     wb.save(buf)
@@ -2762,13 +2762,8 @@ def gerar_romaneio_componentes_xlsx(obra: str, num_op: str, cod_lote: str, compo
     linha = _inserir_aviso_conferencia(ws, linha, "D")
 
     linha += 1
-    assinaturas = ["Almoxarifado", "Recebedor / Produção"]
-    for ass in assinaturas:
-        ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=2)
-        ws.cell(linha, 1).border = Border(bottom=bd)
-        ws.cell(linha+1, 1, ass).font = Font(name="Arial", size=10, bold=True)
-        ws.cell(linha, 3, "____/____/______").font = Font(name="Arial", size=11)
-        linha += 3
+    assinaturas = [("Almoxarifado", False), ("Recebedor / Produção", True)]
+    _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=2, col_data=3)
 
     buf = BytesIO()
     wb.save(buf)
@@ -2853,9 +2848,8 @@ def gerar_romaneio_insumos_xlsx(saida_row, itens_df) -> bytes:
     linha = _inserir_aviso_conferencia(ws, linha, "C")
 
     linha += 1
-    ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=2)
-    ws.cell(linha, 1).border = Border(bottom=bd)
-    ws.cell(linha+1, 1, "Retirado por / Data").font = Font(name="Arial", size=10, bold=True)
+    assinaturas = [("Almoxarifado", False), ("Recebido em obra", True)]
+    _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=2, col_data=3)
 
     buf = BytesIO()
     wb.save(buf)
@@ -6550,14 +6544,19 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             elif n_total_ins and n_conf_ins == n_total_ins:
                                 st.success("✅ Todos os itens conferidos e disponíveis!")
 
+                            # ── Emitir romaneio (só com os itens Disponível, igual as OPs) ──
                             st.markdown("<br>", unsafe_allow_html=True)
-                            rom_insumo_bytes = gerar_romaneio_insumos_xlsx(saida_row, df_itens_saida)
-                            st.download_button(
-                                "🖨️ Emitir Romaneio", data=rom_insumo_bytes,
-                                file_name=f"Romaneio_Insumos_{pd.to_datetime(saida_row['data_saida']).strftime('%Y%m%d')}_{int(saida_row['id'])}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key=f"dl_saida_insumo_{saida_row['id']}"
-                            )
+                            df_disp_ins = df_itens_saida[df_itens_saida['status_item'] == 'Disponivel']
+                            if df_disp_ins.empty:
+                                st.caption("Nenhum item Disponível ainda pra emitir romaneio — confira os itens acima primeiro.")
+                            else:
+                                rom_insumo_bytes = gerar_romaneio_insumos_xlsx(saida_row, df_disp_ins)
+                                st.download_button(
+                                    "🖨️ Emitir Romaneio", data=rom_insumo_bytes,
+                                    file_name=f"Romaneio_Insumos_{pd.to_datetime(saida_row['data_saida']).strftime('%Y%m%d')}_{int(saida_row['id'])}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key=f"dl_saida_insumo_{saida_row['id']}"
+                                )
 
     # ==================================================
     # ROMANEIO MANUAL (sem OP vinculada)
