@@ -733,6 +733,7 @@ def inicializar_banco_de_dados():
                 unidade TEXT DEFAULT 'un'
             )
         """)
+        cursor.execute("ALTER TABLE saidas_insumos ADD COLUMN IF NOT EXISTS numero_projeto TEXT")
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS status_item TEXT DEFAULT 'Aguardando Conferencia'")
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS observacao TEXT")
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS conferido_por TEXT")
@@ -2209,7 +2210,7 @@ def carregar_saidas_insumos():
     conn = conectar_banco()
     try:
         return pd.read_sql_query("""
-            SELECT s.id, s.data_saida, s.obra, s.destino, s.registrado_por, s.criado_em,
+            SELECT s.id, s.data_saida, s.obra, s.numero_projeto, s.destino, s.registrado_por, s.criado_em,
                    COUNT(i.id) AS qtd_itens
             FROM saidas_insumos s LEFT JOIN saidas_insumos_itens i ON i.saida_id = s.id
             GROUP BY s.id ORDER BY s.data_saida DESC, s.id DESC
@@ -2263,16 +2264,16 @@ def atualizar_item_insumo(item_id: int, status: str, obs: str, usuario: str):
     finally:
         liberar_conexao(conn)
 
-def salvar_saida_insumos(data_saida, obra: str, destino: str, itens: list, usuario: str):
+def salvar_saida_insumos(data_saida, obra: str, destino: str, itens: list, usuario: str, numero_projeto: str = ''):
     """Saida de insumos (parafuso, broca, lima etc) do almoxarifado — igual qualquer outra
     saida de material, so que manual porque nao esta vinculada a uma OP. Obra e opcional."""
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO saidas_insumos (data_saida, obra, destino, registrado_por)
-            VALUES (%s,%s,%s,%s) RETURNING id
-        """, (data_saida, obra or None, destino, usuario))
+            INSERT INTO saidas_insumos (data_saida, obra, numero_projeto, destino, registrado_por)
+            VALUES (%s,%s,%s,%s,%s) RETURNING id
+        """, (data_saida, obra or None, numero_projeto or None, destino, usuario))
         saida_id = cursor.fetchone()[0]
         for item in itens:
             cursor.execute("""
@@ -2804,6 +2805,7 @@ def gerar_romaneio_insumos_xlsx(saida_row, itens_df) -> bytes:
     infos = [
         ("Data:", pd.to_datetime(saida_row.get('data_saida')).strftime('%d/%m/%Y')),
         ("Obra:", str(saida_row.get('obra') or '—')),
+        ("Nº do Projeto:", str(saida_row.get('numero_projeto') or '—')),
         ("Destino:", str(saida_row.get('destino') or '—')),
         ("Registrado por:", str(saida_row.get('registrado_por') or '—')),
     ]
@@ -6426,12 +6428,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 with st.expander("➕ Nova Saída de Insumos", expanded=df_todos_ins.empty):
                     st.caption("Saída de material manual (parafuso, broca, lima etc) — igual qualquer outra saída, só que sem OP vinculada. Obra é opcional.")
                     obras_insumo = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
-                    ii1, ii2, ii3 = st.columns(3)
+                    ii1, ii2, ii3, ii4 = st.columns(4)
                     with ii1:
                         insumo_data = st.date_input("Data de saída:", value=hoje_projeto().date(), format="DD/MM/YYYY", key="insumo_data")
                     with ii2:
                         insumo_obra = st.selectbox("Obra (opcional):", ["— Sem obra vinculada —"] + obras_insumo, key="insumo_obra")
                     with ii3:
+                        projetos_insumo = sorted(
+                            df_projetos[df_projetos['Obra'] == insumo_obra]['Numero_Projeto'].unique().tolist()
+                        ) if insumo_obra != "— Sem obra vinculada —" and not df_projetos.empty else []
+                        insumo_projeto = st.selectbox("Projeto:", projetos_insumo, key="insumo_projeto") if projetos_insumo else None
+                    with ii4:
                         insumo_destino = st.text_input("Destino:", key="insumo_destino", placeholder="Ex: Produção, Obra tal, Manutenção...")
 
                     if "insumo_itens" not in st.session_state:
@@ -6473,7 +6480,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             obra_final = None if insumo_obra == "— Sem obra vinculada —" else insumo_obra
                             saida_id = salvar_saida_insumos(
                                 insumo_data, obra_final, insumo_destino.strip(),
-                                st.session_state.insumo_itens, st.session_state.usuario_nome
+                                st.session_state.insumo_itens, st.session_state.usuario_nome,
+                                numero_projeto=insumo_projeto or ''
                             )
                             if saida_id:
                                 registrar_auditoria(st.session_state.usuario_nome, "SAIDA_INSUMOS",
@@ -6503,7 +6511,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                         with st.expander(
                             f"{icone_ins} {pd.to_datetime(saida_row['data_saida']).strftime('%d/%m/%Y')} — "
-                            f"{saida_row.get('obra') or 'Sem obra'} — {saida_row.get('destino') or '—'} "
+                            f"{saida_row.get('obra') or 'Sem obra'}"
+                            f"{' (Proj. ' + str(saida_row['numero_projeto']) + ')' if saida_row.get('numero_projeto') else ''}"
+                            f" — {saida_row.get('destino') or '—'} "
                             f"({n_conf_ins}/{n_total_ins} conferidos{f' — {n_indisp_ins} FALTANDO' if n_indisp_ins > 0 else ''}) — por {saida_row['registrado_por']}",
                             expanded=(n_indisp_ins > 0 or n_conf_ins < n_total_ins)
                         ):
