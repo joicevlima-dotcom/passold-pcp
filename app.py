@@ -4351,6 +4351,23 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     elif setor not in ["Producao", "Master"]:
                                         st.markdown("<div style='text-align:center;color:#94A3B8;font-size:12px;padding:8px;'>Em producao</div>", unsafe_allow_html=True)
 
+                            # ── ARQUIVOS DA OP ────────────────────────────────
+                            arqs_esq = carregar_arquivos_op(int(row['id']))
+                            if arqs_esq:
+                                with st.expander(f"📎 {len(arqs_esq)} arquivo(s) anexado(s)", expanded=False):
+                                    for arq in arqs_esq:
+                                        arq_id, arq_nome, arq_tipo, arq_enviado_por, _ = arq
+                                        ca1, ca2 = st.columns([5, 1])
+                                        ca1.markdown(f"📄 **{html_escape(arq_nome)}**  \n<small style='color:#94A3B8'>{html_escape(arq_enviado_por)}</small>", unsafe_allow_html=True)
+                                        conteudo_arq = carregar_conteudo_arquivo(arq_id)
+                                        if conteudo_arq:
+                                            _, _, bytes_arq = conteudo_arq
+                                            ca2.download_button(
+                                                "⬇️", data=bytes(bytes_arq),
+                                                file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
+                                                key=f"esq_dl_{arq_id}"
+                                            )
+
                             if st.session_state.get(f"esq_modal_{row['id']}", False):
                                 with st.container(border=True):
                                     st.markdown(f"#### `{row['Cod_Lote']}` — {row['Obra_Vinculada']} — Tipo de Envio")
