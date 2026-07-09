@@ -7330,8 +7330,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 status_opcoes = ["Todos", "Pendente", "Liberado para Fabrica", "Parcialmente Concluido", "Concluido"]
                 filtro_status_rel = st.selectbox("Status:", status_opcoes, key="rel_status")
             with rel_f3:
-                escopo_opcoes = ["Todos"] + sorted(df_banco_micro_rel['Tipo_Material'].dropna().unique().tolist()) if not df_banco_micro_rel.empty else ["Todos"]
-                filtro_escopo_rel = st.selectbox("Escopo / Material:", escopo_opcoes, key="rel_escopo")
+                escopo_labels_rel = {"ACM": "ACM", "Esquadrias": "Esquadria-Vidro", "Terceirizada": "Terceirizada"}
+                filtro_escopo_rel = st.selectbox("Escopo:", ["Todos"] + list(escopo_labels_rel.keys()), key="rel_escopo")
 
             rel_f4, rel_f5, rel_f6 = st.columns([2, 2, 2])
             with rel_f4:
@@ -7357,7 +7357,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 if filtro_status_rel != "Todos":
                     df_rel = df_rel[df_rel['Status_Item'] == filtro_status_rel]
                 if filtro_escopo_rel != "Todos":
-                    df_rel = df_rel[df_rel['Tipo_Material'] == filtro_escopo_rel]
+                    df_rel = df_rel[df_rel['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
                 col_data_map = {
                     "Entrada em Produção": "Data_Producao_Programada",
                     "Data Limite": "Data_Limite_Obra"
