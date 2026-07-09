@@ -7350,7 +7350,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             df_rel = df_banco_micro_rel.copy() if not df_banco_micro_rel.empty else pd.DataFrame()
 
             if not df_rel.empty:
-                if not mostrar_concluidos:
+                if not mostrar_concluidos and filtro_status_rel != "Concluido":
                     df_rel = df_rel[df_rel['Status_Item'] != 'Concluido']
                 if filtro_obra_rel != "Todas":
                     df_rel = df_rel[df_rel['Obra_Vinculada'] == filtro_obra_rel]
