@@ -6956,8 +6956,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     else:
                         st.caption("Nenhum anexo ainda.")
 
-            tab_rd_op, tab_rd_comp, tab_rd_ins = st.tabs([
-                "📋 Romaneios de OP / Peças", "🧩 Romaneios de Componentes", "📦 Romaneios de Insumos"
+            tab_rd_op, tab_rd_comp, tab_rd_ins, tab_rd_man = st.tabs([
+                "📋 Romaneios de OP / Peças", "🧩 Romaneios de Componentes", "📦 Romaneios de Insumos", "🗒️ Romaneio Manual"
             ])
 
             with tab_rd_op:
@@ -7024,6 +7024,27 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             with cins2:
                                 st.markdown(badge_ri)
                             _bloco_anexo_rd('INSUMO', saida_id_rd, f"ins_{saida_id_rd}")
+
+            with tab_rd_man:
+                df_rd_man = carregar_romaneios_manuais()
+                if not df_rd_man.empty:
+                    df_rd_man['_devolvido'] = df_rd_man['id'].apply(lambda i: ('MANUAL', int(i)) in status_rd)
+                    if filtro_rd == "Pendentes":
+                        df_rd_man = df_rd_man[~df_rd_man['_devolvido']]
+                if df_rd_man.empty:
+                    st.info("Nenhum romaneio manual pendente de devolução." if filtro_rd == "Pendentes" else "Nenhum romaneio manual cadastrado ainda.")
+                else:
+                    for _, row_rm in df_rd_man.iterrows():
+                        romaneio_id_rd = int(row_rm['id'])
+                        badge_rm = "🟢 Devolvido assinado" if row_rm['_devolvido'] else "🔴 Pendente"
+                        with st.container(border=True):
+                            cman1, cman2 = st.columns([4, 1])
+                            with cman1:
+                                st.markdown(f"**{row_rm['obra_vinculada']}** — {pd.to_datetime(row_rm['data_recebimento']).strftime('%d/%m/%Y')}")
+                                st.caption(f"Projeto {row_rm.get('numero_projeto') or '—'} · {row_rm.get('etapa') or 'Sem etapa'} · {int(row_rm.get('qtd_itens') or 0)} item(ns) · {row_rm.get('criado_por','—')}")
+                            with cman2:
+                                st.markdown(badge_rm)
+                            _bloco_anexo_rd('MANUAL', romaneio_id_rd, f"man_{romaneio_id_rd}")
 
     # ==================================================
     # SISTEMA DE MEDICAO — agora 100% no banco
