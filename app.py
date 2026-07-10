@@ -705,6 +705,7 @@ def inicializar_banco_de_dados():
                 Conferido_Em TEXT
             )
         """)
+        cursor.execute("ALTER TABLE componentes_op ADD COLUMN IF NOT EXISTS quantidade_enviada REAL")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS romaneios_componentes_op (
                 item_id INTEGER PRIMARY KEY,
@@ -738,6 +739,7 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS observacao TEXT")
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS conferido_por TEXT")
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS conferido_em TEXT")
+        cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS quantidade_enviada NUMERIC")
         # ── TABELAS DO SISTEMA DE MEDIÇÃO ──────────────────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS medicao_obras (
@@ -2170,15 +2172,15 @@ def carregar_todas_ops_com_componentes():
         liberar_conexao(conn)
     return df
 
-def atualizar_componente(comp_id, status, obs, usuario):
+def atualizar_componente(comp_id, status, obs, usuario, qtd_enviada=None):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE componentes_op
-            SET Status_Item=%s, Observacao=%s, Conferido_Por=%s, Conferido_Em=%s
+            SET Status_Item=%s, Observacao=%s, Conferido_Por=%s, Conferido_Em=%s, quantidade_enviada=%s
             WHERE id=%s
-        """, (status, obs, usuario, datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M'), comp_id))
+        """, (status, obs, usuario, datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M'), qtd_enviada, comp_id))
         conn.commit()
         carregar_componentes_op.clear()
         carregar_todas_ops_com_componentes.clear()
@@ -2270,7 +2272,7 @@ def carregar_itens_saida_insumos(saida_id: int):
     conn = conectar_banco()
     try:
         return pd.read_sql_query(
-            "SELECT id, descricao, quantidade, unidade, status_item, observacao "
+            "SELECT id, descricao, quantidade, unidade, status_item, observacao, quantidade_enviada "
             "FROM saidas_insumos_itens WHERE saida_id=%s ORDER BY id",
             conn, params=(saida_id,)
         )
@@ -2291,15 +2293,15 @@ def carregar_todos_itens_insumos():
     finally:
         liberar_conexao(conn)
 
-def atualizar_item_insumo(item_id: int, status: str, obs: str, usuario: str):
+def atualizar_item_insumo(item_id: int, status: str, obs: str, usuario: str, qtd_enviada=None):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE saidas_insumos_itens
-            SET status_item=%s, observacao=%s, conferido_por=%s, conferido_em=%s
+            SET status_item=%s, observacao=%s, conferido_por=%s, conferido_em=%s, quantidade_enviada=%s
             WHERE id=%s
-        """, (status, obs, usuario, datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M'), item_id))
+        """, (status, obs, usuario, datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M'), qtd_enviada, item_id))
         conn.commit()
         carregar_itens_saida_insumos.clear()
         carregar_todos_itens_insumos.clear()
@@ -2789,7 +2791,11 @@ def gerar_romaneio_componentes_xlsx(obra: str, num_op: str, cod_lote: str, compo
     linha += 1
 
     for i, (_, comp) in enumerate(componentes_disponiveis_df.iterrows()):
-        dados = [comp.get('nome_componente', ''), comp.get('quantidade', 0), comp.get('unidade', ''), "✔ ENVIADO"]
+        is_parcial = comp.get('status_item') == 'Parcial'
+        qtd_env = comp.get('quantidade_enviada')
+        qtd_final = qtd_env if (is_parcial and pd.notna(qtd_env)) else comp.get('quantidade', 0)
+        status_txt = "⚠ PARCIAL" if is_parcial else "✔ ENVIADO"
+        dados = [comp.get('nome_componente', ''), qtd_final, comp.get('unidade', ''), status_txt]
         for col, val in enumerate(dados, 1):
             cel = ws.cell(linha, col, val)
             cel.font = Font(name="Arial", size=11)
@@ -2877,7 +2883,11 @@ def gerar_romaneio_insumos_xlsx(saida_row, itens_df) -> bytes:
     linha += 1
 
     for i, (_, item) in enumerate(itens_df.iterrows()):
-        dados = [item.get('descricao', ''), item.get('quantidade', 0), item.get('unidade', ''), "✔ ENVIADO"]
+        is_parcial = item.get('status_item') == 'Parcial'
+        qtd_env = item.get('quantidade_enviada')
+        qtd_final = qtd_env if (is_parcial and pd.notna(qtd_env)) else item.get('quantidade', 0)
+        status_txt = "⚠ PARCIAL" if is_parcial else "✔ ENVIADO"
+        dados = [item.get('descricao', ''), qtd_final, item.get('unidade', ''), status_txt]
         for col, val in enumerate(dados, 1):
             cel = ws.cell(linha, col, val)
             cel.font = Font(name="Arial", size=11)
@@ -6414,11 +6424,13 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                     n_aguard  = len(todos_comps[todos_comps['status_item'] == 'Aguardando Conferencia'])
                     n_ok      = len(todos_comps[todos_comps['status_item'] == 'Disponivel'])
+                    n_parc    = len(todos_comps[todos_comps['status_item'] == 'Parcial'])
                     n_falta   = len(todos_comps[todos_comps['status_item'] == 'Indisponivel'])
-                    c1, c2, c3 = st.columns(3)
+                    c1, c2, c3, c4 = st.columns(4)
                     c1.metric("⏳ Aguardando", n_aguard)
                     c2.metric("✅ Disponíveis", n_ok)
-                    c3.metric("❌ Indisponíveis", n_falta)
+                    c3.metric("🟡 Parciais", n_parc)
+                    c4.metric("❌ Indisponíveis", n_falta)
                     st.markdown("---")
 
                     df_rom_emitidos = carregar_romaneios_componentes_emitidos()
@@ -6430,9 +6442,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         n_total   = len(df_comp)
                         n_conf    = len(df_comp[df_comp['status_item'] != 'Aguardando Conferencia'])
                         n_indisp  = len(df_comp[df_comp['status_item'] == 'Indisponivel'])
-                        if n_indisp > 0:   icone = "❌"
+                        n_parcial = len(df_comp[df_comp['status_item'] == 'Parcial'])
+                        if n_indisp > 0:        icone = "❌"
+                        elif n_parcial > 0:     icone = "🟡"
                         elif n_conf == n_total: icone = "✅"
-                        else:              icone = "⏳"
+                        else:                   icone = "⏳"
 
                         with st.expander(
                             f"{icone} OP: {op_row['num_op']} — {op_row['cod_lote']} | {op_row['obra_vinculada']}"
@@ -6445,41 +6459,55 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
                             st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
 
+                            status_opcoes_comp = ["Aguardando Conferencia", "Disponivel", "Parcial", "Indisponivel"]
                             for _, comp in df_comp.iterrows():
                                 st_item = comp['status_item']
+                                qtd_env_atual = comp.get('quantidade_enviada')
                                 if st_item == 'Disponivel':     cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
+                                elif st_item == 'Parcial':      cor = "#B45309"; bg = "#FEF3C7"; emoji = "🟡"
                                 elif st_item == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
                                 else:                           cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
+                                badge_txt = f"{st_item} ({qtd_env_atual:g}/{comp['quantidade']:g})" if st_item == 'Parcial' and pd.notna(qtd_env_atual) else st_item
                                 rc = st.columns([4, 2, 2, 3, 2])
                                 rc[0].markdown(f"**{comp['nome_componente']}**")
                                 rc[1].markdown(f"`{comp['quantidade']}`")
                                 rc[2].markdown(f"{comp['unidade']}")
-                                rc[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {st_item}</span>", unsafe_allow_html=True)
+                                rc[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {badge_txt}</span>", unsafe_allow_html=True)
                                 with rc[4]:
                                     acao = st.selectbox(
-                                        "", ["Aguardando Conferencia", "Disponivel", "Indisponivel"],
-                                        index=["Aguardando Conferencia", "Disponivel", "Indisponivel"].index(st_item),
+                                        "", status_opcoes_comp,
+                                        index=status_opcoes_comp.index(st_item) if st_item in status_opcoes_comp else 0,
                                         key=f"alm_st_{comp['id']}", label_visibility="collapsed"
                                     )
-                                    if acao != st_item:
-                                        atualizar_componente(comp['id'], acao, comp.get('observacao') or '', st.session_state.usuario_nome)
-                                        st.rerun()
+                                qtd_parcial_nova = None
+                                if acao == "Parcial":
+                                    qtd_parcial_nova = st.number_input(
+                                        f"Quantidade enviada — {comp['nome_componente']} (solicitado: {comp['quantidade']:g} {comp['unidade']}):",
+                                        min_value=0.0, max_value=float(comp['quantidade']),
+                                        value=float(qtd_env_atual) if pd.notna(qtd_env_atual) else float(comp['quantidade']),
+                                        step=1.0, key=f"alm_qtdparcial_{comp['id']}"
+                                    )
+                                if acao != st_item or (acao == "Parcial" and qtd_parcial_nova != qtd_env_atual):
+                                    atualizar_componente(comp['id'], acao, comp.get('observacao') or '', st.session_state.usuario_nome, qtd_parcial_nova)
+                                    st.rerun()
                                 obs_atual = comp.get('observacao') or ''
                                 obs_nova  = st.text_input(f"Obs — {comp['nome_componente']}:", value=obs_atual,
                                                           key=f"alm_obs_{comp['id']}", placeholder="Ex: em falta, previsão 20/06...")
                                 if obs_nova != obs_atual:
-                                    atualizar_componente(comp['id'], st_item, obs_nova, st.session_state.usuario_nome)
+                                    atualizar_componente(comp['id'], st_item, obs_nova, st.session_state.usuario_nome, qtd_env_atual)
                                 st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
 
                             if n_indisp > 0:
                                 itens_falt = df_comp[df_comp['status_item'] == 'Indisponivel']['nome_componente'].tolist()
                                 st.error(f"⚠️ Itens em falta: {', '.join(itens_falt)}")
+                            elif n_parcial > 0 and n_conf == n_total:
+                                st.warning("🟡 Todos conferidos, mas alguns componentes estão parciais.")
                             elif n_conf == n_total:
                                 st.success("✅ Todos os componentes conferidos e disponíveis!")
 
-                            # ── Emitir romaneio (só com os itens Disponível) ──
+                            # ── Emitir romaneio (itens Disponível ou Parcial) ──
                             item_id_op = int(op_row['item_id'])
-                            df_disponiveis = df_comp[df_comp['status_item'] == 'Disponivel']
+                            df_disponiveis = df_comp[df_comp['status_item'].isin(['Disponivel', 'Parcial'])]
                             ja_emitido = df_rom_emitidos[df_rom_emitidos['item_id'] == item_id_op] if not df_rom_emitidos.empty else pd.DataFrame()
                             st.markdown("<br>", unsafe_allow_html=True)
                             if not ja_emitido.empty:
@@ -6508,11 +6536,13 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 if not df_todos_ins.empty:
                     n_aguard_ins = len(df_todos_ins[df_todos_ins['status_item'] == 'Aguardando Conferencia'])
                     n_ok_ins     = len(df_todos_ins[df_todos_ins['status_item'] == 'Disponivel'])
+                    n_parc_ins   = len(df_todos_ins[df_todos_ins['status_item'] == 'Parcial'])
                     n_falta_ins  = len(df_todos_ins[df_todos_ins['status_item'] == 'Indisponivel'])
-                    ci1, ci2, ci3 = st.columns(3)
+                    ci1, ci2, ci3, ci4 = st.columns(4)
                     ci1.metric("⏳ Aguardando", n_aguard_ins)
                     ci2.metric("✅ Disponíveis", n_ok_ins)
-                    ci3.metric("❌ Indisponíveis", n_falta_ins)
+                    ci3.metric("🟡 Parciais", n_parc_ins)
+                    ci4.metric("❌ Indisponíveis", n_falta_ins)
                     st.markdown("---")
 
                 with st.expander("➕ Nova Saída de Insumos", expanded=df_todos_ins.empty):
@@ -6599,9 +6629,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         n_total_ins = len(df_itens_saida)
                         n_conf_ins  = len(df_itens_saida[df_itens_saida['status_item'] != 'Aguardando Conferencia']) if n_total_ins else 0
                         n_indisp_ins = len(df_itens_saida[df_itens_saida['status_item'] == 'Indisponivel']) if n_total_ins else 0
-                        if n_indisp_ins > 0:            icone_ins = "❌"
-                        elif n_total_ins and n_conf_ins == n_total_ins: icone_ins = "✅"
-                        else:                            icone_ins = "⏳"
+                        n_parcial_ins = len(df_itens_saida[df_itens_saida['status_item'] == 'Parcial']) if n_total_ins else 0
+                        if n_indisp_ins > 0:                              icone_ins = "❌"
+                        elif n_parcial_ins > 0:                           icone_ins = "🟡"
+                        elif n_total_ins and n_conf_ins == n_total_ins:   icone_ins = "✅"
+                        else:                                             icone_ins = "⏳"
 
                         with st.expander(
                             f"{icone_ins} {pd.to_datetime(saida_row['data_saida']).strftime('%d/%m/%Y')} — "
@@ -6616,41 +6648,55 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
                             st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
 
+                            status_opcoes_ins = ["Aguardando Conferencia", "Disponivel", "Parcial", "Indisponivel"]
                             for _, item_ins in df_itens_saida.iterrows():
                                 st_ins = item_ins['status_item']
+                                qtd_env_atual_ins = item_ins.get('quantidade_enviada')
                                 if st_ins == 'Disponivel':     cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
+                                elif st_ins == 'Parcial':      cor = "#B45309"; bg = "#FEF3C7"; emoji = "🟡"
                                 elif st_ins == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
                                 else:                           cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
+                                badge_txt_ins = f"{st_ins} ({qtd_env_atual_ins:g}/{item_ins['quantidade']:g})" if st_ins == 'Parcial' and pd.notna(qtd_env_atual_ins) else st_ins
                                 rci = st.columns([4, 2, 2, 3, 2])
                                 rci[0].markdown(f"**{item_ins['descricao']}**")
                                 rci[1].markdown(f"`{item_ins['quantidade']}`")
                                 rci[2].markdown(f"{item_ins['unidade']}")
-                                rci[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {st_ins}</span>", unsafe_allow_html=True)
+                                rci[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {badge_txt_ins}</span>", unsafe_allow_html=True)
                                 with rci[4]:
                                     acao_ins = st.selectbox(
-                                        "", ["Aguardando Conferencia", "Disponivel", "Indisponivel"],
-                                        index=["Aguardando Conferencia", "Disponivel", "Indisponivel"].index(st_ins),
+                                        "", status_opcoes_ins,
+                                        index=status_opcoes_ins.index(st_ins) if st_ins in status_opcoes_ins else 0,
                                         key=f"alm_ins_st_{item_ins['id']}", label_visibility="collapsed"
                                     )
-                                    if acao_ins != st_ins:
-                                        atualizar_item_insumo(int(item_ins['id']), acao_ins, item_ins.get('observacao') or '', st.session_state.usuario_nome)
-                                        st.rerun()
+                                qtd_parcial_nova_ins = None
+                                if acao_ins == "Parcial":
+                                    qtd_parcial_nova_ins = st.number_input(
+                                        f"Quantidade enviada — {item_ins['descricao']} (solicitado: {item_ins['quantidade']:g} {item_ins['unidade']}):",
+                                        min_value=0.0, max_value=float(item_ins['quantidade']),
+                                        value=float(qtd_env_atual_ins) if pd.notna(qtd_env_atual_ins) else float(item_ins['quantidade']),
+                                        step=1.0, key=f"alm_ins_qtdparcial_{item_ins['id']}"
+                                    )
+                                if acao_ins != st_ins or (acao_ins == "Parcial" and qtd_parcial_nova_ins != qtd_env_atual_ins):
+                                    atualizar_item_insumo(int(item_ins['id']), acao_ins, item_ins.get('observacao') or '', st.session_state.usuario_nome, qtd_parcial_nova_ins)
+                                    st.rerun()
                                 obs_atual_ins = item_ins.get('observacao') or ''
                                 obs_nova_ins  = st.text_input(f"Obs — {item_ins['descricao']}:", value=obs_atual_ins,
                                                           key=f"alm_ins_obs_{item_ins['id']}", placeholder="Ex: em falta, previsão 20/06...")
                                 if obs_nova_ins != obs_atual_ins:
-                                    atualizar_item_insumo(int(item_ins['id']), st_ins, obs_nova_ins, st.session_state.usuario_nome)
+                                    atualizar_item_insumo(int(item_ins['id']), st_ins, obs_nova_ins, st.session_state.usuario_nome, qtd_env_atual_ins)
                                 st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
 
                             if n_indisp_ins > 0:
                                 itens_falt_ins = df_itens_saida[df_itens_saida['status_item'] == 'Indisponivel']['descricao'].tolist()
                                 st.error(f"⚠️ Itens em falta: {', '.join(itens_falt_ins)}")
+                            elif n_parcial_ins > 0 and n_total_ins and n_conf_ins == n_total_ins:
+                                st.warning("🟡 Todos conferidos, mas alguns itens estão parciais.")
                             elif n_total_ins and n_conf_ins == n_total_ins:
                                 st.success("✅ Todos os itens conferidos e disponíveis!")
 
-                            # ── Emitir romaneio (só com os itens Disponível, igual as OPs) ──
+                            # ── Emitir romaneio (itens Disponível ou Parcial, igual as OPs) ──
                             st.markdown("<br>", unsafe_allow_html=True)
-                            df_disp_ins = df_itens_saida[df_itens_saida['status_item'] == 'Disponivel']
+                            df_disp_ins = df_itens_saida[df_itens_saida['status_item'].isin(['Disponivel', 'Parcial'])]
                             if df_disp_ins.empty:
                                 st.caption("Nenhum item Disponível ainda pra emitir romaneio — confira os itens acima primeiro.")
                             else:
