@@ -1086,6 +1086,57 @@ def editar_numero_projeto(obra: str, projeto_antigo: str, projeto_novo: str):
     finally:
         liberar_conexao(conn)
 
+def editar_nome_obra(obra_antiga: str, obra_nova: str):
+    """Renomeia uma Obra, propagando pra todas as tabelas que guardam o nome como texto
+    (nao ha FK): projetos, cronograma_macro, itens_detalhado, componentes_op,
+    logistica_envios, romaneios_manuais, romaneios_componentes_op, saidas_insumos,
+    op_pecas, solicitacoes_op. Se o nome novo ja existir (obra duplicada, ex: obra
+    cadastrada duas vezes com erro de digitacao), os projetos com o mesmo numero sao
+    mesclados — o resto das tabelas so passa a apontar pro mesmo nome."""
+    obra_nova = obra_nova.strip().upper()
+    obra_antiga = obra_antiga.strip()
+    if not obra_nova:
+        return False, "Informe o novo nome da obra."
+    if obra_nova == obra_antiga:
+        return False, "O novo nome é igual ao atual."
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT Numero_Projeto FROM projetos WHERE Obra=%s", (obra_antiga,))
+        projetos_antigos = [r[0] for r in cursor.fetchall()]
+        mesclou = False
+        for num_proj in projetos_antigos:
+            cursor.execute("SELECT 1 FROM projetos WHERE Obra=%s AND Numero_Projeto=%s", (obra_nova, num_proj))
+            if cursor.fetchone():
+                cursor.execute("DELETE FROM projetos WHERE Obra=%s AND Numero_Projeto=%s", (obra_antiga, num_proj))
+                mesclou = True
+            else:
+                cursor.execute("UPDATE projetos SET Obra=%s WHERE Obra=%s AND Numero_Projeto=%s",
+                                (obra_nova, obra_antiga, num_proj))
+
+        cursor.execute("UPDATE cronograma_macro SET Obra=%s WHERE Obra=%s", (obra_nova, obra_antiga))
+        cursor.execute("UPDATE itens_detalhado SET Obra_Vinculada=%s WHERE Obra_Vinculada=%s", (obra_nova, obra_antiga))
+        cursor.execute("UPDATE componentes_op SET Obra_Vinculada=%s WHERE Obra_Vinculada=%s", (obra_nova, obra_antiga))
+        cursor.execute("UPDATE logistica_envios SET Obra_Vinculada=%s WHERE Obra_Vinculada=%s", (obra_nova, obra_antiga))
+        cursor.execute("UPDATE romaneios_manuais SET obra_vinculada=%s WHERE obra_vinculada=%s", (obra_nova, obra_antiga))
+        cursor.execute("UPDATE romaneios_componentes_op SET obra=%s WHERE obra=%s", (obra_nova, obra_antiga))
+        cursor.execute("UPDATE saidas_insumos SET obra=%s WHERE obra=%s", (obra_nova, obra_antiga))
+        cursor.execute("UPDATE op_pecas SET obra=%s WHERE obra=%s", (obra_nova, obra_antiga))
+        cursor.execute("UPDATE solicitacoes_op SET obra=%s WHERE obra=%s", (obra_nova, obra_antiga))
+        conn.commit()
+        carregar_projetos.clear()
+        _limpar_cache_geral()
+        carregar_saidas_insumos.clear()
+        carregar_macro.clear()
+        msg = ("Obras mescladas — já existia uma obra com esse nome; os projetos em comum foram unificados."
+               if mesclou else "Nome da obra atualizado em todos os registros!")
+        return True, msg
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao renomear obra: {e}"
+    finally:
+        liberar_conexao(conn)
+
 @st.cache_data(ttl=30)
 def carregar_macro():
     conn = conectar_banco()
@@ -5637,6 +5688,27 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     st.rerun()
                                 else:
                                     st.error(msg_edit_proj)
+
+                with st.expander("✏️ Editar nome de uma Obra", expanded=False):
+                    st.caption("Corrige o nome de uma obra já cadastrada — atualiza automaticamente em todos os "
+                               "projetos, frentes, lotes, OPs, romaneios e saídas de insumos que já referenciam essa obra. "
+                               "Se o nome novo já existir (obra duplicada por erro de digitação), os projetos em comum são mesclados.")
+                    with st.form("form_editar_obra"):
+                        obra_atual_edit = st.selectbox("Obra atual:", obras_existentes, key="obra_atual_edit_sel") if obras_existentes else None
+                        obra_nova_edit = st.text_input("Novo nome da obra:", placeholder="Ex: DOWNTOWN")
+                        if st.form_submit_button("💾 Salvar novo nome"):
+                            if not obra_atual_edit:
+                                st.error("Não há obra cadastrada.")
+                            else:
+                                ok_edit_obra, msg_edit_obra = editar_nome_obra(obra_atual_edit, obra_nova_edit)
+                                if ok_edit_obra:
+                                    registrar_auditoria(st.session_state.usuario_nome, "EDITAR_OBRA",
+                                        f"{obra_atual_edit} → {obra_nova_edit.strip().upper()}")
+                                    st.toast(f"✅ {msg_edit_obra}")
+                                    time.sleep(0.4)
+                                    st.rerun()
+                                else:
+                                    st.error(msg_edit_obra)
 
             st.markdown("---")
             # ===== PASSO 2 — Frente (opcional) dentro de um Projeto ===
