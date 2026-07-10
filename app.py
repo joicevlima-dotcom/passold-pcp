@@ -740,6 +740,48 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS conferido_por TEXT")
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS conferido_em TEXT")
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS quantidade_enviada NUMERIC")
+        # ── TABELAS DE LISTA MESTRA (envio parcial de listas de materiais/fixadores) ──
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS listas_mestras (
+                id SERIAL PRIMARY KEY,
+                obra TEXT NOT NULL,
+                numero_projeto TEXT,
+                titulo TEXT NOT NULL,
+                criado_por TEXT,
+                criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS listas_mestras_itens (
+                id SERIAL PRIMARY KEY,
+                lista_id INTEGER REFERENCES listas_mestras(id) ON DELETE CASCADE,
+                item TEXT NOT NULL,
+                uso TEXT,
+                observacoes TEXT,
+                unidade TEXT DEFAULT 'un',
+                qtd_total NUMERIC NOT NULL DEFAULT 0,
+                qtd_enviada NUMERIC NOT NULL DEFAULT 0,
+                criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS listas_mestras_envios (
+                id SERIAL PRIMARY KEY,
+                lista_id INTEGER REFERENCES listas_mestras(id) ON DELETE CASCADE,
+                data_envio DATE NOT NULL,
+                destino TEXT,
+                enviado_por TEXT,
+                criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS listas_mestras_envios_itens (
+                id SERIAL PRIMARY KEY,
+                envio_id INTEGER REFERENCES listas_mestras_envios(id) ON DELETE CASCADE,
+                item_id INTEGER REFERENCES listas_mestras_itens(id),
+                quantidade NUMERIC NOT NULL
+            )
+        """)
         # ── TABELAS DO SISTEMA DE MEDIÇÃO ──────────────────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS medicao_obras (
@@ -2023,6 +2065,350 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
     buf.seek(0)
     return buf.getvalue()
 
+# ══════════════════════════════════════════════════════════════════════════
+# LISTA MESTRA — controle de envio parcial de listas de materiais/fixadores
+# ══════════════════════════════════════════════════════════════════════════
+
+def parse_lista_mestra(texto: str) -> list:
+    """Interpreta o bloco colado da lista mestra (uma linha por item). Ao colar direto do
+    Excel cada celula vem separada por TAB; se nao achar TAB, cai pro fallback de 2+ espacos.
+    Ordem esperada: Item, Qtde, Uso (opcional), Observacoes (opcional). Linhas sem Item+Qtde
+    validos sao ignoradas (o preview antes de salvar mostra o que foi reconhecido)."""
+    import re
+    itens = []
+    for linha in texto.splitlines():
+        linha = linha.rstrip()
+        if not linha.strip():
+            continue
+        partes = linha.split('\t')
+        if len(partes) < 2:
+            partes = re.split(r'\s{2,}', linha.strip())
+        if len(partes) < 2:
+            continue
+        item = partes[0].strip()
+        qtd_str = partes[1].strip().replace(',', '.')
+        if not item or not qtd_str:
+            continue
+        try:
+            qtd = float(qtd_str)
+        except ValueError:
+            continue
+        uso = partes[2].strip() if len(partes) > 2 else ''
+        observacoes = partes[3].strip() if len(partes) > 3 else ''
+        itens.append({'item': item, 'qtd_total': qtd, 'uso': uso, 'observacoes': observacoes})
+    return itens
+
+@st.cache_data(ttl=30)
+def carregar_listas_mestras():
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            "SELECT l.id, l.obra, l.numero_projeto, l.titulo, l.criado_por, l.criado_em, "
+            "COUNT(i.id) AS qtd_itens "
+            "FROM listas_mestras l LEFT JOIN listas_mestras_itens i ON i.lista_id = l.id "
+            "GROUP BY l.id ORDER BY l.criado_em DESC",
+            conn
+        )
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=15)
+def carregar_itens_lista_mestra(lista_id: int):
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            "SELECT id, item, uso, observacoes, unidade, qtd_total, qtd_enviada "
+            "FROM listas_mestras_itens WHERE lista_id=%s ORDER BY id",
+            conn, params=(lista_id,)
+        )
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+    if not df.empty:
+        df['saldo'] = df['qtd_total'] - df['qtd_enviada']
+    return df
+
+@st.cache_data(ttl=15)
+def carregar_envios_lista_mestra(lista_id: int):
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            "SELECT e.id, e.data_envio, e.destino, e.enviado_por, e.criado_em, COUNT(ei.id) AS qtd_itens "
+            "FROM listas_mestras_envios e LEFT JOIN listas_mestras_envios_itens ei ON ei.envio_id = e.id "
+            "WHERE e.lista_id=%s GROUP BY e.id ORDER BY e.data_envio DESC, e.id DESC",
+            conn, params=(lista_id,)
+        )
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=15)
+def carregar_itens_envio_lista_mestra(envio_id: int):
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            "SELECT ei.quantidade, li.item, li.uso, li.observacoes, li.unidade "
+            "FROM listas_mestras_envios_itens ei "
+            "JOIN listas_mestras_itens li ON li.id = ei.item_id "
+            "WHERE ei.envio_id=%s ORDER BY ei.id",
+            conn, params=(envio_id,)
+        )
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
+def salvar_lista_mestra(obra: str, numero_projeto: str, titulo: str, itens: list, usuario: str):
+    """Cria a lista mestra e ja insere os itens iniciais (parseados do bloco colado)."""
+    if not itens:
+        return False, "Nenhum item reconhecido para cadastrar.", None
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO listas_mestras (obra, numero_projeto, titulo, criado_por) VALUES (%s,%s,%s,%s) RETURNING id",
+            (obra, numero_projeto or None, titulo, usuario)
+        )
+        lista_id = cursor.fetchone()[0]
+        for it in itens:
+            cursor.execute(
+                "INSERT INTO listas_mestras_itens (lista_id, item, uso, observacoes, qtd_total) VALUES (%s,%s,%s,%s,%s)",
+                (lista_id, it['item'], it.get('uso') or '', it.get('observacoes') or '', it['qtd_total'])
+            )
+        conn.commit()
+        carregar_listas_mestras.clear()
+        carregar_itens_lista_mestra.clear()
+        return True, f"Lista mestra criada com {len(itens)} item(ns)!", lista_id
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao salvar lista mestra: {e}", None
+    finally:
+        liberar_conexao(conn)
+
+def adicionar_itens_lista_mestra(lista_id: int, itens: list):
+    if not itens:
+        return False, "Nenhum item para adicionar."
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        for it in itens:
+            cursor.execute(
+                "INSERT INTO listas_mestras_itens (lista_id, item, uso, observacoes, qtd_total) VALUES (%s,%s,%s,%s,%s)",
+                (lista_id, it['item'], it.get('uso') or '', it.get('observacoes') or '', it['qtd_total'])
+            )
+        conn.commit()
+        carregar_itens_lista_mestra.clear()
+        carregar_listas_mestras.clear()
+        return True, f"{len(itens)} item(ns) adicionado(s)!"
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao adicionar itens: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def editar_item_lista_mestra(item_id: int, qtd_total_novo: float, uso_novo: str, observacoes_novo: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT qtd_enviada FROM listas_mestras_itens WHERE id=%s", (item_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return False, "Item não encontrado."
+        qtd_enviada_atual = row[0] or 0
+        if qtd_total_novo < qtd_enviada_atual:
+            return False, f"Quantidade total não pode ser menor que o já enviado ({qtd_enviada_atual:g})."
+        cursor.execute(
+            "UPDATE listas_mestras_itens SET qtd_total=%s, uso=%s, observacoes=%s WHERE id=%s",
+            (qtd_total_novo, uso_novo or '', observacoes_novo or '', item_id)
+        )
+        conn.commit()
+        carregar_itens_lista_mestra.clear()
+        return True, "Item atualizado!"
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao editar item: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def excluir_item_lista_mestra(item_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT qtd_enviada FROM listas_mestras_itens WHERE id=%s", (item_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return False, "Item não encontrado."
+        if (row[0] or 0) > 0:
+            return False, "Esse item já teve envio registrado — não pode ser excluído."
+        cursor.execute("DELETE FROM listas_mestras_itens WHERE id=%s", (item_id,))
+        conn.commit()
+        carregar_itens_lista_mestra.clear()
+        carregar_listas_mestras.clear()
+        return True, "Item excluído."
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao excluir item: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def excluir_lista_mestra(lista_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM listas_mestras WHERE id=%s", (lista_id,))
+        conn.commit()
+        carregar_listas_mestras.clear()
+        carregar_itens_lista_mestra.clear()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao excluir lista mestra: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
+def registrar_envio_lista_mestra(lista_id: int, data_envio, destino: str, usuario: str, itens_qtds: dict):
+    """itens_qtds: {item_id: quantidade_a_enviar}. Confere server-side que nenhuma quantidade
+    excede o saldo atual do item antes de gravar qualquer coisa (tudo ou nada)."""
+    itens_qtds = {int(k): float(v) for k, v in itens_qtds.items() if float(v) > 0}
+    if not itens_qtds:
+        return False, "Selecione ao menos um item com quantidade maior que zero.", None
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        for item_id, qtd in itens_qtds.items():
+            cursor.execute("SELECT qtd_total, qtd_enviada FROM listas_mestras_itens WHERE id=%s AND lista_id=%s",
+                            (item_id, lista_id))
+            row = cursor.fetchone()
+            if row is None:
+                conn.rollback()
+                return False, f"Item {item_id} não encontrado nessa lista.", None
+            saldo = (row[0] or 0) - (row[1] or 0)
+            if qtd > saldo:
+                conn.rollback()
+                return False, f"Quantidade enviada ({qtd:g}) excede o saldo disponível ({saldo:g}) de um dos itens.", None
+
+        cursor.execute(
+            "INSERT INTO listas_mestras_envios (lista_id, data_envio, destino, enviado_por) VALUES (%s,%s,%s,%s) RETURNING id",
+            (lista_id, data_envio, destino or '', usuario)
+        )
+        envio_id = cursor.fetchone()[0]
+        for item_id, qtd in itens_qtds.items():
+            cursor.execute(
+                "INSERT INTO listas_mestras_envios_itens (envio_id, item_id, quantidade) VALUES (%s,%s,%s)",
+                (envio_id, item_id, qtd)
+            )
+            cursor.execute(
+                "UPDATE listas_mestras_itens SET qtd_enviada = qtd_enviada + %s WHERE id=%s",
+                (qtd, item_id)
+            )
+        conn.commit()
+        carregar_itens_lista_mestra.clear()
+        carregar_envios_lista_mestra.clear()
+        carregar_itens_envio_lista_mestra.clear()
+        return True, f"Envio registrado com {len(itens_qtds)} item(ns)!", envio_id
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao registrar envio: {e}", None
+    finally:
+        liberar_conexao(conn)
+
+def gerar_romaneio_lista_mestra_xlsx(lista_row, envio_row, itens_envio_df) -> bytes:
+    """Romaneio de um envio parcial de Lista Mestra — mesma estrutura do Romaneio Manual."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from io import BytesIO
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Romaneio"
+    ws.sheet_view.showGridLines = False
+    ws.page_setup.orientation = "portrait"
+
+    bd = Side(style='thin', color="000000")
+    borda = Border(left=bd, right=bd, top=bd, bottom=bd)
+    fill_cab = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    fill_sub = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+
+    ws.column_dimensions['A'].width = 30
+    ws.column_dimensions['B'].width = 16
+    ws.column_dimensions['C'].width = 28
+    ws.column_dimensions['D'].width = 10
+    ws.column_dimensions['E'].width = 16
+
+    ws.merge_cells("A1:E1")
+    _inserir_logo_cabecalho(ws, "E")
+
+    ws.merge_cells("A2:E2")
+    ws["A2"] = "ROMANEIO DE LISTA MESTRA"
+    ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+    ws["A2"].fill = fill_cab
+    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    infos = [
+        ("Obra:", str(lista_row.get('obra') or '—')),
+        ("Projeto:", str(lista_row.get('numero_projeto') or '—')),
+        ("Lista / Etapa:", str(lista_row.get('titulo') or '—')),
+        ("Data de envio:", pd.to_datetime(envio_row.get('data_envio')).strftime('%d/%m/%Y')),
+        ("Destino:", str(envio_row.get('destino') or '—')),
+        ("Enviado por:", str(envio_row.get('enviado_por') or '—')),
+    ]
+    linha = 3
+    for label, valor in infos:
+        ws.cell(linha, 1, label).font = Font(name="Arial", size=11, bold=True)
+        ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=5)
+        ws.cell(linha, 2, valor).font = Font(name="Arial", size=11)
+        for c in range(1, 6):
+            ws.cell(linha, c).border = borda
+        linha += 1
+
+    linha += 1
+    titulos = ["ITEM", "USO", "OBSERVAÇÕES", "UND", "QUANTIDADE ENVIADA"]
+    for col, titulo in enumerate(titulos, 1):
+        cel = ws.cell(linha, col, titulo)
+        cel.font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        cel.fill = fill_cab
+        cel.alignment = Alignment(horizontal="center", vertical="center")
+        cel.border = borda
+    linha += 1
+
+    for i, (_, item) in enumerate(itens_envio_df.iterrows()):
+        dados = [
+            item.get('item', ''), item.get('uso', '') or '—', item.get('observacoes', '') or '—',
+            item.get('unidade', '') or 'un', item.get('quantidade', 0)
+        ]
+        for col, val in enumerate(dados, 1):
+            cel = ws.cell(linha, col, val)
+            cel.font = Font(name="Arial", size=11)
+            cel.alignment = Alignment(horizontal="center", vertical="center")
+            cel.border = borda
+            if i % 2 == 0:
+                cel.fill = fill_sub
+        linha += 1
+
+    linha += 1
+    ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=3)
+    ws.cell(linha, 1, "TOTAL DE ITENS:").font = Font(name="Arial", size=11, bold=True)
+    ws.cell(linha, 4, len(itens_envio_df)).font = Font(name="Arial", size=11, bold=True)
+    for c in range(1, 6):
+        ws.cell(linha, c).border = borda
+
+    linha += 2
+    linha = _inserir_aviso_conferencia(ws, linha, "E")
+
+    linha += 1
+    assinaturas = [("Almoxarifado", False), ("Recebedor", True)]
+    _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=3, col_data=4)
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
 def salvar_solicitacao_op(obra: str, numero_projeto: str, tipo_material: str, descricao: str,
                            quantidade: float, observacao: str, usuario: str):
     conn = conectar_banco()
@@ -3235,6 +3621,7 @@ GRUPOS_NAV = {
         "Logistica":      ("🚚  Logística",       ["Master","Logistica"]),
         "Almoxarifado":   ("📦  Almoxarifado",    ["Master","Almoxarifado"]),
         "Romaneio Manual": ("📋  Romaneio Manual", ["Master","Almoxarifado","PCP"]),
+        "Lista Mestra": ("📑  Lista Mestra", ["Master","Almoxarifado"]),
         "Romaneios Devolvidos": ("🗂️  Romaneios Devolvidos", ["Master"]),
     },
     "📊  Relatórios": {
@@ -6899,6 +7286,251 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if st.button("🗑️ Excluir", key=f"del_rom_manual_{rm_row['id']}"):
                                     excluir_romaneio_manual(int(rm_row['id']))
                                     st.toast("Romaneio removido.")
+                                    time.sleep(0.3)
+                                    st.rerun()
+
+    # ==================================================
+    # LISTA MESTRA — envio parcial de listas de materiais/fixadores
+    # ==================================================
+    elif nome_aba == "Lista Mestra":
+        with aba_objeto:
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Lista Mestra</h2><p>Controle de envio parcial de listas de materiais/fixadores por etapa</p></div><span class="page-icon">📑</span></div>', unsafe_allow_html=True)
+            st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
+
+            with st.expander("➕ Cadastrar Lista Mestra", expanded=False):
+                st.caption("Cole o bloco de itens direto da planilha (Excel) — uma linha por item, "
+                           "colunas na ordem Item, Qtde, Uso, Observações (Uso e Observações são opcionais).")
+                lm1, lm2, lm3 = st.columns(3)
+                with lm1:
+                    obras_lm = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
+                    lm_obra = st.selectbox("Obra:", obras_lm, key="lm_obra_cad") if obras_lm else None
+                with lm2:
+                    projetos_lm = sorted(df_projetos[df_projetos['Obra'] == lm_obra]['Numero_Projeto'].unique().tolist()) if lm_obra else []
+                    lm_projeto = st.selectbox("Projeto:", projetos_lm, key="lm_projeto_cad") if projetos_lm else None
+                with lm3:
+                    lm_titulo = st.text_input("Título / Etapa:", key="lm_titulo_cad", placeholder="Ex: Terreo Componentes/Fixadores")
+
+                lm_texto = st.text_area("Colar itens aqui:", key="lm_texto_cad", height=200,
+                                         placeholder="ANC4\t82\tObra\tColuna Tipo8 em baixo\n...")
+
+                itens_preview = parse_lista_mestra(lm_texto) if lm_texto.strip() else []
+                if lm_texto.strip():
+                    if itens_preview:
+                        st.caption(f"{len(itens_preview)} item(ns) reconhecido(s):")
+                        st.dataframe(pd.DataFrame(itens_preview), hide_index=True, use_container_width=True)
+                    else:
+                        st.warning("Nenhum item reconhecido — confira se colou Item e Quantidade em cada linha.")
+
+                if st.button("💾 Salvar Lista Mestra", key="btn_salvar_lm", type="primary",
+                             disabled=not (lm_obra and lm_titulo.strip() and itens_preview)):
+                    ok_lm, msg_lm, _ = salvar_lista_mestra(lm_obra, lm_projeto or '', lm_titulo.strip(), itens_preview, st.session_state.usuario_nome)
+                    if ok_lm:
+                        registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_LISTA_MESTRA",
+                            f"Obra: {lm_obra} | {lm_titulo.strip()} | {len(itens_preview)} item(ns)")
+                        st.toast(f"✅ {msg_lm}")
+                        time.sleep(0.4)
+                        st.rerun()
+                    else:
+                        st.error(msg_lm)
+
+            st.markdown("---")
+            st.markdown("### Listas Cadastradas")
+            df_listas_lm = carregar_listas_mestras()
+            if df_listas_lm.empty:
+                st.caption("Nenhuma lista mestra cadastrada ainda.")
+            else:
+                obras_filtro_lm = ["Todas"] + sorted(df_listas_lm['obra'].dropna().unique().tolist())
+                filtro_obra_lm = st.selectbox("Filtrar por obra:", obras_filtro_lm, key="lm_filtro_obra")
+                df_listas_lm_f = df_listas_lm if filtro_obra_lm == "Todas" else df_listas_lm[df_listas_lm['obra'] == filtro_obra_lm]
+
+                for _, lista_row in df_listas_lm_f.iterrows():
+                    lista_id = int(lista_row['id'])
+                    df_itens_lm = carregar_itens_lista_mestra(lista_id)
+                    icone_lm = "⏳"
+                    if not df_itens_lm.empty:
+                        n_concluido = int((df_itens_lm['saldo'] <= 0).sum())
+                        n_parcial   = int((df_itens_lm['qtd_enviada'] > 0).sum()) - n_concluido
+                        if n_concluido == len(df_itens_lm):
+                            icone_lm = "✅"
+                        elif n_parcial > 0 or n_concluido > 0:
+                            icone_lm = "🟡"
+
+                    with st.expander(
+                        f"{icone_lm} {lista_row['obra']} — {lista_row['titulo']} "
+                        f"({int(lista_row.get('qtd_itens') or 0)} item(ns)) — por {lista_row.get('criado_por','—')}"
+                    ):
+                        st.caption(f"Projeto {lista_row.get('numero_projeto') or '—'} · Criada em {pd.to_datetime(lista_row['criado_em']).strftime('%d/%m/%Y %H:%M')}")
+
+                        if df_itens_lm.empty:
+                            st.info("Nenhum item cadastrado nessa lista.")
+                        else:
+                            df_show_lm = df_itens_lm.copy()
+                            def _status_lm(row):
+                                if row['saldo'] <= 0: return "✅ Concluído"
+                                if row['qtd_enviada'] > 0: return "🟡 Parcial"
+                                return "⏳ Pendente"
+                            df_show_lm['Status'] = df_show_lm.apply(_status_lm, axis=1)
+                            st.dataframe(
+                                df_show_lm[['item', 'uso', 'observacoes', 'unidade', 'qtd_total', 'qtd_enviada', 'saldo', 'Status']]
+                                    .rename(columns={'item': 'Item', 'uso': 'Uso', 'observacoes': 'Observações', 'unidade': 'Unidade',
+                                                      'qtd_total': 'Qtd Total', 'qtd_enviada': 'Qtd Enviada', 'saldo': 'Saldo'}),
+                                hide_index=True, use_container_width=True
+                            )
+
+                        cadd1, cadd2 = st.columns(2)
+                        with cadd1:
+                            with st.expander("➕ Adicionar item avulso"):
+                                with st.form(f"form_add_item_lm_{lista_id}"):
+                                    ai1, ai2, ai3, ai4 = st.columns(4)
+                                    with ai1:
+                                        item_novo = st.text_input("Item:", key=f"lm_item_novo_{lista_id}")
+                                    with ai2:
+                                        qtd_novo = st.number_input("Qtde:", min_value=0.0, value=1.0, step=1.0, key=f"lm_qtd_novo_{lista_id}")
+                                    with ai3:
+                                        uso_novo = st.text_input("Uso:", key=f"lm_uso_novo_{lista_id}")
+                                    with ai4:
+                                        obs_novo = st.text_input("Observações:", key=f"lm_obs_novo_{lista_id}")
+                                    if st.form_submit_button("Adicionar"):
+                                        if not item_novo.strip():
+                                            st.error("Informe o nome do item.")
+                                        else:
+                                            ok_add, msg_add = adicionar_itens_lista_mestra(lista_id, [{
+                                                'item': item_novo.strip(), 'qtd_total': qtd_novo, 'uso': uso_novo, 'observacoes': obs_novo
+                                            }])
+                                            if ok_add:
+                                                registrar_auditoria(st.session_state.usuario_nome, "ADICIONAR_ITEM_LISTA_MESTRA",
+                                                    f"Lista {lista_id} | {item_novo.strip()}")
+                                                st.toast("Item adicionado!")
+                                                time.sleep(0.3)
+                                                st.rerun()
+                                            else:
+                                                st.error(msg_add)
+                        with cadd2:
+                            with st.expander("📋 Colar mais itens"):
+                                texto_extra_lm = st.text_area("Colar itens:", key=f"lm_texto_extra_{lista_id}", height=120)
+                                itens_extra_preview = parse_lista_mestra(texto_extra_lm) if texto_extra_lm.strip() else []
+                                if itens_extra_preview:
+                                    st.caption(f"{len(itens_extra_preview)} item(ns) reconhecido(s).")
+                                if st.button("Adicionar itens colados", key=f"btn_add_extra_lm_{lista_id}", disabled=not itens_extra_preview):
+                                    ok_extra, msg_extra = adicionar_itens_lista_mestra(lista_id, itens_extra_preview)
+                                    if ok_extra:
+                                        registrar_auditoria(st.session_state.usuario_nome, "ADICIONAR_ITEM_LISTA_MESTRA",
+                                            f"Lista {lista_id} | +{len(itens_extra_preview)} item(ns) colado(s)")
+                                        st.toast(msg_extra)
+                                        time.sleep(0.3)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg_extra)
+
+                        if not df_itens_lm.empty:
+                            with st.expander("✏️ Editar / excluir item"):
+                                opcoes_item_lm = {f"{r['item']} (saldo {r['saldo']:g})": int(r['id']) for _, r in df_itens_lm.iterrows()}
+                                item_sel_label = st.selectbox("Item:", list(opcoes_item_lm.keys()), key=f"lm_item_edit_sel_{lista_id}")
+                                item_sel_id = opcoes_item_lm[item_sel_label]
+                                item_sel_row = df_itens_lm[df_itens_lm['id'] == item_sel_id].iloc[0]
+                                ei1, ei2, ei3 = st.columns(3)
+                                with ei1:
+                                    qtd_total_edit = st.number_input("Qtd Total:", min_value=0.0, value=float(item_sel_row['qtd_total']), step=1.0, key=f"lm_qtd_edit_{lista_id}_{item_sel_id}")
+                                with ei2:
+                                    uso_edit = st.text_input("Uso:", value=item_sel_row.get('uso') or '', key=f"lm_uso_edit_{lista_id}_{item_sel_id}")
+                                with ei3:
+                                    obs_edit = st.text_input("Observações:", value=item_sel_row.get('observacoes') or '', key=f"lm_obs_edit_{lista_id}_{item_sel_id}")
+                                eb1, eb2 = st.columns(2)
+                                with eb1:
+                                    if st.button("💾 Salvar alterações", key=f"btn_edit_item_lm_{lista_id}_{item_sel_id}"):
+                                        ok_edit, msg_edit = editar_item_lista_mestra(item_sel_id, qtd_total_edit, uso_edit, obs_edit)
+                                        if ok_edit:
+                                            registrar_auditoria(st.session_state.usuario_nome, "EDITAR_ITEM_LISTA_MESTRA", f"Item {item_sel_id}")
+                                            st.toast("Item atualizado!")
+                                            time.sleep(0.3)
+                                            st.rerun()
+                                        else:
+                                            st.error(msg_edit)
+                                with eb2:
+                                    if item_sel_row['qtd_enviada'] == 0:
+                                        if st.button("🗑️ Excluir item", key=f"btn_del_item_lm_{lista_id}_{item_sel_id}"):
+                                            ok_del, msg_del = excluir_item_lista_mestra(item_sel_id)
+                                            if ok_del:
+                                                registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_ITEM_LISTA_MESTRA", f"Item {item_sel_id}")
+                                                st.toast(msg_del)
+                                                time.sleep(0.3)
+                                                st.rerun()
+                                            else:
+                                                st.error(msg_del)
+                                    else:
+                                        st.caption("Já tem envio registrado — não pode excluir.")
+
+                        df_disponiveis_lm = df_itens_lm[df_itens_lm['saldo'] > 0] if not df_itens_lm.empty else pd.DataFrame()
+                        st.markdown("---")
+                        with st.expander("📦 Registrar Envio Parcial", expanded=False):
+                            if df_disponiveis_lm.empty:
+                                st.caption("Nenhum item com saldo disponível pra enviar.")
+                            else:
+                                ce1, ce2 = st.columns(2)
+                                with ce1:
+                                    data_envio_lm = st.date_input("Data de envio:", value=hoje_projeto().date(), format="DD/MM/YYYY", key=f"lm_data_envio_{lista_id}")
+                                with ce2:
+                                    destino_lm = st.text_input("Destino:", key=f"lm_destino_{lista_id}", placeholder="Ex: Obra, Produção...")
+
+                                itens_selecionados_lm = st.multiselect(
+                                    "Itens a enviar:",
+                                    options=df_disponiveis_lm['id'].tolist(),
+                                    format_func=lambda i: f"{df_disponiveis_lm[df_disponiveis_lm['id']==i].iloc[0]['item']} (saldo {df_disponiveis_lm[df_disponiveis_lm['id']==i].iloc[0]['saldo']:g})",
+                                    key=f"lm_itens_sel_{lista_id}"
+                                )
+                                qtds_envio_lm = {}
+                                for iid in itens_selecionados_lm:
+                                    item_row_sel = df_disponiveis_lm[df_disponiveis_lm['id'] == iid].iloc[0]
+                                    qtds_envio_lm[iid] = st.number_input(
+                                        f"Quantidade — {item_row_sel['item']} (saldo {item_row_sel['saldo']:g} {item_row_sel['unidade']}):",
+                                        min_value=0.0, max_value=float(item_row_sel['saldo']), value=float(item_row_sel['saldo']),
+                                        step=1.0, key=f"lm_qtd_envio_{lista_id}_{iid}"
+                                    )
+
+                                if st.button("✅ Registrar Envio", key=f"btn_registrar_envio_lm_{lista_id}", type="primary",
+                                             disabled=not itens_selecionados_lm):
+                                    ok_env, msg_env, _ = registrar_envio_lista_mestra(
+                                        lista_id, data_envio_lm, destino_lm, st.session_state.usuario_nome, qtds_envio_lm
+                                    )
+                                    if ok_env:
+                                        registrar_auditoria(st.session_state.usuario_nome, "ENVIO_LISTA_MESTRA",
+                                            f"Lista {lista_id} | {len(qtds_envio_lm)} item(ns) | Destino: {destino_lm}")
+                                        # limpa selecao/quantidades pra nao herdar valores agora invalidos
+                                        # (saldo menor ou item que sumiu da lista de disponiveis) no proximo render
+                                        for k in [f"lm_itens_sel_{lista_id}"] + [f"lm_qtd_envio_{lista_id}_{iid}" for iid in itens_selecionados_lm]:
+                                            st.session_state.pop(k, None)
+                                        st.toast(f"✅ {msg_env}")
+                                        time.sleep(0.4)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg_env)
+
+                        df_envios_lm = carregar_envios_lista_mestra(lista_id)
+                        if not df_envios_lm.empty:
+                            st.markdown("**Histórico de Envios:**")
+                            for _, envio_row in df_envios_lm.iterrows():
+                                envio_id = int(envio_row['id'])
+                                with st.container(border=True):
+                                    cenv1, cenv2 = st.columns([4, 1])
+                                    with cenv1:
+                                        st.markdown(f"**{pd.to_datetime(envio_row['data_envio']).strftime('%d/%m/%Y')}** — {envio_row.get('destino') or '—'}")
+                                        st.caption(f"{int(envio_row.get('qtd_itens') or 0)} item(ns) · por {envio_row.get('enviado_por','—')}")
+                                    with cenv2:
+                                        df_itens_envio_lm = carregar_itens_envio_lista_mestra(envio_id)
+                                        rom_lm_bytes = gerar_romaneio_lista_mestra_xlsx(lista_row, envio_row, df_itens_envio_lm)
+                                        st.download_button(
+                                            "🖨️ Romaneio", data=rom_lm_bytes,
+                                            file_name=f"Romaneio_ListaMestra_{lista_id}_{pd.to_datetime(envio_row['data_envio']).strftime('%Y%m%d')}_{envio_id}.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            key=f"dl_envio_lm_{envio_id}"
+                                        )
+
+                        if setor in ["Master", "Almoxarifado"]:
+                            st.markdown("---")
+                            if st.button("🗑️ Excluir Lista Mestra", key=f"btn_del_lista_lm_{lista_id}"):
+                                if excluir_lista_mestra(lista_id):
+                                    registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_LISTA_MESTRA", f"Lista {lista_id} — {lista_row['titulo']}")
+                                    st.toast("Lista mestra excluída.")
                                     time.sleep(0.3)
                                     st.rerun()
 
