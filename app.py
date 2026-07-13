@@ -8226,11 +8226,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 if rel_dt_fim:
                     df_rel = df_rel[df_rel[col_dt_filtro] <= pd.Timestamp(rel_dt_fim)]
 
+            # Esquadria-Vidro e medido em kg, nao em m2 — troca a coluna/unidade de referencia
+            # do relatorio quando o filtro de escopo estiver em Esquadrias.
+            escopo_esquadrias_rel = (filtro_escopo_rel == "Esquadrias")
+            col_medida_rel   = 'Peso_Kg' if escopo_esquadrias_rel else 'M2_Item'
+            label_medida_rel = 'kg' if escopo_esquadrias_rel else 'm²'
+
             # ── KPIs ─────────────────────────────────────────────
             st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
             if not df_rel.empty:
                 total_ops     = df_rel['Num_OP'].nunique()
-                total_m2      = df_rel['M2_Item'].sum()
+                total_medida  = df_rel[col_medida_rel].sum()
                 total_cx      = df_rel['Qtd_Caixas'].sum()
                 ops_atrasadas = df_rel[
                     (pd.to_datetime(df_rel['Data_Limite_Obra'], errors='coerce') < pd.Timestamp.now()) &
@@ -8240,7 +8246,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                 k1, k2, k3, k4, k5 = st.columns(5)
                 k1.metric("Total de OPs", total_ops)
-                k2.metric("Total m²", f"{total_m2:,.1f}")
+                k2.metric(f"Total {label_medida_rel}", f"{total_medida:,.1f}")
                 k3.metric("Total Caixas", int(total_cx))
                 k4.metric("OPs Atrasadas", ops_atrasadas, delta=f"-{ops_atrasadas}" if ops_atrasadas > 0 else None, delta_color="inverse")
                 k5.metric("Envio Parcial", enviadas_parcial)
@@ -8250,16 +8256,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
             if not df_rel.empty:
-                # ── Gráfico: m² por obra ──────────────────────────
+                # ── Gráfico: medida por obra (m² ou kg, conforme o escopo) ──
                 col_g1, col_g2 = st.columns(2)
                 with col_g1:
-                    df_m2_obra = df_rel.groupby('Obra_Vinculada')['M2_Item'].sum().reset_index()
-                    df_m2_obra.columns = ['Obra', 'm²']
-                    df_m2_obra = df_m2_obra.sort_values('m²', ascending=False)
+                    df_m2_obra = df_rel.groupby('Obra_Vinculada')[col_medida_rel].sum().reset_index()
+                    df_m2_obra.columns = ['Obra', label_medida_rel]
+                    df_m2_obra = df_m2_obra.sort_values(label_medida_rel, ascending=False)
                     fig_m2 = px.bar(
-                        df_m2_obra, x='Obra', y='m²',
-                        title='m² em Produção por Obra',
-                        color='m²',
+                        df_m2_obra, x='Obra', y=label_medida_rel,
+                        title=f'{label_medida_rel} em Produção por Obra',
+                        color=label_medida_rel,
                         color_continuous_scale=[[0,'#334155'],[1,'#1A56DB']],
                         text_auto='.1f'
                     )
@@ -8314,11 +8320,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                 hoje_ts = pd.Timestamp.now().normalize()
                 cols_show = ['Obra_Vinculada','Num_OP','Tipo_Material','EDT_Vinculado',
-                             'Qtd_Caixas','M2_Item','Data_Producao_Programada','Data_Limite_Obra','Status_Item',
+                             'Qtd_Caixas',col_medida_rel,'Data_Producao_Programada','Data_Limite_Obra','Status_Item',
                              'Em_Parada','Motivo_Parada']
                 cols_show_exist = [c for c in cols_show if c in df_rel.columns]
                 df_tabela = df_rel[cols_show_exist].copy()
-                col_names = ['Obra','OP','Material','EDT/Lote','Caixas','m²','Ini Prod.','Limite','Status']
+                col_names = ['Obra','OP','Material','EDT/Lote','Caixas',label_medida_rel,'Ini Prod.','Limite','Status']
                 if 'Em_Parada' in df_tabela.columns:
                     df_tabela['Situacao'] = df_tabela.apply(
                         lambda r: f"⛔ PARADA — {r.get('Motivo_Parada','')}" if r.get('Em_Parada') else '', axis=1
@@ -8328,17 +8334,18 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 df_tabela.columns = col_names
 
                 # % de representação sobre o total filtrado
-                total_m2_rel  = df_tabela['m²'].sum()
+                col_pct = f'% {label_medida_rel}'
+                total_medida_rel = df_tabela[label_medida_rel].sum()
                 total_cx_rel  = df_tabela['Caixas'].sum()
-                if total_m2_rel > 0:
-                    df_tabela['% m²'] = (df_tabela['m²'] / total_m2_rel * 100).round(1)
-                    base_pct = 'm²'
+                if total_medida_rel > 0:
+                    df_tabela[col_pct] = (df_tabela[label_medida_rel] / total_medida_rel * 100).round(1)
+                    base_pct = label_medida_rel
                 elif total_cx_rel > 0:
-                    df_tabela['% m²'] = (df_tabela['Caixas'] / total_cx_rel * 100).round(1)
+                    df_tabela[col_pct] = (df_tabela['Caixas'] / total_cx_rel * 100).round(1)
                     base_pct = 'Caixas'
                 else:
-                    df_tabela['% m²'] = 0.0
-                    base_pct = 'm²'
+                    df_tabela[col_pct] = 0.0
+                    base_pct = label_medida_rel
 
                 for col_dt in ['Ini Prod.','Limite']:
                     df_tabela[col_dt] = pd.to_datetime(df_tabela[col_dt], errors='coerce').dt.strftime('%d/%m/%Y')
@@ -8350,7 +8357,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         return ['background-color:#FEF2F2'] * len(row)
                     return [''] * len(row)
 
-                styled = df_tabela.style.apply(highlight_row, axis=1).format({'m²': '{:.2f}', '% m²': '{:.1f}%'})
+                styled = df_tabela.style.apply(highlight_row, axis=1).format({label_medida_rel: '{:.2f}', col_pct: '{:.1f}%'})
                 st.dataframe(styled, hide_index=True, use_container_width=True, height=420)
 
                 st.caption(f"Total de {len(df_tabela)} registros | % calculada sobre {base_pct} do total filtrado | Linhas em vermelho = prazo vencido")
@@ -8464,15 +8471,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 df_avulsas = df_banco_micro_rel[df_banco_micro_rel['EDT_Vinculado'].str.startswith('AVULSO', na=False)].copy() if not df_banco_micro_rel.empty else pd.DataFrame()
                 if filtro_obra_rel != "Todas" and not df_avulsas.empty:
                     df_avulsas = df_avulsas[df_avulsas['Obra_Vinculada'] == filtro_obra_rel]
+                if filtro_escopo_rel != "Todos" and not df_avulsas.empty and 'Escopo' in df_avulsas.columns:
+                    df_avulsas = df_avulsas[df_avulsas['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
                 if df_avulsas.empty:
                     st.info("Nenhuma OP sem frente encontrada.")
                 else:
-                    cols_av = ['Obra_Vinculada','Num_OP','Tipo_Material','Qtd_Caixas','M2_Item',
+                    cols_av = ['Obra_Vinculada','Num_OP','Tipo_Material','Qtd_Caixas',col_medida_rel,
                                'Data_Producao_Programada','Data_Limite_Obra','Status_Item','Romaneio_Chapas']
                     df_avulsas = df_avulsas[cols_av].copy()
-                    df_avulsas.columns = ['Obra','OP','Material','Caixas','m²','Ini Prod.','Limite','Status','Detalhes']
+                    df_avulsas.columns = ['Obra','OP','Material','Caixas',label_medida_rel,'Ini Prod.','Limite','Status','Detalhes']
                     for col_dt in ['Ini Prod.','Limite']:
                         df_avulsas[col_dt] = pd.to_datetime(df_avulsas[col_dt], errors='coerce').dt.strftime('%d/%m/%Y')
-                    st.dataframe(df_avulsas.style.format({'m²': '{:.2f}'}), hide_index=True, use_container_width=True)
+                    st.dataframe(df_avulsas.style.format({label_medida_rel: '{:.2f}'}), hide_index=True, use_container_width=True)
                     st.caption(f"{len(df_avulsas)} OP(s) sem frente encontrada(s).")
 
