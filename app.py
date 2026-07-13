@@ -4696,7 +4696,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     urg  = row['_urgencia']
                     cfg  = URG_CONFIG[urg]
                     dias = row['_dias_restantes']
-                    dias_txt  = f"Vencido há {abs(dias)}d" if dias < 0 else (f"Faltam {dias} dia(s)" if dias < 9999 else "Sem prazo")
+                    dias_txt  = ('Concluído' if row['Status_Item'] == 'Concluido' else
+                                 (f"Vencido há {abs(dias)}d" if dias < 0 else (f"Faltam {dias} dia(s)" if dias < 9999 else "Sem prazo")))
                     em, ec, _ = STATUS_EMOJI.get(row['Status_Item'], ('❓', '#64748B', '#F8FAFC'))
                     prazo_fmt = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y') if prazo_valido(row['Data_Limite_Obra']) else '—'
                     op_txt    = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
@@ -5161,7 +5162,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     urg  = row['_urgencia']
                     cfg  = URG_CONFIG_ESQ[urg]
                     dias = row['_dias_restantes']
-                    dias_txt  = f"Vencido há {abs(dias)}d" if dias < 0 else (f"Faltam {dias} dia(s)" if dias < 9999 else "Sem prazo")
+                    dias_txt  = ('Concluído' if row['Status_Item'] == 'Concluido' else
+                                 (f"Vencido há {abs(dias)}d" if dias < 0 else (f"Faltam {dias} dia(s)" if dias < 9999 else "Sem prazo")))
                     prazo_fmt = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y') if prazo_valido(row['Data_Limite_Obra']) else '—'
                     op_txt    = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
                     kg_v      = row.get('Peso_Kg', 0.0) or 0.0
