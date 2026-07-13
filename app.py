@@ -2912,6 +2912,26 @@ def carregar_todas_pecas_obra(obra: str):
         liberar_conexao(conn)
     return df
 
+@st.cache_data(ttl=30)
+def carregar_saldo_pecas_por_lote():
+    """Agrega op_pecas por lote — usado pra calcular quanto de m2/kg ainda falta
+    enviar em OPs Parcialmente Concluidas (saldo pendente), em vez do tamanho total da OP."""
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            """SELECT lote_id,
+                      SUM(qtd_total) AS qtd_total,
+                      SUM(saldo) AS saldo,
+                      MAX(m2_op_real) AS m2_op_real,
+                      MAX(peso_op_real) AS peso_op_real
+               FROM op_pecas
+               GROUP BY lote_id""",
+            conn
+        )
+    finally:
+        liberar_conexao(conn)
+    return df
+
 def salvar_pecas_lote(lote_id: int, obra: str, cod_lote: str, num_op: str,
                       pecas: list, componentes_status: str, m2_op_real: float, peso_op_real: float = 0.0):
     """Salva peças com lock otimista via updated_at. Reconcilia tanto m2_executado (ACM) quanto
@@ -8300,6 +8320,27 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 if rel_dt_fim:
                     df_rel = df_rel[df_rel[col_dt_filtro] <= pd.Timestamp(rel_dt_fim)]
 
+            # OPs Parcialmente Concluidas ja tiveram parte do material enviada — sem descontar isso,
+            # o relatorio contaria o tamanho cheio da OP como se nada tivesse saido ainda. Troca
+            # M2_Item/Peso_Kg pelo SALDO PENDENTE (o que ainda falta produzir/enviar), usando a
+            # proporcao de pecas com saldo (op_pecas) sobre o valor real medido daquele lote.
+            def _saldo_pendente_rel(row, col_original, col_real):
+                if row['Status_Item'] == 'Concluido':
+                    return 0.0
+                qtd_total_p = row.get('qtd_total')
+                if pd.notna(qtd_total_p) and qtd_total_p > 0:
+                    frac_pendente = float(row.get('saldo') or 0) / float(qtd_total_p)
+                    base = row.get(col_real)
+                    base = float(base) if pd.notna(base) and base and base > 0 else float(row.get(col_original) or 0)
+                    return base * frac_pendente
+                return float(row.get(col_original) or 0)
+
+            if not df_rel.empty:
+                df_pecas_saldo_rel = carregar_saldo_pecas_por_lote()
+                df_rel = df_rel.merge(df_pecas_saldo_rel, left_on='id', right_on='lote_id', how='left')
+                df_rel['M2_Item'] = df_rel.apply(lambda r: _saldo_pendente_rel(r, 'M2_Item', 'm2_op_real'), axis=1)
+                df_rel['Peso_Kg'] = df_rel.apply(lambda r: _saldo_pendente_rel(r, 'Peso_Kg', 'peso_op_real'), axis=1)
+
             # Esquadria-Vidro e medido em kg, nao em m2 — troca a coluna/unidade de referencia
             # do relatorio quando o filtro de escopo estiver em Esquadrias.
             escopo_esquadrias_rel = (filtro_escopo_rel == "Esquadrias")
@@ -8320,7 +8361,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                 k1, k2, k3, k4, k5 = st.columns(5)
                 k1.metric("Total de OPs", total_ops)
-                k2.metric(f"Total {label_medida_rel}", f"{total_medida:,.1f}")
+                k2.metric(f"Saldo {label_medida_rel}", f"{total_medida:,.1f}", help="O que ainda falta produzir/enviar — desconta o que já saiu em OPs parcialmente enviadas.")
                 k3.metric("Total Caixas", int(total_cx))
                 k4.metric("OPs Atrasadas", ops_atrasadas, delta=f"-{ops_atrasadas}" if ops_atrasadas > 0 else None, delta_color="inverse")
                 k5.metric("Envio Parcial", enviadas_parcial)
@@ -8338,7 +8379,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     df_m2_obra = df_m2_obra.sort_values(label_medida_rel, ascending=False)
                     fig_m2 = px.bar(
                         df_m2_obra, x='Obra', y=label_medida_rel,
-                        title=f'{label_medida_rel} em Produção por Obra',
+                        title=f'Saldo {label_medida_rel} Pendente por Obra',
                         color=label_medida_rel,
                         color_continuous_scale=[[0,'#334155'],[1,'#1A56DB']],
                         text_auto='.1f'
@@ -8398,7 +8439,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                              'Em_Parada','Motivo_Parada']
                 cols_show_exist = [c for c in cols_show if c in df_rel.columns]
                 df_tabela = df_rel[cols_show_exist].copy()
-                col_names = ['Obra','OP','Material','EDT/Lote','Caixas',label_medida_rel,'Ini Prod.','Limite','Status']
+                col_saldo_label = f'{label_medida_rel} (saldo)'
+                col_names = ['Obra','OP','Material','EDT/Lote','Caixas',col_saldo_label,'Ini Prod.','Limite','Status']
                 if 'Em_Parada' in df_tabela.columns:
                     df_tabela['Situacao'] = df_tabela.apply(
                         lambda r: f"⛔ PARADA — {r.get('Motivo_Parada','')}" if r.get('Em_Parada') else '', axis=1
@@ -8409,17 +8451,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                 # % de representação sobre o total filtrado
                 col_pct = f'% {label_medida_rel}'
-                total_medida_rel = df_tabela[label_medida_rel].sum()
+                total_medida_rel = df_tabela[col_saldo_label].sum()
                 total_cx_rel  = df_tabela['Caixas'].sum()
                 if total_medida_rel > 0:
-                    df_tabela[col_pct] = (df_tabela[label_medida_rel] / total_medida_rel * 100).round(1)
-                    base_pct = label_medida_rel
+                    df_tabela[col_pct] = (df_tabela[col_saldo_label] / total_medida_rel * 100).round(1)
+                    base_pct = col_saldo_label
                 elif total_cx_rel > 0:
                     df_tabela[col_pct] = (df_tabela['Caixas'] / total_cx_rel * 100).round(1)
                     base_pct = 'Caixas'
                 else:
                     df_tabela[col_pct] = 0.0
-                    base_pct = label_medida_rel
+                    base_pct = col_saldo_label
 
                 for col_dt in ['Ini Prod.','Limite']:
                     df_tabela[col_dt] = pd.to_datetime(df_tabela[col_dt], errors='coerce').dt.strftime('%d/%m/%Y')
@@ -8431,7 +8473,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         return ['background-color:#FEF2F2'] * len(row)
                     return [''] * len(row)
 
-                styled = df_tabela.style.apply(highlight_row, axis=1).format({label_medida_rel: '{:.2f}', col_pct: '{:.1f}%'})
+                styled = df_tabela.style.apply(highlight_row, axis=1).format({col_saldo_label: '{:.2f}', col_pct: '{:.1f}%'})
                 st.dataframe(styled, hide_index=True, use_container_width=True, height=420)
 
                 st.caption(f"Total de {len(df_tabela)} registros | % calculada sobre {base_pct} do total filtrado | Linhas em vermelho = prazo vencido")
@@ -8550,13 +8592,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 if df_avulsas.empty:
                     st.info("Nenhuma OP sem frente encontrada.")
                 else:
+                    df_avulsas = df_avulsas.merge(carregar_saldo_pecas_por_lote(), left_on='id', right_on='lote_id', how='left')
+                    df_avulsas['M2_Item'] = df_avulsas.apply(lambda r: _saldo_pendente_rel(r, 'M2_Item', 'm2_op_real'), axis=1)
+                    df_avulsas['Peso_Kg'] = df_avulsas.apply(lambda r: _saldo_pendente_rel(r, 'Peso_Kg', 'peso_op_real'), axis=1)
                     cols_av = ['Obra_Vinculada','Num_OP','Tipo_Material','Qtd_Caixas',col_medida_rel,
                                'Data_Producao_Programada','Data_Limite_Obra','Status_Item','Romaneio_Chapas']
                     df_avulsas = df_avulsas[cols_av].copy()
-                    df_avulsas.columns = ['Obra','OP','Material','Caixas',label_medida_rel,'Ini Prod.','Limite','Status','Detalhes']
+                    col_saldo_label_av = f'{label_medida_rel} (saldo)'
+                    df_avulsas.columns = ['Obra','OP','Material','Caixas',col_saldo_label_av,'Ini Prod.','Limite','Status','Detalhes']
                     for col_dt in ['Ini Prod.','Limite']:
                         df_avulsas[col_dt] = pd.to_datetime(df_avulsas[col_dt], errors='coerce').dt.strftime('%d/%m/%Y')
-                    st.dataframe(df_avulsas.style.format({label_medida_rel: '{:.2f}'}), hide_index=True, use_container_width=True)
+                    st.dataframe(df_avulsas.style.format({col_saldo_label_av: '{:.2f}'}), hide_index=True, use_container_width=True)
                     st.caption(f"{len(df_avulsas)} OP(s) sem frente encontrada(s).")
 
     # ==================================================
