@@ -28,6 +28,9 @@ BLOQUEIO_MINUTOS      = 15
 TIMEOUT_SESSAO_HORAS  = 8
 LIMITE_REGISTROS_LOAD = 2000   # máx de linhas carregadas de uma vez
 
+# Meta oficial de produtividade por colaborador/mês, por escopo (kg p/ Esquadria-Vidro, m² p/ ACM)
+METAS_PRODUTIVIDADE = {"Esquadria-Vidro": 450, "ACM": 382}
+
 st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide", page_icon="🏭", initial_sidebar_state="expanded")
 
 st.markdown("""
@@ -959,6 +962,21 @@ def inicializar_banco_de_dados():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_logistica_status ON logistica_envios(Status_Logistica)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_medicao_hist_obra ON medicao_historico(obra_id)")
 
+        # ── Produtividade semanal (lançamento manual de colaboradores/executado) ──
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS produtividade_semanal (
+                id SERIAL PRIMARY KEY,
+                escopo TEXT NOT NULL,
+                semana_inicio DATE NOT NULL,
+                semana_fim DATE NOT NULL,
+                colaboradores NUMERIC(5,1) NOT NULL,
+                executado NUMERIC(10,2) NOT NULL,
+                criado_por TEXT,
+                criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_produtividade_semanal_escopo_semana ON produtividade_semanal(escopo, semana_inicio)")
+
 # ── Tabela de auditoria (nova) ──────────────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS auditoria_log (
@@ -1672,6 +1690,61 @@ def reverter_baixa_romaneio(item_id: int):
     except Exception as e:
         conn.rollback()
         st.error(f"Erro ao reverter baixa: {e}")
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=30)
+def carregar_produtividade_semanal(escopo: str = None):
+    conn = conectar_banco()
+    try:
+        if escopo:
+            df = pd.read_sql_query(
+                "SELECT * FROM produtividade_semanal WHERE escopo=%s ORDER BY semana_inicio",
+                conn, params=(escopo,)
+            )
+        else:
+            df = pd.read_sql_query("SELECT * FROM produtividade_semanal ORDER BY semana_inicio", conn)
+    finally:
+        liberar_conexao(conn)
+    for col in ['semana_inicio', 'semana_fim']:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+    for col in ['colaboradores', 'executado']:
+        if col in df.columns:
+            df[col] = df[col].astype(float)
+    return df
+
+def salvar_produtividade_semanal(escopo, semana_inicio, semana_fim, colaboradores, executado, usuario):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO produtividade_semanal (escopo, semana_inicio, semana_fim, colaboradores, executado, criado_por)
+            VALUES (%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (escopo, semana_inicio) DO UPDATE SET
+                semana_fim=EXCLUDED.semana_fim,
+                colaboradores=EXCLUDED.colaboradores,
+                executado=EXCLUDED.executado,
+                criado_por=EXCLUDED.criado_por
+        """, (escopo, semana_inicio, semana_fim, colaboradores, executado, usuario))
+        conn.commit()
+        carregar_produtividade_semanal.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar produtividade semanal: {e}")
+    finally:
+        liberar_conexao(conn)
+
+def excluir_produtividade_semanal(id_registro: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM produtividade_semanal WHERE id=%s", (id_registro,))
+        conn.commit()
+        carregar_produtividade_semanal.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao excluir lançamento de produtividade: {e}")
     finally:
         liberar_conexao(conn)
 
@@ -3665,6 +3738,7 @@ GRUPOS_NAV = {
     },
     "📊  Relatórios": {
         "Relatorio Geral":    ("📊  Relatório Geral",    ["Master","Diretoria","PCP","Medicao"]),
+        "Relatorio Produtividade": ("📈  Produtividade", ["Master","Diretoria","PCP","Medicao"]),
         "Sistema de Medicao": ("📏  Sistema de Medição", ["Master","Medicao"]),
     },
     "⚙️  Sistema": {
@@ -8484,4 +8558,107 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         df_avulsas[col_dt] = pd.to_datetime(df_avulsas[col_dt], errors='coerce').dt.strftime('%d/%m/%Y')
                     st.dataframe(df_avulsas.style.format({label_medida_rel: '{:.2f}'}), hide_index=True, use_container_width=True)
                     st.caption(f"{len(df_avulsas)} OP(s) sem frente encontrada(s).")
+
+    # ==================================================
+    # RELATORIO DE PRODUTIVIDADE — kg (Esquadria-Vidro) / m² (ACM) por colaborador
+    # ==================================================
+    elif nome_aba == "Relatorio Produtividade":
+        with aba_objeto:
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Relatório de Produtividade</h2><p>Produtividade por colaborador — Esquadrias (kg) e ACM (m²)</p></div><span class="page-icon">📈</span></div>', unsafe_allow_html=True)
+
+            escopo_prod = st.radio("Escopo:", ["Esquadria-Vidro", "ACM"], horizontal=True, key="prod_escopo")
+            label_medida_prod = 'kg' if escopo_prod == 'Esquadria-Vidro' else 'm²'
+            meta_mensal_prod = METAS_PRODUTIVIDADE[escopo_prod]
+
+            with st.expander("➕ Lançar semana", expanded=False):
+                lp1, lp2, lp3, lp4 = st.columns(4)
+                with lp1:
+                    prod_semana_ini = st.date_input("De:", format="DD/MM/YYYY", key="prod_semana_ini")
+                with lp2:
+                    prod_semana_fim = st.date_input("Até:", format="DD/MM/YYYY", key="prod_semana_fim")
+                with lp3:
+                    prod_colaboradores = st.number_input("Colaboradores:", min_value=0.0, step=0.5, format="%.1f", key="prod_colaboradores")
+                with lp4:
+                    prod_executado = st.number_input(f"Executado ({label_medida_prod}):", min_value=0.0, step=1.0, format="%.2f", key="prod_executado")
+                if st.button("💾 Salvar", key="prod_salvar", type="primary"):
+                    if prod_semana_fim < prod_semana_ini:
+                        st.error("A data 'Até' não pode ser anterior à data 'De'.")
+                    elif prod_colaboradores <= 0:
+                        st.error("Informe o número de colaboradores.")
+                    else:
+                        salvar_produtividade_semanal(
+                            escopo_prod, prod_semana_ini, prod_semana_fim,
+                            prod_colaboradores, prod_executado, st.session_state.usuario_nome
+                        )
+                        registrar_auditoria(st.session_state.usuario_nome, "LANCAR_PRODUTIVIDADE_SEMANAL",
+                            f"{escopo_prod} — {prod_semana_ini.strftime('%d/%m/%Y')} a {prod_semana_fim.strftime('%d/%m/%Y')}")
+                        st.toast("Semana lançada!")
+                        time.sleep(0.3)
+                        st.rerun()
+
+            df_prod = carregar_produtividade_semanal(escopo_prod)
+
+            if df_prod.empty:
+                st.info("Nenhuma semana lançada ainda para este escopo.")
+            else:
+                df_prod = df_prod.sort_values('semana_inicio').copy()
+                df_prod['meta'] = (meta_mensal_prod / 22) * df_prod['colaboradores'] * 5
+                df_prod['media_mensal'] = (df_prod['executado'] / df_prod['colaboradores'] / 5) * 22
+                df_prod['pct_atingido'] = (df_prod['executado'] / df_prod['meta'] * 100).round(1)
+                df_prod['semana_label'] = (
+                    df_prod['semana_inicio'].dt.strftime('%d/%m') + ' – ' + df_prod['semana_fim'].dt.strftime('%d/%m')
+                )
+
+                # ── KPIs ─────────────────────────────────────────
+                media_alcancada = df_prod['media_mensal'].mean()
+                n_semanas = len(df_prod)
+                n_acima = int((df_prod['media_mensal'] > meta_mensal_prod).sum())
+                n_abaixo = n_semanas - n_acima
+
+                kp1, kp2, kp3, kp4 = st.columns(4)
+                kp1.metric(f"Média mensal alcançada ({label_medida_prod}/colab.)", f"{media_alcancada:,.1f}",
+                           delta=f"{media_alcancada - meta_mensal_prod:,.1f} vs meta", delta_color="normal")
+                kp2.metric("Meta", f"{meta_mensal_prod} {label_medida_prod}/colab./mês")
+                kp3.metric("Semanas acima da meta", f"{n_acima}/{n_semanas}")
+                kp4.metric("Semanas abaixo da meta", f"{n_abaixo}/{n_semanas}")
+
+                # ── Gráfico de tendência: Meta x Executado ────────
+                df_prod_long = pd.concat([
+                    df_prod[['semana_label', 'meta']].rename(columns={'meta': 'Valor'}).assign(Série='Meta'),
+                    df_prod[['semana_label', 'executado']].rename(columns={'executado': 'Valor'}).assign(Série='Executado'),
+                ], ignore_index=True)
+                fig_prod = px.line(
+                    df_prod_long, x='semana_label', y='Valor', color='Série',
+                    title=f'Meta x Executado ({label_medida_prod}) por Semana',
+                    color_discrete_map={'Meta': '#334155', 'Executado': '#1A56DB'},
+                    markers=True
+                )
+                fig_prod.update_traces(selector=dict(name='Meta'), line=dict(dash='dash'))
+                fig_prod.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                    font_family='Inter', title_font_size=14,
+                    margin=dict(l=10, r=10, t=40, b=10),
+                    legend=dict(font=dict(size=11)),
+                    xaxis=dict(tickfont=dict(size=11), title=''),
+                )
+                st.plotly_chart(fig_prod, use_container_width=True)
+
+                # ── Tabela detalhada ───────────────────────────────
+                st.markdown("#### Semanas lançadas")
+                for _, row_p in df_prod.sort_values('semana_inicio', ascending=False).iterrows():
+                    with st.container(border=True):
+                        pc1, pc2, pc3, pc4, pc5, pc6 = st.columns([2, 1.4, 1.4, 1.4, 1.6, 1])
+                        pc1.markdown(f"**{row_p['semana_label']}**")
+                        pc2.caption(f"Colaboradores\n\n**{row_p['colaboradores']:.1f}**")
+                        pc3.caption(f"Meta ({label_medida_prod})\n\n**{row_p['meta']:.1f}**")
+                        pc4.caption(f"Executado ({label_medida_prod})\n\n**{row_p['executado']:.1f}** ({row_p['pct_atingido']:.0f}%)")
+                        pc5.caption(f"Média mensal/colab.\n\n**{row_p['media_mensal']:.1f}**")
+                        with pc6:
+                            if st.button("🗑️", key=f"del_prod_{row_p['id']}", help="Excluir lançamento"):
+                                excluir_produtividade_semanal(int(row_p['id']))
+                                registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_PRODUTIVIDADE_SEMANAL",
+                                    f"{escopo_prod} — {row_p['semana_label']}")
+                                st.toast("Lançamento excluído.")
+                                time.sleep(0.3)
+                                st.rerun()
 
