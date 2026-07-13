@@ -554,6 +554,9 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Escopo TEXT")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Numero_Projeto TEXT")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Uso_Interno BOOLEAN DEFAULT FALSE")
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Romaneio_Emitido BOOLEAN DEFAULT FALSE")
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Romaneio_Emitido_Em TIMESTAMP")
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Romaneio_Emitido_Por TEXT")
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_itens_detalhado_num_op ON itens_detalhado(Num_OP) WHERE Num_OP IS NOT NULL")
         # Escopo oficial (enum unico usado em toda a aplicacao): ACM / Esquadria-Vidro / Terceirizada.
         # Itens ligados a EDT herdam o Tipo_Escopo do cronograma (normalizado pro enum);
@@ -1633,6 +1636,42 @@ def confirmar_despacho(log_id, usuario):
     except Exception as e:
         conn.rollback()
         st.error(f"Erro ao confirmar despacho: {e}")
+    finally:
+        liberar_conexao(conn)
+
+def dar_baixa_romaneio(item_ids: list, usuario: str):
+    """Marca OP(s) como romaneio emitido, tirando-as da fila de 'OPs Finalizadas — Emitir Romaneio'."""
+    if not item_ids:
+        return
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE itens_detalhado SET Romaneio_Emitido=TRUE, Romaneio_Emitido_Em=%s, Romaneio_Emitido_Por=%s WHERE id = ANY(%s)",
+            (datetime.now(FUSO_BR).strftime('%Y-%m-%d %H:%M:%S'), usuario, item_ids)
+        )
+        conn.commit()
+        _limpar_cache_geral()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao dar baixa no romaneio: {e}")
+    finally:
+        liberar_conexao(conn)
+
+def reverter_baixa_romaneio(item_id: int):
+    """Desfaz a baixa (volta a OP para a fila de emissao)."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE itens_detalhado SET Romaneio_Emitido=FALSE, Romaneio_Emitido_Em=NULL, Romaneio_Emitido_Por=NULL WHERE id=%s",
+            (item_id,)
+        )
+        conn.commit()
+        _limpar_cache_geral()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao reverter baixa: {e}")
     finally:
         liberar_conexao(conn)
 
@@ -6674,14 +6713,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             with st.expander("✅ OPs Finalizadas — Emitir Romaneio", expanded=True):
                 df_micro_completo_log = carregar_micro_completo()
                 df_conc_log = df_micro_completo_log[
-                    df_micro_completo_log['Status_Item'] == 'Concluido'
+                    (df_micro_completo_log['Status_Item'] == 'Concluido') &
+                    (df_micro_completo_log['Romaneio_Emitido'] != True)
                 ].copy() if not df_micro_completo_log.empty else pd.DataFrame()
 
                 if obra_selecionada and not df_conc_log.empty:
                     df_conc_log = df_conc_log[df_conc_log['Obra_Vinculada'] == obra_selecionada]
 
                 if df_conc_log.empty:
-                    st.info("Nenhuma OP finalizada ainda.")
+                    st.info("Nenhuma OP finalizada aguardando romaneio.")
                 else:
                     for _, row_c in df_conc_log.iterrows():
                         df_pecas_c = carregar_pecas_lote(int(row_c['id']))
@@ -6709,6 +6749,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.write("")
                                 if df_pecas_c.empty:
                                     st.warning("Sem peças para o romaneio")
+                                    if st.button("Dar baixa (OP antiga, já emitido)", key=f"baixa_manual_{row_c['id']}",
+                                                 use_container_width=True,
+                                                 help="Sem peças lançadas pra gerar o romaneio — use para baixar OPs antigas ja finalizadas fora do sistema."):
+                                        dar_baixa_romaneio([int(row_c['id'])], st.session_state.usuario_nome)
+                                        registrar_auditoria(st.session_state.usuario_nome, "BAIXA_ROMANEIO_MANUAL",
+                                            f"OP {num_op_c} — Lote {row_c['Cod_Lote']}")
+                                        st.toast(f"OP {num_op_c} baixada!")
+                                        time.sleep(0.3)
+                                        st.rerun()
                                 else:
                                     etapa_c = ''
                                     edt_c = row_c.get('EDT_Vinculado', '')
@@ -6720,13 +6769,50 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         row_c, df_pecas_c, end_r,
                                         st.session_state.usuario_nome, etapa=etapa_c
                                     )
-                                    st.download_button(
+                                    romaneio_baixado = st.download_button(
                                         label="🖨️ Emitir Romaneio",
                                         data=rom_bytes,
                                         file_name=f"Romaneio_{num_op_c}_{row_c['Cod_Lote']}.xlsx",
                                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        key=f"dl_rom_{row_c['id']}"
+                                        key=f"dl_rom_{row_c['id']}",
+                                        use_container_width=True
                                     )
+                                    if romaneio_baixado:
+                                        dar_baixa_romaneio([int(row_c['id'])], st.session_state.usuario_nome)
+                                        registrar_auditoria(st.session_state.usuario_nome, "EMITIR_ROMANEIO",
+                                            f"OP {num_op_c} — Lote {row_c['Cod_Lote']}")
+                                        st.toast(f"Romaneio emitido — OP {num_op_c} baixada!")
+                                        time.sleep(0.3)
+                                        st.rerun()
+
+                with st.expander("Romaneios já baixados (histórico recente)", expanded=False):
+                    df_baixados_log = df_micro_completo_log[
+                        df_micro_completo_log['Romaneio_Emitido'] == True
+                    ].copy() if not df_micro_completo_log.empty else pd.DataFrame()
+                    if obra_selecionada and not df_baixados_log.empty:
+                        df_baixados_log = df_baixados_log[df_baixados_log['Obra_Vinculada'] == obra_selecionada]
+                    if df_baixados_log.empty:
+                        st.caption("Nenhuma OP baixada ainda.")
+                    else:
+                        df_baixados_log = df_baixados_log.sort_values('Romaneio_Emitido_Em', ascending=False).head(50)
+                        for _, row_b in df_baixados_log.iterrows():
+                            bi, bb = st.columns([5, 1])
+                            with bi:
+                                num_op_b = row_b.get('Num_OP') or '—'
+                                em_b = row_b.get('Romaneio_Emitido_Em')
+                                em_b_txt = pd.to_datetime(em_b).strftime('%d/%m/%Y %H:%M') if pd.notna(em_b) else '—'
+                                st.caption(
+                                    f"**OP {num_op_b}** — {row_b['Obra_Vinculada']} — Lote {row_b['Cod_Lote']} "
+                                    f"— baixado em {em_b_txt} por {row_b.get('Romaneio_Emitido_Por') or '—'}"
+                                )
+                            with bb:
+                                if st.button("Reverter", key=f"rev_rom_{row_b['id']}", use_container_width=True):
+                                    reverter_baixa_romaneio(int(row_b['id']))
+                                    registrar_auditoria(st.session_state.usuario_nome, "REVERTER_BAIXA_ROMANEIO",
+                                        f"OP {num_op_b} — Lote {row_b['Cod_Lote']}")
+                                    st.toast(f"Baixa revertida — OP {num_op_b} voltou pra fila.")
+                                    time.sleep(0.3)
+                                    st.rerun()
 
             with st.expander("Fila Prioritaria — Aguardando Agendamento", expanded=True):
                 if df_log.empty or df_log[df_log['Status_Logistica'] == 'Aguardando Agendamento'].empty:
