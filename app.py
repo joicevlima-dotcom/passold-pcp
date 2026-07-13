@@ -3658,10 +3658,10 @@ GRUPOS_NAV = {
     },
     "🚚  Operações": {
         "Logistica":      ("🚚  Logística",       ["Master","Logistica"]),
-        "Almoxarifado":   ("📦  Almoxarifado",    ["Master","Almoxarifado"]),
+        "Almoxarifado":   ("📦  Almoxarifado",    ["Master","Almoxarifado","PCP"]),
         "Romaneio Manual": ("📋  Romaneio Manual", ["Master","Almoxarifado","PCP"]),
-        "Lista Mestra": ("📑  Lista Mestra", ["Master","Almoxarifado"]),
-        "Romaneios Devolvidos": ("🗂️  Romaneios Devolvidos", ["Master"]),
+        "Lista Mestra": ("📑  Lista Mestra", ["Master","Almoxarifado","PCP"]),
+        "Romaneios Devolvidos": ("🗂️  Romaneios Devolvidos", ["Master","PCP"]),
     },
     "📊  Relatórios": {
         "Relatorio Geral":    ("📊  Relatório Geral",    ["Master","Diretoria","PCP","Medicao"]),
@@ -7625,8 +7625,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
     # ==================================================
     elif nome_aba == "Romaneios Devolvidos":
         with aba_objeto:
-            if setor != "Master":
-                st.error("⛔ Acesso negado. Apenas usuários Master podem acessar esta página.")
+            if setor not in ["Master", "PCP"]:
+                st.error("⛔ Acesso negado.")
                 st.stop()
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Romaneios Devolvidos</h2><p>Controle de romaneios de OP e de Insumos que voltaram assinados da obra/produção</p></div><span class="page-icon">🗂️</span></div>', unsafe_allow_html=True)
 
