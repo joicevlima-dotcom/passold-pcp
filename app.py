@@ -3657,7 +3657,7 @@ GRUPOS_NAV = {
         "Vincular Datas":       ("📅  Vincular Datas",       ["Master"]),
     },
     "🚚  Operações": {
-        "Logistica":      ("🚚  Logística",       ["Master","Logistica"]),
+        "Logistica":      ("🚚  Logística",       ["Master","Logistica","Producao"]),
         "Almoxarifado":   ("📦  Almoxarifado",    ["Master","Almoxarifado","PCP"]),
         "Romaneio Manual": ("📋  Romaneio Manual", ["Master","Almoxarifado","PCP"]),
         "Lista Mestra": ("📑  Lista Mestra", ["Master","Almoxarifado","PCP"]),
