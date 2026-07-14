@@ -2503,13 +2503,6 @@ def gerar_romaneio_lista_mestra_xlsx(lista_row, envio_row, itens_envio_df) -> by
         linha += 1
 
     linha += 1
-    ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=3)
-    ws.cell(linha, 1, "TOTAL DE ITENS:").font = Font(name="Arial", size=11, bold=True)
-    ws.cell(linha, 4, len(itens_envio_df)).font = Font(name="Arial", size=11, bold=True)
-    for c in range(1, 6):
-        ws.cell(linha, c).border = borda
-
-    linha += 2
     linha = _inserir_aviso_conferencia(ws, linha, "E")
 
     linha += 1
@@ -3393,13 +3386,6 @@ def gerar_romaneio_componentes_xlsx(obra: str, num_op: str, cod_lote: str, compo
         linha += 1
 
     linha += 1
-    ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=2)
-    ws.cell(linha, 1, "TOTAL DE ITENS:").font = Font(name="Arial", size=11, bold=True)
-    ws.cell(linha, 3, len(componentes_disponiveis_df)).font = Font(name="Arial", size=11, bold=True)
-    for c in range(1, 5):
-        ws.cell(linha, c).border = borda
-
-    linha += 2
     linha = _inserir_aviso_conferencia(ws, linha, "D")
 
     linha += 1
@@ -3486,13 +3472,6 @@ def gerar_romaneio_insumos_xlsx(saida_row, itens_df) -> bytes:
         linha += 1
 
     linha += 1
-    ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=1)
-    ws.cell(linha, 1, "TOTAL DE ITENS:").font = Font(name="Arial", size=11, bold=True)
-    ws.cell(linha, 2, len(itens_df)).font = Font(name="Arial", size=11, bold=True)
-    for c in range(1, 5):
-        ws.cell(linha, c).border = borda
-
-    linha += 2
     linha = _inserir_aviso_conferencia(ws, linha, "D")
 
     linha += 1
@@ -4975,6 +4954,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             if st.button("⏸ Parada", key=f"esq_parada_{row['id']}", use_container_width=True):
                                                 st.session_state[f"esq_modal_parada_{row['id']}"] = not st.session_state.get(f"esq_modal_parada_{row['id']}", False)
                                                 st.rerun()
+                                        if st.button("✏️ Editar", key=f"esq_editar_lote_{row['id']}", use_container_width=True):
+                                            st.session_state[f"esq_modal_editar_{row['id']}"] = not st.session_state.get(f"esq_modal_editar_{row['id']}", False)
+                                            st.rerun()
                                     if pode_concluir:
                                         st.write("")
                                         if st.button("✅ Pronto", key=f"esq_baixa_{row['id']}", type="primary", use_container_width=True):
@@ -4982,6 +4964,34 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             st.rerun()
                                     elif setor not in ["Producao", "Master"]:
                                         st.markdown("<div style='text-align:center;color:#94A3B8;font-size:12px;padding:8px;'>Em producao</div>", unsafe_allow_html=True)
+
+                            # ── EDITAR QTD CAIXAS / M² ────────────────────────
+                            if st.session_state.get(f"esq_modal_editar_{row['id']}", False):
+                                with st.container(border=True):
+                                    st.markdown(f"#### ✏️ Corrigir dados do lote `{row['Cod_Lote']}`")
+                                    eed1, eed2 = st.columns(2)
+                                    with eed1:
+                                        esq_caixas_edit = st.number_input("Qtd Caixas:", min_value=0, value=int(row['Qtd_Caixas']), step=1, key=f"esq_edit_caixas_{row['id']}")
+                                    with eed2:
+                                        esq_m2_edit = st.number_input("m² Total:", min_value=0.0, value=float(row['M2_Item']), step=0.01, key=f"esq_edit_m2_{row['id']}")
+                                    eeb1, eeb2, _ = st.columns([2, 2, 4])
+                                    with eeb1:
+                                        if st.button("💾 Salvar correção", key=f"esq_salvar_edit_lote_{row['id']}", type="primary", use_container_width=True):
+                                            ok_esq_edit, msg_esq_edit = editar_qtd_caixas_lote(int(row['id']), int(esq_caixas_edit), float(esq_m2_edit))
+                                            if ok_esq_edit:
+                                                registrar_auditoria(st.session_state.usuario_nome, "EDITAR_LOTE",
+                                                    f"Lote {row['Cod_Lote']} — Qtd_Caixas: {int(row['Qtd_Caixas'])}→{int(esq_caixas_edit)} | "
+                                                    f"M2: {float(row['M2_Item']):.2f}→{esq_m2_edit:.2f}")
+                                                st.session_state[f"esq_modal_editar_{row['id']}"] = False
+                                                st.toast("Quantidade corrigida!")
+                                                time.sleep(0.4)
+                                                st.rerun()
+                                            else:
+                                                st.error(msg_esq_edit)
+                                    with eeb2:
+                                        if st.button("Cancelar", key=f"esq_cancel_edit_lote_{row['id']}", use_container_width=True):
+                                            st.session_state[f"esq_modal_editar_{row['id']}"] = False
+                                            st.rerun()
 
                             # ── ARQUIVOS DA OP ────────────────────────────────
                             arqs_esq = carregar_arquivos_op(int(row['id']))
