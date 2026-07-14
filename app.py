@@ -2166,9 +2166,9 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
 
     linha += 1
     assinaturas = (
-        [("Conferência interna", False), ("Recebimento terceiro", True)]
+        [("Conferência interna", False), ("Recebimento terceiro", True), ("Assinatura motorista", False)]
         if terceirizado else
-        [("Recebedor na Obra", True), ("Conferência Almoxarifado", False)]
+        [("Recebedor na Obra", True), ("Conferência Almoxarifado", False), ("Assinatura motorista", False)]
     )
     _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=4, col_data=6)
 
@@ -2513,7 +2513,7 @@ def gerar_romaneio_lista_mestra_xlsx(lista_row, envio_row, itens_envio_df) -> by
     linha = _inserir_aviso_conferencia(ws, linha, "E")
 
     linha += 1
-    assinaturas = [("Almoxarifado", False), ("Recebedor", True)]
+    assinaturas = [("Almoxarifado", False), ("Recebedor", True), ("Assinatura motorista", False)]
     _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=3, col_data=4)
 
     buf = BytesIO()
@@ -3403,7 +3403,7 @@ def gerar_romaneio_componentes_xlsx(obra: str, num_op: str, cod_lote: str, compo
     linha = _inserir_aviso_conferencia(ws, linha, "D")
 
     linha += 1
-    assinaturas = [("Almoxarifado", False), ("Recebedor / Produção", True)]
+    assinaturas = [("Almoxarifado", False), ("Recebedor / Produção", True), ("Assinatura motorista", False)]
     _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=2, col_data=3)
 
     buf = BytesIO()
@@ -3443,13 +3443,14 @@ def gerar_romaneio_insumos_xlsx(saida_row, itens_df) -> bytes:
     ws["A2"].fill = fill_cab
     ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
 
-    infos = [
+    infos_brutas = [
         ("Data:", pd.to_datetime(saida_row.get('data_saida')).strftime('%d/%m/%Y')),
-        ("Obra:", str(saida_row.get('obra') or '—')),
-        ("Nº do Projeto:", str(saida_row.get('numero_projeto') or '—')),
-        ("Destino:", str(saida_row.get('destino') or '—')),
-        ("Registrado por:", str(saida_row.get('registrado_por') or '—')),
+        ("Obra:", saida_row.get('obra')),
+        ("Nº do Projeto:", saida_row.get('numero_projeto')),
+        ("Destino:", saida_row.get('destino')),
+        ("Registrado por:", saida_row.get('registrado_por')),
     ]
+    infos = [(label, str(valor)) for label, valor in infos_brutas if valor not in (None, '')]
     linha = 3
     for label, valor in infos:
         ws.cell(linha, 1, label).font = Font(name="Arial", size=11, bold=True)
@@ -3495,7 +3496,7 @@ def gerar_romaneio_insumos_xlsx(saida_row, itens_df) -> bytes:
     linha = _inserir_aviso_conferencia(ws, linha, "D")
 
     linha += 1
-    assinaturas = [("Almoxarifado", False), ("Recebido em obra", True)]
+    assinaturas = [("Almoxarifado", False), ("Recebido em obra", True), ("Assinatura motorista", False)]
     _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=2, col_data=4)
 
     buf = BytesIO()
