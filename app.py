@@ -6,6 +6,7 @@ import calendar as py_calendar
 import os
 import secrets
 import time
+import base64
 import bcrypt
 import psycopg2
 import psycopg2.extras
@@ -1867,6 +1868,17 @@ def carregar_conteudo_arquivo(arquivo_id: int):
         return None
     finally:
         liberar_conexao(conn)
+
+def _link_abrir_arquivo(nome: str, tipo: str, conteudo: bytes) -> str | None:
+    """Link 'abrir em nova aba' (via data URI) pra tipos que o navegador consegue exibir
+    sozinho (PDF/imagem). Pra outros tipos (xlsx, dwg etc) retorna None — so da pra baixar."""
+    ext = nome.rsplit('.', 1)[-1].lower() if '.' in nome else ''
+    mime_por_ext = {'pdf': 'application/pdf', 'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg'}
+    mime = mime_por_ext.get(ext)
+    if not mime:
+        return None
+    b64 = base64.b64encode(conteudo).decode('ascii')
+    return f'<a href="data:{mime};base64,{b64}" target="_blank" rel="noopener noreferrer" title="Abrir em nova aba">🔗</a>'
 
 def deletar_arquivo_op(arquivo_id: int):
     conn = conectar_banco()
@@ -4459,12 +4471,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 with st.expander(f"📎 {len(arqs_op)} arquivo(s) anexado(s)", expanded=False):
                                     for arq in arqs_op:
                                         arq_id, arq_nome, arq_tipo, arq_enviado_por, _ = arq
-                                        ca1, ca2 = st.columns([5, 1])
+                                        ca1, ca2, ca3 = st.columns([5, 1, 1])
                                         ca1.markdown(f"📄 **{html_escape(arq_nome)}**  \n<small style='color:#94A3B8'>{html_escape(arq_enviado_por)}</small>", unsafe_allow_html=True)
                                         conteudo_arq = carregar_conteudo_arquivo(arq_id)
                                         if conteudo_arq:
                                             _, _, bytes_arq = conteudo_arq
-                                            ca2.download_button(
+                                            link_abrir = _link_abrir_arquivo(arq_nome, arq_tipo, bytes(bytes_arq))
+                                            if link_abrir:
+                                                ca2.markdown(link_abrir, unsafe_allow_html=True)
+                                            ca3.download_button(
                                                 "⬇️", data=bytes(bytes_arq),
                                                 file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
                                                 key=f"acm_dl_{arq_id}"
@@ -5023,12 +5038,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 with st.expander(f"📎 {len(arqs_esq)} arquivo(s) anexado(s)", expanded=False):
                                     for arq in arqs_esq:
                                         arq_id, arq_nome, arq_tipo, arq_enviado_por, _ = arq
-                                        ca1, ca2 = st.columns([5, 1])
+                                        ca1, ca2, ca3 = st.columns([5, 1, 1])
                                         ca1.markdown(f"📄 **{html_escape(arq_nome)}**  \n<small style='color:#94A3B8'>{html_escape(arq_enviado_por)}</small>", unsafe_allow_html=True)
                                         conteudo_arq = carregar_conteudo_arquivo(arq_id)
                                         if conteudo_arq:
                                             _, _, bytes_arq = conteudo_arq
-                                            ca2.download_button(
+                                            link_abrir = _link_abrir_arquivo(arq_nome, arq_tipo, bytes(bytes_arq))
+                                            if link_abrir:
+                                                ca2.markdown(link_abrir, unsafe_allow_html=True)
+                                            ca3.download_button(
                                                 "⬇️", data=bytes(bytes_arq),
                                                 file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
                                                 key=f"esq_dl_{arq_id}"
@@ -5760,13 +5778,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.markdown("**Arquivos anexados:**")
                                 for arq in arqs_existentes:
                                     arq_id, arq_nome, arq_tipo, arq_enviado_por, arq_enviado_em = arq
-                                    col_a, col_b, col_c = st.columns([4, 2, 1])
+                                    col_a, col_b, col_link, col_c = st.columns([4, 2, 1, 1])
                                     col_a.markdown(f"📄 **{html_escape(arq_nome)}**")
                                     col_b.caption(f"{arq_enviado_por} — {pd.to_datetime(arq_enviado_em).strftime('%d/%m/%Y %H:%M')}")
-                                    with col_c:
-                                        conteudo_arq = carregar_conteudo_arquivo(arq_id)
-                                        if conteudo_arq:
-                                            _, _, bytes_arq = conteudo_arq
+                                    conteudo_arq = carregar_conteudo_arquivo(arq_id)
+                                    if conteudo_arq:
+                                        _, _, bytes_arq = conteudo_arq
+                                        link_abrir = _link_abrir_arquivo(arq_nome, arq_tipo, bytes(bytes_arq))
+                                        if link_abrir:
+                                            col_link.markdown(link_abrir, unsafe_allow_html=True)
+                                        with col_c:
                                             st.download_button(
                                                 "⬇️", data=bytes(bytes_arq),
                                                 file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
@@ -7898,13 +7919,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     if arqs_rd:
                         for arq_rd in arqs_rd:
                             arq_id, arq_nome, arq_tipo, arq_por, arq_em = arq_rd
-                            cra, crb, crc = st.columns([4, 2, 1])
+                            cra, crb, crlink, crc = st.columns([4, 2, 1, 1])
                             cra.markdown(f"📄 **{html_escape(arq_nome)}**")
                             crb.caption(f"{arq_por} — {pd.to_datetime(arq_em).strftime('%d/%m/%Y %H:%M')}")
-                            with crc:
-                                cont_rd = carregar_conteudo_arquivo_romaneio_devolvido(arq_id)
-                                if cont_rd:
-                                    _, _, bytes_rd = cont_rd
+                            cont_rd = carregar_conteudo_arquivo_romaneio_devolvido(arq_id)
+                            if cont_rd:
+                                _, _, bytes_rd = cont_rd
+                                link_abrir_rd = _link_abrir_arquivo(arq_nome, arq_tipo, bytes(bytes_rd))
+                                if link_abrir_rd:
+                                    crlink.markdown(link_abrir_rd, unsafe_allow_html=True)
+                                with crc:
                                     st.download_button(
                                         "⬇️", data=bytes(bytes_rd), file_name=arq_nome,
                                         mime=arq_tipo or "application/octet-stream", key=f"rd_dl_{key_prefix}_{arq_id}"
