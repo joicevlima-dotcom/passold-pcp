@@ -2932,6 +2932,24 @@ def carregar_saldo_pecas_por_lote():
         liberar_conexao(conn)
     return df
 
+def editar_qtd_caixas_lote(lote_id: int, qtd_caixas: int, m2_item: float):
+    """Corrige a quantidade de caixas / m² de um lote ja gerado (erro de lancamento)."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE itens_detalhado SET Qtd_Caixas=%s, M2_Item=%s, updated_at=NOW() WHERE id=%s",
+            (qtd_caixas, m2_item, lote_id)
+        )
+        conn.commit()
+        _limpar_cache_geral()
+        return True, "Quantidade corrigida!"
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao corrigir quantidade: {e}"
+    finally:
+        liberar_conexao(conn)
+
 def salvar_pecas_lote(lote_id: int, obra: str, cod_lote: str, num_op: str,
                       pecas: list, componentes_status: str, m2_op_real: float, peso_op_real: float = 0.0):
     """Salva peças com lock otimista via updated_at. Reconcilia tanto m2_executado (ACM) quanto
@@ -4396,6 +4414,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             if st.button("⏸ Parada", key=f"parada_{row['id']}", use_container_width=True):
                                                 st.session_state[f"modal_parada_{row['id']}"] = not st.session_state.get(f"modal_parada_{row['id']}", False)
                                                 st.rerun()
+                                        if st.button("✏️ Editar", key=f"editar_lote_{row['id']}", use_container_width=True):
+                                            st.session_state[f"modal_editar_{row['id']}"] = not st.session_state.get(f"modal_editar_{row['id']}", False)
+                                            st.rerun()
                                     if pode_concluir:
                                         st.write("")
                                         if st.button("✅ Pronto", key=f"baixa_{row['id']}", type="primary", use_container_width=True):
@@ -4403,6 +4424,34 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             st.rerun()
                                     elif setor not in ["Producao", "Master"]:
                                         st.markdown("<div style='text-align:center;color:#94A3B8;font-size:12px;padding:8px;'>Em producao</div>", unsafe_allow_html=True)
+
+                            # ── EDITAR QTD CAIXAS / M² ────────────────────────
+                            if st.session_state.get(f"modal_editar_{row['id']}", False):
+                                with st.container(border=True):
+                                    st.markdown(f"#### ✏️ Corrigir dados do lote `{row['Cod_Lote']}`")
+                                    ed1, ed2 = st.columns(2)
+                                    with ed1:
+                                        caixas_edit = st.number_input("Qtd Caixas:", min_value=0, value=int(row['Qtd_Caixas']), step=1, key=f"edit_caixas_{row['id']}")
+                                    with ed2:
+                                        m2_edit = st.number_input("m² Total:", min_value=0.0, value=float(row['M2_Item']), step=0.01, key=f"edit_m2_{row['id']}")
+                                    eb1, eb2, _ = st.columns([2, 2, 4])
+                                    with eb1:
+                                        if st.button("💾 Salvar correção", key=f"salvar_edit_lote_{row['id']}", type="primary", use_container_width=True):
+                                            ok_edit_lote, msg_edit_lote = editar_qtd_caixas_lote(int(row['id']), int(caixas_edit), float(m2_edit))
+                                            if ok_edit_lote:
+                                                registrar_auditoria(st.session_state.usuario_nome, "EDITAR_LOTE",
+                                                    f"Lote {row['Cod_Lote']} — Qtd_Caixas: {int(row['Qtd_Caixas'])}→{int(caixas_edit)} | "
+                                                    f"M2: {float(row['M2_Item']):.2f}→{m2_edit:.2f}")
+                                                st.session_state[f"modal_editar_{row['id']}"] = False
+                                                st.toast("Quantidade corrigida!")
+                                                time.sleep(0.4)
+                                                st.rerun()
+                                            else:
+                                                st.error(msg_edit_lote)
+                                    with eb2:
+                                        if st.button("Cancelar", key=f"cancel_edit_lote_{row['id']}", use_container_width=True):
+                                            st.session_state[f"modal_editar_{row['id']}"] = False
+                                            st.rerun()
 
                             # ── ARQUIVOS DA OP ────────────────────────────────
                             arqs_op = carregar_arquivos_op(int(row['id']))
