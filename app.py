@@ -3190,7 +3190,7 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
     buf.seek(0)
     return buf.getvalue()
 
-def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: str, etapa: str = '') -> bytes:
+def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: str, etapa: str = '', num_volumes: int = None) -> bytes:
     """Gera o romaneio .xlsx com as peças do lote."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -3281,6 +3281,14 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
     ws.cell(linha, 4, int(pecas_df['qtd_total'].sum()) if not pecas_df.empty else 0).font = Font(name="Arial", size=11, bold=True)
     for c in range(1, 6):
         ws.cell(linha, c).border = borda
+
+    if num_volumes is not None:
+        linha += 1
+        ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=3)
+        ws.cell(linha, 1, "QUANTIDADE DE VOLUMES:").font = Font(name="Arial", size=11, bold=True)
+        ws.cell(linha, 4, int(num_volumes)).font = Font(name="Arial", size=11, bold=True)
+        for c in range(1, 6):
+            ws.cell(linha, c).border = borda
 
     # Perguntas de conferência (com borda ao redor do bloco inteiro)
     linha += 2
@@ -5725,24 +5733,28 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         label_arq = f"📎 Arquivos da OP ({len(arqs_existentes)})" if arqs_existentes else "📎 Arquivos da OP"
                         with st.expander(label_arq, expanded=False):
                             if setor in ["Master", "PCP", "Engenharia", "Producao"]:
-                                uploaded = st.file_uploader(
-                                    "Anexar arquivo (PDF, Excel, imagem):",
+                                uploaded_list = st.file_uploader(
+                                    "Anexar arquivo(s) (PDF, Excel, imagem):",
                                     type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg"],
-                                    key=f"upload_arq_{lote_id}"
+                                    key=f"upload_arq_{lote_id}",
+                                    accept_multiple_files=True
                                 )
-                                if uploaded is not None:
-                                    if st.button("💾 Salvar arquivo", key=f"btn_salvar_arq_{lote_id}", type="primary"):
-                                        ok = salvar_arquivo_op(
-                                            lote_id,
-                                            uploaded.name,
-                                            uploaded.type or "",
-                                            uploaded.read(),
-                                            st.session_state.usuario_nome
-                                        )
-                                        if ok:
-                                            st.toast(f"✅ {uploaded.name} salvo!")
-                                            time.sleep(0.3)
-                                            st.rerun()
+                                if uploaded_list:
+                                    if st.button(f"💾 Salvar {len(uploaded_list)} arquivo(s)", key=f"btn_salvar_arq_{lote_id}", type="primary"):
+                                        n_salvos = 0
+                                        for uploaded in uploaded_list:
+                                            ok = salvar_arquivo_op(
+                                                lote_id,
+                                                uploaded.name,
+                                                uploaded.type or "",
+                                                uploaded.read(),
+                                                st.session_state.usuario_nome
+                                            )
+                                            if ok:
+                                                n_salvos += 1
+                                        st.toast(f"✅ {n_salvos} arquivo(s) salvo(s)!")
+                                        time.sleep(0.3)
+                                        st.rerun()
 
                             if arqs_existentes:
                                 st.markdown("**Arquivos anexados:**")
@@ -6916,6 +6928,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             with cc2:
                                 end_r = st.text_input("Endereço:", key=f"end_rom_{row_c['id']}",
                                                        placeholder="Endereço da obra")
+                                eh_esq_log = row_c.get('Escopo') == 'Esquadria-Vidro'
+                                volumes_c = None
+                                if eh_esq_log:
+                                    volumes_c = st.number_input("Qtd de Volumes:", min_value=0, step=1,
+                                                                 key=f"volumes_rom_{row_c['id']}",
+                                                                 help="Em quantos volumes/pacotes as peças foram amarradas.")
                             with cc3:
                                 st.write("")
                                 st.write("")
@@ -6939,7 +6957,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             etapa_c = str(fr_c.iloc[0].get('Tarefa') or '')
                                     rom_bytes = gerar_romaneio_xlsx(
                                         row_c, df_pecas_c, end_r,
-                                        st.session_state.usuario_nome, etapa=etapa_c
+                                        st.session_state.usuario_nome, etapa=etapa_c,
+                                        num_volumes=int(volumes_c) if eh_esq_log else None
                                     )
                                     romaneio_baixado = st.download_button(
                                         label="🖨️ Emitir Romaneio",
