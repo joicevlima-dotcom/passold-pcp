@@ -2925,15 +2925,23 @@ def carregar_saldo_pecas_por_lote():
         liberar_conexao(conn)
     return df
 
-def editar_qtd_caixas_lote(lote_id: int, qtd_caixas: int, m2_item: float):
-    """Corrige a quantidade de caixas / m² de um lote ja gerado (erro de lancamento)."""
+def editar_qtd_caixas_lote(lote_id: int, qtd_caixas: int, m2_item: float, peso_kg: float = None):
+    """Corrige a quantidade de caixas / m² / peso de um lote ja gerado (erro de lancamento).
+    So corrige o planejado (itens_detalhado) — se as pecas desse lote ja foram lancadas em
+    op_pecas, o m2_op_real/peso_op_real ja gravado la NAO e atualizado retroativamente."""
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE itens_detalhado SET Qtd_Caixas=%s, M2_Item=%s, updated_at=NOW() WHERE id=%s",
-            (qtd_caixas, m2_item, lote_id)
-        )
+        if peso_kg is None:
+            cursor.execute(
+                "UPDATE itens_detalhado SET Qtd_Caixas=%s, M2_Item=%s, updated_at=NOW() WHERE id=%s",
+                (qtd_caixas, m2_item, lote_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE itens_detalhado SET Qtd_Caixas=%s, M2_Item=%s, Peso_Kg=%s, updated_at=NOW() WHERE id=%s",
+                (qtd_caixas, m2_item, peso_kg, lote_id)
+            )
         conn.commit()
         _limpar_cache_geral()
         return True, "Quantidade corrigida!"
@@ -4409,19 +4417,23 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             if st.session_state.get(f"modal_editar_{row['id']}", False):
                                 with st.container(border=True):
                                     st.markdown(f"#### ✏️ Corrigir dados do lote `{row['Cod_Lote']}`")
-                                    ed1, ed2 = st.columns(2)
+                                    ed1, ed2, ed3 = st.columns(3)
                                     with ed1:
                                         caixas_edit = st.number_input("Qtd Caixas:", min_value=0, value=int(row['Qtd_Caixas']), step=1, key=f"edit_caixas_{row['id']}")
                                     with ed2:
                                         m2_edit = st.number_input("m² Total:", min_value=0.0, value=float(row['M2_Item']), step=0.01, key=f"edit_m2_{row['id']}")
+                                    with ed3:
+                                        peso_edit = st.number_input("Peso (kg):", min_value=0.0, value=float(row.get('Peso_Kg', 0) or 0), step=0.01, key=f"edit_peso_{row['id']}")
+                                    st.caption("Isso corrige o planejado do lote. Se as peças já foram lançadas na OP, o valor real gravado lá não muda automaticamente.")
                                     eb1, eb2, _ = st.columns([2, 2, 4])
                                     with eb1:
                                         if st.button("💾 Salvar correção", key=f"salvar_edit_lote_{row['id']}", type="primary", use_container_width=True):
-                                            ok_edit_lote, msg_edit_lote = editar_qtd_caixas_lote(int(row['id']), int(caixas_edit), float(m2_edit))
+                                            ok_edit_lote, msg_edit_lote = editar_qtd_caixas_lote(int(row['id']), int(caixas_edit), float(m2_edit), float(peso_edit))
                                             if ok_edit_lote:
                                                 registrar_auditoria(st.session_state.usuario_nome, "EDITAR_LOTE",
                                                     f"Lote {row['Cod_Lote']} — Qtd_Caixas: {int(row['Qtd_Caixas'])}→{int(caixas_edit)} | "
-                                                    f"M2: {float(row['M2_Item']):.2f}→{m2_edit:.2f}")
+                                                    f"M2: {float(row['M2_Item']):.2f}→{m2_edit:.2f} | "
+                                                    f"Peso: {float(row.get('Peso_Kg', 0) or 0):.2f}→{peso_edit:.2f}")
                                                 st.session_state[f"modal_editar_{row['id']}"] = False
                                                 st.toast("Quantidade corrigida!")
                                                 time.sleep(0.4)
@@ -4969,19 +4981,23 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             if st.session_state.get(f"esq_modal_editar_{row['id']}", False):
                                 with st.container(border=True):
                                     st.markdown(f"#### ✏️ Corrigir dados do lote `{row['Cod_Lote']}`")
-                                    eed1, eed2 = st.columns(2)
+                                    eed1, eed2, eed3 = st.columns(3)
                                     with eed1:
                                         esq_caixas_edit = st.number_input("Qtd Caixas:", min_value=0, value=int(row['Qtd_Caixas']), step=1, key=f"esq_edit_caixas_{row['id']}")
                                     with eed2:
                                         esq_m2_edit = st.number_input("m² Total:", min_value=0.0, value=float(row['M2_Item']), step=0.01, key=f"esq_edit_m2_{row['id']}")
+                                    with eed3:
+                                        esq_peso_edit = st.number_input("Peso (kg):", min_value=0.0, value=float(row.get('Peso_Kg', 0) or 0), step=0.01, key=f"esq_edit_peso_{row['id']}")
+                                    st.caption("Isso corrige o planejado do lote. Se as peças já foram lançadas na OP, o valor real gravado lá não muda automaticamente.")
                                     eeb1, eeb2, _ = st.columns([2, 2, 4])
                                     with eeb1:
                                         if st.button("💾 Salvar correção", key=f"esq_salvar_edit_lote_{row['id']}", type="primary", use_container_width=True):
-                                            ok_esq_edit, msg_esq_edit = editar_qtd_caixas_lote(int(row['id']), int(esq_caixas_edit), float(esq_m2_edit))
+                                            ok_esq_edit, msg_esq_edit = editar_qtd_caixas_lote(int(row['id']), int(esq_caixas_edit), float(esq_m2_edit), float(esq_peso_edit))
                                             if ok_esq_edit:
                                                 registrar_auditoria(st.session_state.usuario_nome, "EDITAR_LOTE",
                                                     f"Lote {row['Cod_Lote']} — Qtd_Caixas: {int(row['Qtd_Caixas'])}→{int(esq_caixas_edit)} | "
-                                                    f"M2: {float(row['M2_Item']):.2f}→{esq_m2_edit:.2f}")
+                                                    f"M2: {float(row['M2_Item']):.2f}→{esq_m2_edit:.2f} | "
+                                                    f"Peso: {float(row.get('Peso_Kg', 0) or 0):.2f}→{esq_peso_edit:.2f}")
                                                 st.session_state[f"esq_modal_editar_{row['id']}"] = False
                                                 st.toast("Quantidade corrigida!")
                                                 time.sleep(0.4)
