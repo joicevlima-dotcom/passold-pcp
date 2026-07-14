@@ -7519,17 +7519,19 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         lm_obs_txt = st.text_area("Observações (opcional):", height=180, key="lm_obs_manual")
 
                     itens_preview_manual_lm = []
-                    linhas_itens_lm = [l.strip() for l in lm_itens_txt.strip().split('\n')] if lm_itens_txt.strip() else []
+                    itens_erro_lm = []
+                    # linhas em branco no meio do campo "Itens" desalinhariam os demais campos —
+                    # remove-se essas linhas antes de combinar por posição.
+                    linhas_itens_lm = [l.strip() for l in lm_itens_txt.strip().split('\n') if l.strip()] if lm_itens_txt.strip() else []
                     linhas_qtds_lm  = [l.strip().replace(',', '.') for l in lm_qtds_txt.strip().split('\n')] if lm_qtds_txt.strip() else []
                     linhas_usos_lm  = [l.strip() for l in lm_usos_txt.strip().split('\n')] if lm_usos_txt.strip() else []
                     linhas_obs_lm   = [l.strip() for l in lm_obs_txt.strip().split('\n')] if lm_obs_txt.strip() else []
                     for i_lm, item_nome_lm in enumerate(linhas_itens_lm):
-                        if not item_nome_lm:
-                            continue
                         qtd_str_lm = linhas_qtds_lm[i_lm] if i_lm < len(linhas_qtds_lm) else ''
                         try:
                             qtd_val_lm = float(qtd_str_lm)
                         except ValueError:
+                            itens_erro_lm.append(item_nome_lm)
                             continue
                         itens_preview_manual_lm.append({
                             'item': item_nome_lm,
@@ -7541,22 +7543,29 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         if itens_preview_manual_lm:
                             st.caption(f"{len(itens_preview_manual_lm)} item(ns) reconhecido(s):")
                             st.dataframe(pd.DataFrame(itens_preview_manual_lm), hide_index=True, use_container_width=True)
-                        else:
-                            st.warning("Nenhum item reconhecido — confira se cada item tem uma quantidade válida na mesma linha.")
+                        if itens_erro_lm:
+                            st.warning("Sem quantidade válida na mesma linha, não foram reconhecidos: " + ", ".join(itens_erro_lm))
 
                 itens_preview = itens_preview_colar_lm + itens_preview_manual_lm
 
-                if st.button("💾 Salvar Lista Mestra", key="btn_salvar_lm", type="primary",
-                             disabled=not (lm_obra and lm_titulo.strip() and itens_preview)):
-                    ok_lm, msg_lm, _ = salvar_lista_mestra(lm_obra, lm_projeto or '', lm_titulo.strip(), itens_preview, st.session_state.usuario_nome)
-                    if ok_lm:
-                        registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_LISTA_MESTRA",
-                            f"Obra: {lm_obra} | {lm_titulo.strip()} | {len(itens_preview)} item(ns)")
-                        st.toast(f"✅ {msg_lm}")
-                        time.sleep(0.4)
-                        st.rerun()
+                if st.button("💾 Salvar Lista Mestra", key="btn_salvar_lm", type="primary"):
+                    if not lm_obra:
+                        st.error("Selecione a obra.")
+                    elif not lm_titulo.strip():
+                        st.error("Informe o título/etapa.")
+                    elif not itens_preview:
+                        st.error("Nenhum item reconhecido para salvar — confira se colou os itens corretamente "
+                                  "ou, na aba Manual, se cada item tem uma quantidade válida (número) na mesma linha.")
                     else:
-                        st.error(msg_lm)
+                        ok_lm, msg_lm, _ = salvar_lista_mestra(lm_obra, lm_projeto or '', lm_titulo.strip(), itens_preview, st.session_state.usuario_nome)
+                        if ok_lm:
+                            registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_LISTA_MESTRA",
+                                f"Obra: {lm_obra} | {lm_titulo.strip()} | {len(itens_preview)} item(ns)")
+                            st.toast(f"✅ {msg_lm}")
+                            time.sleep(0.4)
+                            st.rerun()
+                        else:
+                            st.error(msg_lm)
 
             st.markdown("---")
             st.markdown("### Listas Cadastradas")
