@@ -7480,8 +7480,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
 
             with st.expander("➕ Cadastrar Lista Mestra", expanded=False):
-                st.caption("Cole o bloco de itens direto da planilha (Excel) — uma linha por item, "
-                           "colunas na ordem Item, Qtde, Uso, Observações (Uso e Observações são opcionais).")
                 lm1, lm2, lm3 = st.columns(3)
                 with lm1:
                     obras_lm = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
@@ -7492,16 +7490,61 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 with lm3:
                     lm_titulo = st.text_input("Título / Etapa:", key="lm_titulo_cad", placeholder="Ex: Terreo Componentes/Fixadores")
 
-                lm_texto = st.text_area("Colar itens aqui:", key="lm_texto_cad", height=200,
-                                         placeholder="ANC4\t82\tObra\tColuna Tipo8 em baixo\n...")
+                tab_colar_lm, tab_manual_lm = st.tabs(["📋 Colar", "✍️ Manual"])
 
-                itens_preview = parse_lista_mestra(lm_texto) if lm_texto.strip() else []
-                if lm_texto.strip():
-                    if itens_preview:
-                        st.caption(f"{len(itens_preview)} item(ns) reconhecido(s):")
-                        st.dataframe(pd.DataFrame(itens_preview), hide_index=True, use_container_width=True)
-                    else:
-                        st.warning("Nenhum item reconhecido — confira se colou Item e Quantidade em cada linha.")
+                with tab_colar_lm:
+                    st.caption("Cole o bloco de itens direto da planilha (Excel) — uma linha por item, "
+                               "colunas na ordem Item, Qtde, Uso, Observações (Uso e Observações são opcionais).")
+                    lm_texto = st.text_area("Colar itens aqui:", key="lm_texto_cad", height=200,
+                                             placeholder="ANC4\t82\tObra\tColuna Tipo8 em baixo\n...")
+                    itens_preview_colar_lm = parse_lista_mestra(lm_texto) if lm_texto.strip() else []
+                    if lm_texto.strip():
+                        if itens_preview_colar_lm:
+                            st.caption(f"{len(itens_preview_colar_lm)} item(ns) reconhecido(s):")
+                            st.dataframe(pd.DataFrame(itens_preview_colar_lm), hide_index=True, use_container_width=True)
+                        else:
+                            st.warning("Nenhum item reconhecido — confira se colou Item e Quantidade em cada linha.")
+
+                with tab_manual_lm:
+                    st.caption("Digite os campos abaixo, um item por linha (as linhas se combinam pela posição — "
+                               "a 1ª linha de cada campo forma o 1º item, e assim por diante).")
+                    mc1, mc2, mc3, mc4 = st.columns(4)
+                    with mc1:
+                        lm_itens_txt = st.text_area("Itens:", height=180, key="lm_itens_manual", placeholder="ANC4\nPRIS08")
+                    with mc2:
+                        lm_qtds_txt = st.text_area("Quantidades:", height=180, key="lm_qtds_manual", placeholder="82\n40")
+                    with mc3:
+                        lm_usos_txt = st.text_area("Uso (opcional):", height=180, key="lm_usos_manual", placeholder="Obra")
+                    with mc4:
+                        lm_obs_txt = st.text_area("Observações (opcional):", height=180, key="lm_obs_manual")
+
+                    itens_preview_manual_lm = []
+                    linhas_itens_lm = [l.strip() for l in lm_itens_txt.strip().split('\n')] if lm_itens_txt.strip() else []
+                    linhas_qtds_lm  = [l.strip().replace(',', '.') for l in lm_qtds_txt.strip().split('\n')] if lm_qtds_txt.strip() else []
+                    linhas_usos_lm  = [l.strip() for l in lm_usos_txt.strip().split('\n')] if lm_usos_txt.strip() else []
+                    linhas_obs_lm   = [l.strip() for l in lm_obs_txt.strip().split('\n')] if lm_obs_txt.strip() else []
+                    for i_lm, item_nome_lm in enumerate(linhas_itens_lm):
+                        if not item_nome_lm:
+                            continue
+                        qtd_str_lm = linhas_qtds_lm[i_lm] if i_lm < len(linhas_qtds_lm) else ''
+                        try:
+                            qtd_val_lm = float(qtd_str_lm)
+                        except ValueError:
+                            continue
+                        itens_preview_manual_lm.append({
+                            'item': item_nome_lm,
+                            'qtd_total': qtd_val_lm,
+                            'uso': linhas_usos_lm[i_lm] if i_lm < len(linhas_usos_lm) else '',
+                            'observacoes': linhas_obs_lm[i_lm] if i_lm < len(linhas_obs_lm) else '',
+                        })
+                    if lm_itens_txt.strip():
+                        if itens_preview_manual_lm:
+                            st.caption(f"{len(itens_preview_manual_lm)} item(ns) reconhecido(s):")
+                            st.dataframe(pd.DataFrame(itens_preview_manual_lm), hide_index=True, use_container_width=True)
+                        else:
+                            st.warning("Nenhum item reconhecido — confira se cada item tem uma quantidade válida na mesma linha.")
+
+                itens_preview = itens_preview_colar_lm + itens_preview_manual_lm
 
                 if st.button("💾 Salvar Lista Mestra", key="btn_salvar_lm", type="primary",
                              disabled=not (lm_obra and lm_titulo.strip() and itens_preview)):
