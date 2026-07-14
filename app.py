@@ -4077,7 +4077,7 @@ if nome_aba == "Dashboard":
         ops_concluidas   = len(df_micro_dash[df_micro_dash['Status_Item'] == 'Concluido'])          if not df_micro_dash.empty else 0
         total_obras      = df_micro_dash['Obra_Vinculada'].nunique()                                 if not df_micro_dash.empty else 0
 
-        hoje = datetime.now().date()
+        hoje = hoje_projeto().date()
         if not df_micro_dash.empty and 'Data_Limite_Obra' in df_micro_dash.columns:
             df_ativos = df_micro_dash[~df_micro_dash['Status_Item'].isin(['Concluido','Cancelado'])].copy()
             df_ativos['Data_Limite_Obra'] = pd.to_datetime(df_ativos['Data_Limite_Obra'], errors='coerce')
@@ -8399,7 +8399,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 total_medida  = df_rel[col_medida_rel].sum()
                 total_cx      = df_rel['Qtd_Caixas'].sum()
                 ops_atrasadas = df_rel[
-                    (pd.to_datetime(df_rel['Data_Limite_Obra'], errors='coerce') < pd.Timestamp.now()) &
+                    (pd.to_datetime(df_rel['Data_Limite_Obra'], errors='coerce') < hoje_projeto()) &
                     (~df_rel['Status_Item'].isin(['Concluido']))
                 ]['Num_OP'].nunique()
                 enviadas_parcial = df_rel[df_rel['Status_Item'].str.contains('Parcial|parcial', na=False)]['Num_OP'].nunique()
@@ -8586,7 +8586,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         atrasado = False
                         try:
                             lim_dt = datetime.strptime(limite_val, '%d/%m/%Y')
-                            atrasado = lim_dt < datetime.now() and status_val not in ['Concluído', 'Concluido']
+                            atrasado = lim_dt < hoje_projeto() and status_val not in ['Concluído', 'Concluido']
                         except Exception:
                             pass
 
