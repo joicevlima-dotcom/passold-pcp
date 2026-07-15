@@ -373,7 +373,18 @@ def get_connection_pool():
     )
 
 def conectar_banco():
-    return get_connection_pool().getconn()
+    conn = get_connection_pool().getconn()
+    # O banco (Supabase) roda com o fuso da sessao em UTC por padrao. Colunas TIMESTAMP
+    # preenchidas com NOW() (Concluido_Em, criado_em, emitido_em, enviado_em etc) gravam
+    # o "agora" convertido pra esse fuso da sessao -- sem isso, ficam 3h na frente do
+    # horario de Sao Paulo. Fixa aqui, no unico ponto por onde toda conexao passa.
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+        conn.commit()
+    except Exception:
+        pass
+    return conn
 
 def liberar_conexao(conn):
     try:
