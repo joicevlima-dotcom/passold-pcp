@@ -8727,7 +8727,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             # Excecao: quando o filtro de Status esta especificamente em "Concluido", o usuario
             # quer ver o total EXECUTADO daquele periodo (nao faz sentido mostrar saldo=0 pra um
             # relatorio que so tem itens concluidos) — nesse caso usa o valor real medido cheio.
-            filtro_apenas_concluidos_rel = (filtro_status_rel == "Concluido" or rel_campo_data == "Data de Conclusão")
+            # So trata como "total executado" quando o status filtrado e realmente so
+            # Concluido -- com Status="Todos" + Data de Conclusao, o filtro de data ja so
+            # deixa passar concluidos; com qualquer OUTRO status explicito (Pendente etc.),
+            # nao faz sentido rotular como executado o que e saldo pendente desse status.
+            filtro_apenas_concluidos_rel = (
+                filtro_status_rel == "Concluido"
+                or (rel_campo_data == "Data de Conclusão" and filtro_status_rel == "Todos")
+            )
 
             def _saldo_pendente_rel(row, col_original, col_real):
                 base = row.get(col_real)
@@ -8951,10 +8958,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                     # ── Linhas de dados ──────────────────────────
                     hoje_str = datetime.now(FUSO_BR).strftime('%d/%m/%Y')
+                    # Busca a posição de 'Limite'/'Status' pelo nome, nao por indice fixo --
+                    # a coluna 'Conclusão' (opcional) desloca tudo que vem depois dela.
+                    idx_limite = cabecalhos.index('Limite') if 'Limite' in cabecalhos else None
+                    idx_status = cabecalhos.index('Status') if 'Status' in cabecalhos else None
                     for row_idx, row_data in enumerate(df_exp.itertuples(index=False), start=5):
                         is_par = (row_idx % 2 == 0)
-                        limite_val = str(row_data[7]) if len(row_data) > 7 else ""
-                        status_val = str(row_data[8]) if len(row_data) > 8 else ""
+                        limite_val = str(row_data[idx_limite]) if idx_limite is not None else ""
+                        status_val = str(row_data[idx_status]) if idx_status is not None else ""
                         atrasado = False
                         try:
                             lim_dt = datetime.strptime(limite_val, '%d/%m/%Y')
