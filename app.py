@@ -2738,6 +2738,7 @@ def atualizar_componente(comp_id, status, obs, usuario, qtd_enviada=None):
         conn.commit()
         carregar_componentes_op.clear()
         carregar_todas_ops_com_componentes.clear()
+        carregar_itens_indisponiveis_almoxarifado.clear()
     except Exception as e:
         conn.rollback()
         st.error(f"Erro ao atualizar componente: {e}")
@@ -2847,6 +2848,34 @@ def carregar_todos_itens_insumos():
     finally:
         liberar_conexao(conn)
 
+@st.cache_data(ttl=30)
+def carregar_itens_indisponiveis_almoxarifado():
+    """Consolida os itens com Status_Item='Indisponivel' de componentes de OP e de
+    saidas de insumos — base do relatorio de pendencias do Almoxarifado."""
+    conn = conectar_banco()
+    try:
+        df_comp = pd.read_sql_query("""
+            SELECT 'Componente OP' AS origem, c.Obra_Vinculada AS obra, i.Numero_Projeto AS numero_projeto,
+                   c.Num_OP AS referencia, c.Nome_Componente AS item, c.Quantidade AS quantidade,
+                   c.Unidade AS unidade, c.Observacao AS observacao
+            FROM componentes_op c
+            LEFT JOIN itens_detalhado i ON i.id = c.item_id
+            WHERE c.Status_Item = 'Indisponivel'
+        """, conn)
+        df_ins = pd.read_sql_query("""
+            SELECT 'Insumo' AS origem, s.obra AS obra, s.numero_projeto AS numero_projeto,
+                   s.destino AS referencia, si.descricao AS item, si.quantidade AS quantidade,
+                   si.unidade AS unidade, si.observacao AS observacao
+            FROM saidas_insumos_itens si
+            JOIN saidas_insumos s ON s.id = si.saida_id
+            WHERE si.status_item = 'Indisponivel'
+        """, conn)
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+    return pd.concat([df_comp, df_ins], ignore_index=True)
+
 def atualizar_item_insumo(item_id: int, status: str, obs: str, usuario: str, qtd_enviada=None):
     conn = conectar_banco()
     try:
@@ -2859,6 +2888,7 @@ def atualizar_item_insumo(item_id: int, status: str, obs: str, usuario: str, qtd
         conn.commit()
         carregar_itens_saida_insumos.clear()
         carregar_todos_itens_insumos.clear()
+        carregar_itens_indisponiveis_almoxarifado.clear()
     except Exception as e:
         conn.rollback()
         st.error(f"Erro ao atualizar item: {e}")
@@ -3505,6 +3535,67 @@ def gerar_romaneio_insumos_xlsx(saida_row, itens_df) -> bytes:
     linha += 1
     assinaturas = [("Almoxarifado", False), ("Recebido em obra", True), ("Assinatura motorista", False)]
     _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=2, col_data=4)
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+def gerar_relatorio_indisponiveis_xlsx(df: pd.DataFrame) -> bytes:
+    """Relatorio consolidado dos itens Indisponivel (componentes de OP + insumos)
+    do Almoxarifado, pra baixar e acompanhar as pendencias."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from io import BytesIO
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Indisponiveis"
+    ws.sheet_view.showGridLines = False
+    ws.page_setup.orientation = "landscape"
+
+    bd = Side(style='thin', color="000000")
+    borda = Border(left=bd, right=bd, top=bd, bottom=bd)
+    fill_cab = PatternFill(start_color="DC2626", end_color="DC2626", fill_type="solid")
+    fill_sub = PatternFill(start_color="FEF2F2", end_color="FEF2F2", fill_type="solid")
+
+    larguras = [16, 24, 14, 20, 32, 12, 10, 30]
+    for col, largura in zip("ABCDEFGH", larguras):
+        ws.column_dimensions[col].width = largura
+
+    ws.merge_cells("A1:H1")
+    _inserir_logo_cabecalho(ws, "H")
+
+    ws.merge_cells("A2:H2")
+    ws["A2"] = f"RELATÓRIO DE ITENS INDISPONÍVEIS — ALMOXARIFADO ({hoje_projeto().strftime('%d/%m/%Y %H:%M')})"
+    ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+    ws["A2"].fill = fill_cab
+    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    linha = 4
+    titulos = ["ORIGEM", "OBRA", "PROJETO", "REFERÊNCIA", "ITEM", "QTD", "UNIDADE", "OBSERVAÇÃO"]
+    for col, titulo in enumerate(titulos, 1):
+        cel = ws.cell(linha, col, titulo)
+        cel.font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        cel.fill = fill_cab
+        cel.alignment = Alignment(horizontal="center", vertical="center")
+        cel.border = borda
+    linha += 1
+
+    for i, (_, item) in enumerate(df.iterrows()):
+        dados = [
+            item.get('origem', ''), item.get('obra') or '', item.get('numero_projeto') or '',
+            item.get('referencia') or '', item.get('item', ''), item.get('quantidade', 0),
+            item.get('unidade', ''), item.get('observacao') or '',
+        ]
+        for col, val in enumerate(dados, 1):
+            cel = ws.cell(linha, col, val)
+            cel.font = Font(name="Arial", size=11)
+            cel.alignment = Alignment(horizontal="center", vertical="center", wrap_text=(col == 8))
+            cel.border = borda
+            if i % 2 == 0:
+                cel.fill = fill_sub
+        linha += 1
 
     buf = BytesIO()
     wb.save(buf)
@@ -7164,6 +7255,32 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
         with aba_objeto:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Almoxarifado</h2><p>Conferência e controle de materiais recebidos</p></div><span class="page-icon">📦</span></div>', unsafe_allow_html=True)
             st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
+
+            df_indisp_geral = carregar_itens_indisponiveis_almoxarifado()
+            ver_indisponiveis = st.toggle(
+                f"❌ Ver só os Indisponíveis ({len(df_indisp_geral)})",
+                key="ver_indisponiveis_almox", value=False
+            )
+            if ver_indisponiveis:
+                if df_indisp_geral.empty:
+                    st.success("✅ Nenhum item indisponível no momento — tudo em dia!")
+                else:
+                    st.dataframe(
+                        df_indisp_geral.rename(columns={
+                            "origem": "Origem", "obra": "Obra", "numero_projeto": "Projeto",
+                            "referencia": "Referência", "item": "Item", "quantidade": "Qtd",
+                            "unidade": "Unidade", "observacao": "Observação",
+                        }),
+                        use_container_width=True, hide_index=True
+                    )
+                    rel_indisp_bytes = gerar_relatorio_indisponiveis_xlsx(df_indisp_geral)
+                    st.download_button(
+                        "📄 Baixar Relatório de Indisponíveis", data=rel_indisp_bytes,
+                        file_name=f"Indisponiveis_Almoxarifado_{hoje_projeto().strftime('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="dl_rel_indisponiveis_almox"
+                    )
+                st.markdown("---")
 
             tab_alm_op, tab_alm_ins = st.tabs(["📋 Romaneios com Vínculo a OP", "📦 Romaneios de Insumos"])
 
