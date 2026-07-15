@@ -748,6 +748,18 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS conferido_por TEXT")
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS conferido_em TEXT")
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS quantidade_enviada NUMERIC")
+        # ── COMENTARIOS (historico de anotacoes em lotes de producao e itens do almoxarifado) ──
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS comentarios (
+                id SERIAL PRIMARY KEY,
+                entidade_tipo TEXT NOT NULL,
+                entidade_id INTEGER NOT NULL,
+                autor TEXT NOT NULL,
+                texto TEXT NOT NULL,
+                criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_comentarios_entidade ON comentarios(entidade_tipo, entidade_id)")
         # ── TABELAS DE LISTA MESTRA (envio parcial de listas de materiais/fixadores) ──
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS listas_mestras (
@@ -1894,6 +1906,63 @@ def deletar_arquivo_op(arquivo_id: int):
         return False
     finally:
         liberar_conexao(conn)
+
+@st.cache_data(ttl=10)
+def carregar_comentarios(entidade_tipo: str, entidade_id: int):
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            "SELECT autor, texto, criado_em FROM comentarios WHERE entidade_tipo=%s AND entidade_id=%s ORDER BY criado_em ASC",
+            conn, params=(entidade_tipo, entidade_id)
+        )
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
+def adicionar_comentario(entidade_tipo: str, entidade_id: int, autor: str, texto: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO comentarios (entidade_tipo, entidade_id, autor, texto) VALUES (%s,%s,%s,%s)",
+            (entidade_tipo, entidade_id, autor, texto)
+        )
+        conn.commit()
+        carregar_comentarios.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao adicionar comentário: {e}")
+    finally:
+        liberar_conexao(conn)
+
+def bloco_comentarios(entidade_tipo: str, entidade_id: int, key_prefix: str):
+    """Historico de comentarios acumulado (nunca sobrescreve, so adiciona) — com
+    autor e data de cada registro, tipo o historico de um card de Trello/Pipefy."""
+    df_com = carregar_comentarios(entidade_tipo, entidade_id)
+    with st.expander(f"💬 Comentários ({len(df_com)})", expanded=False):
+        if df_com.empty:
+            st.caption("Nenhum comentário ainda.")
+        else:
+            for _, c in df_com.iterrows():
+                dt_fmt = pd.to_datetime(c['criado_em']).strftime('%d/%m/%Y %H:%M')
+                st.markdown(
+                    f"<div style='margin-bottom:8px;padding:8px 10px;background:#F8FAFC;border-radius:6px;'>"
+                    f"<span style='font-weight:700;color:#1E293B;'>{html_escape(str(c['autor']))}</span> "
+                    f"<span style='color:#94A3B8;font-size:11px;'>{dt_fmt}</span><br>"
+                    f"<span style='color:#334155;font-size:13px;'>{html_escape(str(c['texto']))}</span></div>",
+                    unsafe_allow_html=True
+                )
+        novo_com = st.text_area("Adicionar comentário:", key=f"novo_com_{key_prefix}",
+                                 placeholder="Ex: Em produção de corte e montagem...")
+        if st.button("💬 Comentar", key=f"btn_com_{key_prefix}"):
+            if novo_com.strip():
+                adicionar_comentario(entidade_tipo, entidade_id, st.session_state.usuario_nome, novo_com.strip())
+                st.toast("Comentário adicionado!")
+                time.sleep(0.3)
+                st.rerun()
+            else:
+                st.warning("Escreva algo antes de comentar.")
 
 def salvar_arquivo_romaneio_devolvido(tipo_origem: str, origem_id: int, nome: str, tipo: str, conteudo: bytes, usuario: str):
     """tipo_origem: 'OP' (item de itens_detalhado) ou 'INSUMO' (saida de saidas_insumos)."""
@@ -4577,6 +4646,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 key=f"acm_dl_{arq_id}"
                                             )
 
+                            # ── COMENTÁRIOS ────────────────────────────────────
+                            bloco_comentarios('lote_producao', int(row['id']), f"acm_{row['id']}")
+
                             # ── MODAL EM LARGURA TOTAL ─────────────────────────
                             if st.session_state.get(f"modal_pronto_{row['id']}", False):
                                 with st.container(border=True):
@@ -5145,6 +5217,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
                                                 key=f"esq_dl_{arq_id}"
                                             )
+
+                            # ── COMENTÁRIOS ────────────────────────────────────
+                            bloco_comentarios('lote_producao', int(row['id']), f"esq_{row['id']}")
 
                             if st.session_state.get(f"esq_modal_{row['id']}", False):
                                 with st.container(border=True):
@@ -7381,6 +7456,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                           key=f"alm_obs_{comp['id']}", placeholder="Ex: em falta, previsão 20/06...")
                                 if obs_nova != obs_atual:
                                     atualizar_componente(comp['id'], st_item, obs_nova, st.session_state.usuario_nome, qtd_env_atual)
+                                bloco_comentarios('componente_op', int(comp['id']), f"comp_{comp['id']}")
                                 st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
 
                             if n_indisp > 0:
@@ -7570,6 +7646,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                           key=f"alm_ins_obs_{item_ins['id']}", placeholder="Ex: em falta, previsão 20/06...")
                                 if obs_nova_ins != obs_atual_ins:
                                     atualizar_item_insumo(int(item_ins['id']), st_ins, obs_nova_ins, st.session_state.usuario_nome, qtd_env_atual_ins)
+                                bloco_comentarios('saida_insumo_item', int(item_ins['id']), f"insumo_{item_ins['id']}")
                                 st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
 
                             if n_indisp_ins > 0:
