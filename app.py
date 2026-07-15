@@ -561,6 +561,7 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Romaneio_Emitido BOOLEAN DEFAULT FALSE")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Romaneio_Emitido_Em TIMESTAMP")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Romaneio_Emitido_Por TEXT")
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Concluido_Em TIMESTAMP")
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_itens_detalhado_num_op ON itens_detalhado(Num_OP) WHERE Num_OP IS NOT NULL")
         # Escopo oficial (enum unico usado em toda a aplicacao): ACM / Esquadria-Vidro / Terceirizada.
         # Itens ligados a EDT herdam o Tipo_Escopo do cronograma (normalizado pro enum);
@@ -1263,7 +1264,7 @@ def carregar_micro_completo():
         )
     finally:
         liberar_conexao(conn)
-    for col in ['data_producao_programada', 'data_limite_obra', 'data_despacho']:
+    for col in ['data_producao_programada', 'data_limite_obra', 'data_despacho', 'concluido_em']:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
     df.columns = [c.replace('_', ' ').title().replace(' ', '_') if c != 'id' else c for c in df.columns]
@@ -1274,7 +1275,7 @@ def carregar_micro_completo():
         'Tipo_Material': 'Tipo_Material', 'Qtd_Caixas': 'Qtd_Caixas', 'M2_Item': 'M2_Item',
         'Romaneio_Chapas': 'Romaneio_Chapas', 'Status_Item': 'Status_Item',
         'Fase_Produtiva': 'Fase_Produtiva', 'Enviado_Logistica': 'Enviado_Logistica',
-        'Updated_At': 'Updated_At', 'Peso_Kg': 'Peso_Kg',
+        'Updated_At': 'Updated_At', 'Peso_Kg': 'Peso_Kg', 'Concluido_Em': 'Concluido_Em',
     }
     return df.rename(columns=rename)
 
@@ -4609,7 +4610,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 try:
                                                     cursor = conn.cursor()
                                                     cursor.execute(
-                                                        "UPDATE itens_detalhado SET Status_Item='Concluido' WHERE id=%s",
+                                                        "UPDATE itens_detalhado SET Status_Item='Concluido', Concluido_Em=NOW() WHERE id=%s",
                                                         (row['id'],)
                                                     )
                                                     cursor.execute(
@@ -4627,6 +4628,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 carregar_fila_logistica.clear()
                                                 carregar_pecas_lote.clear()
                                                 carregar_todas_pecas_obra.clear()
+                                                carregar_micro_completo.clear()
                                                 enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
                                                 st.session_state[f"modal_pronto_{row['id']}"] = False
                                                 st.toast(f"✅ {row['Cod_Lote']} concluido!")
@@ -4711,8 +4713,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                                 """, (pe['qtd_enviar'], pe['qtd_enviar'], pe['peca_id']))
                                                             novo_status = 'Concluido' if todas_zeradas else 'Parcialmente Concluido'
                                                             cursor.execute(
-                                                                "UPDATE itens_detalhado SET Status_Item=%s WHERE id=%s",
-                                                                (novo_status, int(row['id']))
+                                                                "UPDATE itens_detalhado SET Status_Item=%s, Concluido_Em=CASE WHEN %s THEN NOW() ELSE Concluido_Em END WHERE id=%s",
+                                                                (novo_status, todas_zeradas, int(row['id']))
                                                             )
                                                             conn.commit()
                                                         except Exception as e:
@@ -4726,6 +4728,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         carregar_pecas_lote.clear()
                                                         carregar_todas_pecas_obra.clear()
                                                         carregar_fila_logistica.clear()
+                                                        carregar_micro_completo.clear()
                                                         enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
                                                         st.session_state[f"modal_pronto_{row['id']}"] = False
                                                         emoji_t = "✅" if todas_zeradas else "🟠"
@@ -5167,7 +5170,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 conn = conectar_banco()
                                                 try:
                                                     cursor = conn.cursor()
-                                                    cursor.execute("UPDATE itens_detalhado SET Status_Item='Concluido' WHERE id=%s", (row['id'],))
+                                                    cursor.execute("UPDATE itens_detalhado SET Status_Item='Concluido', Concluido_Em=NOW() WHERE id=%s", (row['id'],))
                                                     cursor.execute("UPDATE op_pecas SET qtd_enviada=qtd_total, saldo=0 WHERE lote_id=%s", (row['id'],))
                                                     conn.commit()
                                                 except Exception as e:
@@ -5176,6 +5179,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                     liberar_conexao(conn)
                                                 carregar_micro.clear(); carregar_macro.clear(); carregar_fila_logistica.clear()
                                                 carregar_pecas_lote.clear(); carregar_todas_pecas_obra.clear()
+                                                carregar_micro_completo.clear()
                                                 enviar_para_logistica(row, limite_desp_esq if prazo_valido(limite_desp_esq) else pd.NaT)
                                                 st.session_state[f"esq_modal_{row['id']}"] = False
                                                 st.toast(f"✅ {row['Cod_Lote']} concluido!")
@@ -5232,7 +5236,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                                 WHERE id=%s
                                                             """, (p['qtd'], p['qtd'], p['peca_id']))
                                                         novo_status = 'Concluido' if todas_concluidas else 'Parcialmente Concluido'
-                                                        cursor.execute("UPDATE itens_detalhado SET Status_Item=%s WHERE id=%s", (novo_status, row['id']))
+                                                        cursor.execute(
+                                                            "UPDATE itens_detalhado SET Status_Item=%s, Concluido_Em=CASE WHEN %s THEN NOW() ELSE Concluido_Em END WHERE id=%s",
+                                                            (novo_status, todas_concluidas, row['id'])
+                                                        )
                                                         conn.commit()
                                                     except Exception as e:
                                                         conn.rollback(); st.error(f"Erro: {e}")
@@ -5240,6 +5247,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         liberar_conexao(conn)
                                                     carregar_micro.clear(); carregar_macro.clear(); carregar_fila_logistica.clear()
                                                     carregar_pecas_lote.clear(); carregar_todas_pecas_obra.clear()
+                                                    carregar_micro_completo.clear()
                                                     enviar_para_logistica(row, limite_desp_esq if prazo_valido(limite_desp_esq) else pd.NaT)
                                                     st.session_state[f"esq_modal_{row['id']}"] = False
                                                     st.toast(f"Envio parcial de {row['Cod_Lote']} registrado!"); time.sleep(0.5); st.rerun()
@@ -6295,11 +6303,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         try:
                             cursor = conn.cursor()
                             for row in alteradas:
+                                status_antigo = df_str.loc[row.name]['Status_Item']
+                                virou_concluido = (row['Status_Item'] == 'Concluido' and status_antigo != 'Concluido')
+                                saiu_concluido  = (row['Status_Item'] != 'Concluido' and status_antigo == 'Concluido')
                                 cursor.execute("""
                                     UPDATE itens_detalhado
                                     SET EDT_Vinculado=%s, Cod_Lote=%s, Tipo_Material=%s, Qtd_Caixas=%s, M2_Item=%s,
                                         Data_Producao_Programada=%s, Data_Limite_Obra=%s,
                                         Romaneio_Chapas=%s, Status_Item=%s, Dificuldade=%s, Fase_Produtiva=%s,
+                                        Concluido_Em = CASE WHEN %s THEN NOW() WHEN %s THEN NULL ELSE Concluido_Em END,
                                         updated_at=NOW()
                                     WHERE id=%s
                                 """, (
@@ -6307,7 +6319,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     float(row['M2_Item']), row['Data_Producao_Programada'],
                                     row['Data_Limite_Obra'], row['Romaneio_Chapas'],
                                     row['Status_Item'], int(row['Dificuldade']),
-                                    row['Fase_Produtiva'], int(row['id'])
+                                    row['Fase_Produtiva'], virou_concluido, saiu_concluido, int(row['id'])
                                 ))
                             conn.commit()
                             _limpar_cache_geral()
@@ -8577,8 +8589,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             rel_f4, rel_f5, rel_f6 = st.columns([2, 2, 2])
             with rel_f4:
                 rel_campo_data = st.selectbox(
-                    "Filtrar data por:", ["Entrada em Produção", "Data Limite"],
-                    key="rel_campo_data"
+                    "Filtrar data por:", ["Entrada em Produção", "Data Limite", "Data de Conclusão"],
+                    key="rel_campo_data",
+                    help="Entrada em Produção e Data Limite são datas PLANEJADAS (definidas ao cadastrar o lote). "
+                         "Data de Conclusão é a data REAL em que o item foi marcado como Concluído."
                 )
             with rel_f5:
                 rel_dt_ini = st.date_input("De:", value=None, format="DD/MM/YYYY", key="rel_dt_ini")
@@ -8591,7 +8605,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             df_rel = df_banco_micro_rel.copy() if not df_banco_micro_rel.empty else pd.DataFrame()
 
             if not df_rel.empty:
-                if not mostrar_concluidos and filtro_status_rel != "Concluido":
+                # Filtrar por Data de Conclusão só faz sentido pra itens Concluídos —
+                # nesse caso, não esconde os concluídos mesmo com o toggle desligado.
+                if not mostrar_concluidos and filtro_status_rel != "Concluido" and rel_campo_data != "Data de Conclusão":
                     df_rel = df_rel[df_rel['Status_Item'] != 'Concluido']
                 if filtro_obra_rel != "Todas":
                     df_rel = df_rel[df_rel['Obra_Vinculada'] == filtro_obra_rel]
@@ -8601,14 +8617,20 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     df_rel = df_rel[df_rel['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
                 col_data_map = {
                     "Entrada em Produção": "Data_Producao_Programada",
-                    "Data Limite": "Data_Limite_Obra"
+                    "Data Limite": "Data_Limite_Obra",
+                    "Data de Conclusão": "Concluido_Em",
                 }
                 col_dt_filtro = col_data_map[rel_campo_data]
                 df_rel[col_dt_filtro] = pd.to_datetime(df_rel[col_dt_filtro], errors='coerce')
                 if rel_dt_ini:
                     df_rel = df_rel[df_rel[col_dt_filtro] >= pd.Timestamp(rel_dt_ini)]
                 if rel_dt_fim:
-                    df_rel = df_rel[df_rel[col_dt_filtro] <= pd.Timestamp(rel_dt_fim)]
+                    # Concluido_Em tem horário (não é só data) — usa < dia seguinte pra
+                    # incluir qualquer conclusão registrada durante o próprio dia "Até".
+                    if col_dt_filtro == 'Concluido_Em':
+                        df_rel = df_rel[df_rel[col_dt_filtro] < pd.Timestamp(rel_dt_fim) + timedelta(days=1)]
+                    else:
+                        df_rel = df_rel[df_rel[col_dt_filtro] <= pd.Timestamp(rel_dt_fim)]
 
             # OPs Parcialmente Concluidas ja tiveram parte do material enviada — sem descontar isso,
             # o relatorio contaria o tamanho cheio da OP como se nada tivesse saido ainda. Troca
@@ -8617,7 +8639,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             # Excecao: quando o filtro de Status esta especificamente em "Concluido", o usuario
             # quer ver o total EXECUTADO daquele periodo (nao faz sentido mostrar saldo=0 pra um
             # relatorio que so tem itens concluidos) — nesse caso usa o valor real medido cheio.
-            filtro_apenas_concluidos_rel = (filtro_status_rel == "Concluido")
+            filtro_apenas_concluidos_rel = (filtro_status_rel == "Concluido" or rel_campo_data == "Data de Conclusão")
 
             def _saldo_pendente_rel(row, col_original, col_real):
                 base = row.get(col_real)
@@ -8735,12 +8757,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                 hoje_ts = pd.Timestamp.now().normalize()
                 cols_show = ['Obra_Vinculada','Num_OP','Tipo_Material','EDT_Vinculado',
-                             'Qtd_Caixas',col_medida_rel,'Data_Producao_Programada','Data_Limite_Obra','Status_Item',
+                             'Qtd_Caixas',col_medida_rel,'Data_Producao_Programada','Data_Limite_Obra','Concluido_Em','Status_Item',
                              'Em_Parada','Motivo_Parada']
                 cols_show_exist = [c for c in cols_show if c in df_rel.columns]
                 df_tabela = df_rel[cols_show_exist].copy()
                 col_saldo_label = f'{label_medida_rel} (total)' if filtro_apenas_concluidos_rel else f'{label_medida_rel} (saldo)'
-                col_names = ['Obra','OP','Material','EDT/Lote','Caixas',col_saldo_label,'Ini Prod.','Limite','Status']
+                col_names = ['Obra','OP','Material','EDT/Lote','Caixas',col_saldo_label,'Ini Prod.','Limite']
+                if 'Concluido_Em' in df_tabela.columns:
+                    col_names = col_names + ['Conclusão']
+                col_names = col_names + ['Status']
                 if 'Em_Parada' in df_tabela.columns:
                     df_tabela['Situacao'] = df_tabela.apply(
                         lambda r: f"⛔ PARADA — {r.get('Motivo_Parada','')}" if r.get('Em_Parada') else '', axis=1
@@ -8765,6 +8790,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                 for col_dt in ['Ini Prod.','Limite']:
                     df_tabela[col_dt] = pd.to_datetime(df_tabela[col_dt], errors='coerce').dt.strftime('%d/%m/%Y')
+                if 'Conclusão' in df_tabela.columns:
+                    conclusao_dt = pd.to_datetime(df_tabela['Conclusão'], errors='coerce')
+                    df_tabela['Conclusão'] = conclusao_dt.dt.strftime('%d/%m/%Y %H:%M')
+                    df_tabela.loc[conclusao_dt.isna(), 'Conclusão'] = '—'
 
                 # Highlight atraso
                 def highlight_row(row):
