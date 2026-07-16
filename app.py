@@ -3122,18 +3122,52 @@ def editar_qtd_caixas_lote(lote_id: int, qtd_caixas: int, m2_item: float, peso_k
 def editar_obra_projeto_lote(lote_id: int, nova_obra: str, novo_projeto: str):
     """Corrige a Obra/Projeto de um lote AVULSO (sem frente vinculada, EDT_Vinculado
     nulo ou 'AVULSO'). Lotes com frente real (EDT de uma cronograma_macro) precisam ser
-    movidos via 'Vincular Datas', que ajusta o saldo m2/kg da frente corretamente --
-    aqui e so um UPDATE direto, sem nenhum saldo de frente envolvido."""
+    movidos via 'Vincular Datas', que ajusta o saldo m2/kg da frente corretamente.
+
+    Se o lote ja tem Num_OP (ja foi liberado), gera um numero novo na sequencia do
+    projeto de DESTINO -- sem isso a OP ficaria com o numero antigo, que carrega o
+    projeto/obra errados dentro do proprio texto (ex: 'OP-1068-001'), e podia parecer
+    coincidir ou nao com o '001' que ja existe no projeto certo. A troca de Obra/Num_OP
+    e propagada pras tabelas que guardam copia (componentes_op, romaneios_componentes_op,
+    op_pecas) -- todas ligadas ao lote por item_id/lote_id, nunca pelo texto do Num_OP,
+    entao a atualizacao aqui e so pra manter os relatorios e romaneios exibindo o numero
+    certo, sem risco de perder vinculo."""
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE itens_detalhado SET Obra_Vinculada=%s, Numero_Projeto=%s, updated_at=NOW() WHERE id=%s",
-            (nova_obra, novo_projeto, lote_id)
-        )
+        cursor.execute("SELECT Num_OP FROM itens_detalhado WHERE id=%s", (lote_id,))
+        row = cursor.fetchone()
+        num_op_atual = row[0] if row else None
+        num_op_novo = None
+        if num_op_atual:
+            cursor.execute(
+                "SELECT COUNT(*) FROM itens_detalhado WHERE Numero_Projeto=%s AND Num_OP IS NOT NULL",
+                (novo_projeto,)
+            )
+            seq = cursor.fetchone()[0] + 1
+            num_op_novo = f"OP-{novo_projeto}-{str(seq).zfill(3)}"
+            cursor.execute(
+                "UPDATE itens_detalhado SET Obra_Vinculada=%s, Numero_Projeto=%s, Num_OP=%s, updated_at=NOW() WHERE id=%s",
+                (nova_obra, novo_projeto, num_op_novo, lote_id)
+            )
+            cursor.execute("UPDATE componentes_op SET Obra_Vinculada=%s, Num_OP=%s WHERE item_id=%s", (nova_obra, num_op_novo, lote_id))
+            cursor.execute("UPDATE romaneios_componentes_op SET obra=%s, num_op=%s WHERE item_id=%s", (nova_obra, num_op_novo, lote_id))
+            cursor.execute("UPDATE op_pecas SET obra=%s, num_op=%s WHERE lote_id=%s", (nova_obra, num_op_novo, lote_id))
+        else:
+            cursor.execute(
+                "UPDATE itens_detalhado SET Obra_Vinculada=%s, Numero_Projeto=%s, updated_at=NOW() WHERE id=%s",
+                (nova_obra, novo_projeto, lote_id)
+            )
         conn.commit()
         _limpar_cache_geral()
-        return True, "Obra/Projeto corrigidos!"
+        try:
+            carregar_componentes_op.clear()
+            carregar_todas_ops_com_componentes.clear()
+            carregar_itens_indisponiveis_almoxarifado.clear()
+        except Exception:
+            pass
+        msg = f"Obra/Projeto corrigidos! Número da OP atualizado para {num_op_novo}." if num_op_novo else "Obra/Projeto corrigidos!"
+        return True, msg
     except Exception as e:
         conn.rollback()
         return False, f"Erro ao corrigir obra/projeto: {e}"
@@ -4728,7 +4762,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 if ok_edit_lote and obra_mudou:
                                                     ok_edit_lote, msg_edit_lote = editar_obra_projeto_lote(int(row['id']), obra_edit, novo_projeto_edit)
                                                 if ok_edit_lote:
-                                                    detalhe_obra = f" | Obra: {row['Obra_Vinculada']}→{obra_edit} | Projeto: {row.get('Numero_Projeto') or '—'}→{novo_projeto_edit or '—'}" if obra_mudou else ""
+                                                    detalhe_obra = (
+                                                        f" | Obra: {row['Obra_Vinculada']}→{obra_edit} | Projeto: {row.get('Numero_Projeto') or '—'}→{novo_projeto_edit or '—'} | {msg_edit_lote}"
+                                                        if obra_mudou else ""
+                                                    )
                                                     registrar_auditoria(st.session_state.usuario_nome, "EDITAR_LOTE",
                                                         f"Lote {row['Cod_Lote']} — Qtd_Caixas: {int(row['Qtd_Caixas'])}→{int(caixas_edit)} | "
                                                         f"M2: {float(row['M2_Item']):.2f}→{m2_edit:.2f} | "
@@ -4736,7 +4773,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         f"Início: {data_prod_atual.strftime('%d/%m/%Y')}→{data_prod_edit.strftime('%d/%m/%Y')} | "
                                                         f"Limite: {data_lim_atual.strftime('%d/%m/%Y')}→{data_lim_edit.strftime('%d/%m/%Y')}{detalhe_obra}")
                                                     st.session_state[f"modal_editar_{row['id']}"] = False
-                                                    st.toast("Dados corrigidos!")
+                                                    st.toast(msg_edit_lote if obra_mudou else "Dados corrigidos!")
                                                     time.sleep(0.4)
                                                     st.rerun()
                                                 else:
@@ -5373,7 +5410,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 if ok_esq_edit and esq_obra_mudou:
                                                     ok_esq_edit, msg_esq_edit = editar_obra_projeto_lote(int(row['id']), esq_obra_edit, esq_novo_projeto_edit)
                                                 if ok_esq_edit:
-                                                    esq_detalhe_obra = f" | Obra: {row['Obra_Vinculada']}→{esq_obra_edit} | Projeto: {row.get('Numero_Projeto') or '—'}→{esq_novo_projeto_edit or '—'}" if esq_obra_mudou else ""
+                                                    esq_detalhe_obra = (
+                                                        f" | Obra: {row['Obra_Vinculada']}→{esq_obra_edit} | Projeto: {row.get('Numero_Projeto') or '—'}→{esq_novo_projeto_edit or '—'} | {msg_esq_edit}"
+                                                        if esq_obra_mudou else ""
+                                                    )
                                                     registrar_auditoria(st.session_state.usuario_nome, "EDITAR_LOTE",
                                                         f"Lote {row['Cod_Lote']} — Qtd_Caixas: {int(row['Qtd_Caixas'])}→{int(esq_caixas_edit)} | "
                                                         f"M2: {float(row['M2_Item']):.2f}→{esq_m2_edit:.2f} | "
@@ -5381,7 +5421,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         f"Início: {esq_data_prod_atual.strftime('%d/%m/%Y')}→{esq_data_prod_edit.strftime('%d/%m/%Y')} | "
                                                         f"Limite: {esq_data_lim_atual.strftime('%d/%m/%Y')}→{esq_data_lim_edit.strftime('%d/%m/%Y')}{esq_detalhe_obra}")
                                                     st.session_state[f"esq_modal_editar_{row['id']}"] = False
-                                                    st.toast("Dados corrigidos!")
+                                                    st.toast(msg_esq_edit if esq_obra_mudou else "Dados corrigidos!")
                                                     time.sleep(0.4)
                                                     st.rerun()
                                                 else:
