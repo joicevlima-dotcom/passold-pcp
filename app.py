@@ -3042,6 +3042,27 @@ def salvar_saida_insumos(data_saida, obra: str, destino: str, itens: list, usuar
     finally:
         liberar_conexao(conn)
 
+def adicionar_item_saida_insumo(saida_id: int, descricao: str, quantidade: float, unidade: str):
+    """Acrescenta um item a uma saida de insumos ja registrada -- pro caso de esquecer
+    de incluir algo (ex: um spray) na hora de montar a saida original."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO saidas_insumos_itens (saida_id, descricao, quantidade, unidade) VALUES (%s,%s,%s,%s)",
+            (saida_id, descricao, quantidade, unidade)
+        )
+        conn.commit()
+        carregar_itens_saida_insumos.clear()
+        carregar_todos_itens_insumos.clear()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao adicionar item: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
 # ========================================================
 # FUNÇÕES DE OP_PECAS
 # ========================================================
@@ -7914,6 +7935,28 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     atualizar_item_insumo(int(item_ins['id']), st_ins, obs_nova_ins, st.session_state.usuario_nome, qtd_env_atual_ins)
                                 bloco_comentarios('saida_insumo_item', int(item_ins['id']), f"insumo_{item_ins['id']}")
                                 st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
+
+                            with st.expander("➕ Adicionar item a esta saída", expanded=False):
+                                nic1, nic2, nic3, nic4 = st.columns([4, 2, 2, 1])
+                                with nic1:
+                                    novo_item_desc = st.text_input("Descrição:", key=f"novo_item_desc_{saida_row['id']}", placeholder="Ex: Spray, silicone...")
+                                with nic2:
+                                    novo_item_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key=f"novo_item_qtd_{saida_row['id']}")
+                                with nic3:
+                                    novo_item_und = st.selectbox("Unidade:", ["un", "kg", "m", "cx", "pç", "rolo", "L"], key=f"novo_item_und_{saida_row['id']}")
+                                with nic4:
+                                    st.write("")
+                                    st.write("")
+                                    if st.button("➕", key=f"btn_add_item_saida_{saida_row['id']}"):
+                                        if not novo_item_desc.strip():
+                                            st.error("Informe a descrição do item.")
+                                        else:
+                                            if adicionar_item_saida_insumo(int(saida_row['id']), novo_item_desc.strip(), novo_item_qtd, novo_item_und):
+                                                registrar_auditoria(st.session_state.usuario_nome, "ADICIONAR_ITEM_INSUMO",
+                                                    f"Saída #{int(saida_row['id'])} — item adicionado: {novo_item_desc.strip()} ({novo_item_qtd:g} {novo_item_und})")
+                                                st.toast("Item adicionado!")
+                                                time.sleep(0.3)
+                                                st.rerun()
 
                             if n_indisp_ins > 0:
                                 itens_falt_ins = df_itens_saida[df_itens_saida['status_item'] == 'Indisponivel']['descricao'].tolist()
