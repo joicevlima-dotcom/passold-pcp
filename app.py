@@ -3119,6 +3119,27 @@ def editar_qtd_caixas_lote(lote_id: int, qtd_caixas: int, m2_item: float, peso_k
     finally:
         liberar_conexao(conn)
 
+def editar_obra_projeto_lote(lote_id: int, nova_obra: str, novo_projeto: str):
+    """Corrige a Obra/Projeto de um lote AVULSO (sem frente vinculada, EDT_Vinculado
+    nulo ou 'AVULSO'). Lotes com frente real (EDT de uma cronograma_macro) precisam ser
+    movidos via 'Vincular Datas', que ajusta o saldo m2/kg da frente corretamente --
+    aqui e so um UPDATE direto, sem nenhum saldo de frente envolvido."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE itens_detalhado SET Obra_Vinculada=%s, Numero_Projeto=%s, updated_at=NOW() WHERE id=%s",
+            (nova_obra, novo_projeto, lote_id)
+        )
+        conn.commit()
+        _limpar_cache_geral()
+        return True, "Obra/Projeto corrigidos!"
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao corrigir obra/projeto: {e}"
+    finally:
+        liberar_conexao(conn)
+
 def salvar_pecas_lote(lote_id: int, obra: str, cod_lote: str, num_op: str,
                       pecas: list, componentes_status: str, m2_op_real: float, peso_op_real: float = 0.0):
     """Salva peças com lock otimista via updated_at. Reconcilia tanto m2_executado (ACM) quanto
@@ -4673,6 +4694,26 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     with ed5:
                                         data_lim_edit = st.date_input("Data limite (entrega na obra):", value=data_lim_atual, format="DD/MM/YYYY", key=f"edit_datlim_{row['id']}")
                                     st.caption("Isso corrige o planejado do lote. Se as peças já foram lançadas na OP, o valor real gravado lá não muda automaticamente.")
+
+                                    edt_vinc_atual = row.get('EDT_Vinculado')
+                                    lote_tem_frente = bool(edt_vinc_atual) and edt_vinc_atual != 'AVULSO'
+                                    st.markdown("**Obra / Projeto**")
+                                    if lote_tem_frente:
+                                        st.caption(f"⚠️ Este lote está vinculado à frente **{edt_vinc_atual}** — pra trocar de obra, "
+                                                   "use 'Vincular Datas' (lá o saldo da frente é ajustado corretamente).")
+                                        obra_edit = novo_projeto_edit = None
+                                    else:
+                                        obras_disp_edit = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
+                                        obra_idx_edit = obras_disp_edit.index(row['Obra_Vinculada']) if row['Obra_Vinculada'] in obras_disp_edit else 0
+                                        ed6, ed7 = st.columns(2)
+                                        with ed6:
+                                            obra_edit = st.selectbox("Obra:", obras_disp_edit, index=obra_idx_edit, key=f"edit_obra_{row['id']}") if obras_disp_edit else row['Obra_Vinculada']
+                                        with ed7:
+                                            projetos_disp_edit = sorted(df_projetos[df_projetos['Obra'] == obra_edit]['Numero_Projeto'].dropna().unique().tolist()) if obra_edit else []
+                                            projeto_atual_edit = row.get('Numero_Projeto') or ''
+                                            projeto_idx_edit = projetos_disp_edit.index(projeto_atual_edit) if projeto_atual_edit in projetos_disp_edit else 0
+                                            novo_projeto_edit = st.selectbox("Projeto:", projetos_disp_edit, index=projeto_idx_edit, key=f"edit_projeto_{row['id']}") if projetos_disp_edit else projeto_atual_edit
+
                                     eb1, eb2, _ = st.columns([2, 2, 4])
                                     with eb1:
                                         if st.button("💾 Salvar correção", key=f"salvar_edit_lote_{row['id']}", type="primary", use_container_width=True):
@@ -4683,13 +4724,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                     int(row['id']), int(caixas_edit), float(m2_edit), float(peso_edit),
                                                     data_producao=data_prod_edit, data_limite=data_lim_edit
                                                 )
+                                                obra_mudou = (not lote_tem_frente) and (obra_edit != row['Obra_Vinculada'] or novo_projeto_edit != (row.get('Numero_Projeto') or ''))
+                                                if ok_edit_lote and obra_mudou:
+                                                    ok_edit_lote, msg_edit_lote = editar_obra_projeto_lote(int(row['id']), obra_edit, novo_projeto_edit)
                                                 if ok_edit_lote:
+                                                    detalhe_obra = f" | Obra: {row['Obra_Vinculada']}→{obra_edit} | Projeto: {row.get('Numero_Projeto') or '—'}→{novo_projeto_edit or '—'}" if obra_mudou else ""
                                                     registrar_auditoria(st.session_state.usuario_nome, "EDITAR_LOTE",
                                                         f"Lote {row['Cod_Lote']} — Qtd_Caixas: {int(row['Qtd_Caixas'])}→{int(caixas_edit)} | "
                                                         f"M2: {float(row['M2_Item']):.2f}→{m2_edit:.2f} | "
                                                         f"Peso: {float(row.get('Peso_Kg', 0) or 0):.2f}→{peso_edit:.2f} | "
                                                         f"Início: {data_prod_atual.strftime('%d/%m/%Y')}→{data_prod_edit.strftime('%d/%m/%Y')} | "
-                                                        f"Limite: {data_lim_atual.strftime('%d/%m/%Y')}→{data_lim_edit.strftime('%d/%m/%Y')}")
+                                                        f"Limite: {data_lim_atual.strftime('%d/%m/%Y')}→{data_lim_edit.strftime('%d/%m/%Y')}{detalhe_obra}")
                                                     st.session_state[f"modal_editar_{row['id']}"] = False
                                                     st.toast("Dados corrigidos!")
                                                     time.sleep(0.4)
@@ -5294,6 +5339,26 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     with eed5:
                                         esq_data_lim_edit = st.date_input("Data limite (entrega na obra):", value=esq_data_lim_atual, format="DD/MM/YYYY", key=f"esq_edit_datlim_{row['id']}")
                                     st.caption("Isso corrige o planejado do lote. Se as peças já foram lançadas na OP, o valor real gravado lá não muda automaticamente.")
+
+                                    esq_edt_vinc_atual = row.get('EDT_Vinculado')
+                                    esq_lote_tem_frente = bool(esq_edt_vinc_atual) and esq_edt_vinc_atual != 'AVULSO'
+                                    st.markdown("**Obra / Projeto**")
+                                    if esq_lote_tem_frente:
+                                        st.caption(f"⚠️ Este lote está vinculado à frente **{esq_edt_vinc_atual}** — pra trocar de obra, "
+                                                   "use 'Vincular Datas' (lá o saldo da frente é ajustado corretamente).")
+                                        esq_obra_edit = esq_novo_projeto_edit = None
+                                    else:
+                                        esq_obras_disp_edit = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
+                                        esq_obra_idx_edit = esq_obras_disp_edit.index(row['Obra_Vinculada']) if row['Obra_Vinculada'] in esq_obras_disp_edit else 0
+                                        eed6, eed7 = st.columns(2)
+                                        with eed6:
+                                            esq_obra_edit = st.selectbox("Obra:", esq_obras_disp_edit, index=esq_obra_idx_edit, key=f"esq_edit_obra_{row['id']}") if esq_obras_disp_edit else row['Obra_Vinculada']
+                                        with eed7:
+                                            esq_projetos_disp_edit = sorted(df_projetos[df_projetos['Obra'] == esq_obra_edit]['Numero_Projeto'].dropna().unique().tolist()) if esq_obra_edit else []
+                                            esq_projeto_atual_edit = row.get('Numero_Projeto') or ''
+                                            esq_projeto_idx_edit = esq_projetos_disp_edit.index(esq_projeto_atual_edit) if esq_projeto_atual_edit in esq_projetos_disp_edit else 0
+                                            esq_novo_projeto_edit = st.selectbox("Projeto:", esq_projetos_disp_edit, index=esq_projeto_idx_edit, key=f"esq_edit_projeto_{row['id']}") if esq_projetos_disp_edit else esq_projeto_atual_edit
+
                                     eeb1, eeb2, _ = st.columns([2, 2, 4])
                                     with eeb1:
                                         if st.button("💾 Salvar correção", key=f"esq_salvar_edit_lote_{row['id']}", type="primary", use_container_width=True):
@@ -5304,13 +5369,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                     int(row['id']), int(esq_caixas_edit), float(esq_m2_edit), float(esq_peso_edit),
                                                     data_producao=esq_data_prod_edit, data_limite=esq_data_lim_edit
                                                 )
+                                                esq_obra_mudou = (not esq_lote_tem_frente) and (esq_obra_edit != row['Obra_Vinculada'] or esq_novo_projeto_edit != (row.get('Numero_Projeto') or ''))
+                                                if ok_esq_edit and esq_obra_mudou:
+                                                    ok_esq_edit, msg_esq_edit = editar_obra_projeto_lote(int(row['id']), esq_obra_edit, esq_novo_projeto_edit)
                                                 if ok_esq_edit:
+                                                    esq_detalhe_obra = f" | Obra: {row['Obra_Vinculada']}→{esq_obra_edit} | Projeto: {row.get('Numero_Projeto') or '—'}→{esq_novo_projeto_edit or '—'}" if esq_obra_mudou else ""
                                                     registrar_auditoria(st.session_state.usuario_nome, "EDITAR_LOTE",
                                                         f"Lote {row['Cod_Lote']} — Qtd_Caixas: {int(row['Qtd_Caixas'])}→{int(esq_caixas_edit)} | "
                                                         f"M2: {float(row['M2_Item']):.2f}→{esq_m2_edit:.2f} | "
                                                         f"Peso: {float(row.get('Peso_Kg', 0) or 0):.2f}→{esq_peso_edit:.2f} | "
                                                         f"Início: {esq_data_prod_atual.strftime('%d/%m/%Y')}→{esq_data_prod_edit.strftime('%d/%m/%Y')} | "
-                                                        f"Limite: {esq_data_lim_atual.strftime('%d/%m/%Y')}→{esq_data_lim_edit.strftime('%d/%m/%Y')}")
+                                                        f"Limite: {esq_data_lim_atual.strftime('%d/%m/%Y')}→{esq_data_lim_edit.strftime('%d/%m/%Y')}{esq_detalhe_obra}")
                                                     st.session_state[f"esq_modal_editar_{row['id']}"] = False
                                                     st.toast("Dados corrigidos!")
                                                     time.sleep(0.4)
