@@ -517,7 +517,12 @@ def registrar_auditoria(usuario: str, acao: str, detalhes: str = ""):
 # ========================================================
 # INICIALIZAÇÃO DAS TABELAS
 # ========================================================
+@st.cache_resource
 def inicializar_banco_de_dados():
+    """Roda so uma vez por processo (cache_resource, igual get_connection_pool) --
+    sem isso, o Streamlit reexecutava CREATE/ALTER TABLE a cada interacao de
+    QUALQUER usuario, e ALTER TABLE ADD COLUMN IF NOT EXISTS pega lock
+    ACCESS EXCLUSIVE mesmo quando e no-op, travando outras consultas."""
     conn = conectar_banco()
     cursor = conn.cursor()
     try:
@@ -1425,8 +1430,11 @@ def salvar_lotes_micro(lotes: list):
                     ('M2_Total_Tarefa', 'm2_executado', m2_item, 'm²')
                 )
                 if valor_item > 0:
+                    # FOR UPDATE trava a linha da frente ate o commit/rollback deste lote --
+                    # sem isso, dois lotes criados ao mesmo tempo pra mesma EDT podiam ler o
+                    # mesmo saldo e furar o limite de m2/kg da frente (race condition).
                     cursor.execute(
-                        f"SELECT {campo_total}, {campo_exec}, Detalhado FROM cronograma_macro WHERE EDT=%s",
+                        f"SELECT {campo_total}, {campo_exec}, Detalhado FROM cronograma_macro WHERE EDT=%s FOR UPDATE",
                         (edt,)
                     )
                     frente_row = cursor.fetchone()
@@ -1502,6 +1510,32 @@ def deletar_lotes_por_edt_lote(obra, edt, cod_lote):
                 (obra, edt, cod_lote)
             )
         else:
+            # Sem EDT informado (ex.: botao "Remover Lote", que so conhece o nome do lote) --
+            # descobre a(s) EDT(s) reais vinculadas a esse Cod_Lote e devolve o saldo de cada
+            # uma antes de apagar. Antes, esse caminho nao devolvia saldo nenhum -- o m2/kg
+            # ficava "gasto" na frente pra sempre.
+            cursor.execute(
+                "SELECT DISTINCT EDT_Vinculado FROM itens_detalhado "
+                "WHERE Obra_Vinculada=%s AND Cod_Lote=%s AND EDT_Vinculado IS NOT NULL AND EDT_Vinculado != 'AVULSO'",
+                (obra, cod_lote)
+            )
+            for (edt_atual,) in cursor.fetchall():
+                cursor.execute(
+                    "SELECT COALESCE(SUM(M2_Item), 0), COALESCE(SUM(Peso_Kg), 0) FROM itens_detalhado "
+                    "WHERE Obra_Vinculada=%s AND EDT_Vinculado=%s AND Cod_Lote=%s",
+                    (obra, edt_atual, cod_lote)
+                )
+                m2_liberado, peso_liberado = cursor.fetchone()
+                m2_liberado   = float(m2_liberado or 0)
+                peso_liberado = float(peso_liberado or 0)
+                if m2_liberado > 0 or peso_liberado > 0:
+                    cursor.execute(
+                        "UPDATE cronograma_macro SET "
+                        "m2_executado = GREATEST(COALESCE(m2_executado,0) - %s, 0), "
+                        "peso_executado = GREATEST(COALESCE(peso_executado,0) - %s, 0) "
+                        "WHERE EDT=%s",
+                        (m2_liberado, peso_liberado, edt_atual)
+                    )
             cursor.execute(
                 "DELETE FROM itens_detalhado WHERE Obra_Vinculada=%s AND Cod_Lote=%s",
                 (obra, cod_lote)
@@ -1597,9 +1631,14 @@ def atualizar_status_solicitacao(sol_id, novo_status):
             row = cursor.fetchone()
             if row:
                 edt_alvo, prazo_novo = row
+                # prazo_solicitado e TEXT em formato brasileiro (DD/MM/AAAA), mas
+                # Prazo_Engenharia e DATE de verdade -- sem converter pra ISO aqui, o
+                # Postgres interpreta a string com DateStyle MDY (padrao): falha pra
+                # dia>12, e troca mes/dia silenciosamente pra dia<=12.
+                prazo_novo_iso = datetime.strptime(prazo_novo, '%d/%m/%Y').strftime('%Y-%m-%d')
                 cursor.execute(
                     "UPDATE cronograma_macro SET Prazo_Engenharia=%s WHERE EDT=%s",
-                    (prazo_novo, edt_alvo)
+                    (prazo_novo_iso, edt_alvo)
                 )
         conn.commit()
         carregar_solicitacoes.clear()
@@ -4452,8 +4491,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 if not df_base.empty:
                     registros_exp = []
                     for _, row in df_base.iterrows():
+                        if not prazo_valido(row['Data_Producao_Programada']) or not prazo_valido(row['Data_Limite_Obra']):
+                            continue  # data faltando -- pula em vez de quebrar a pagina inteira
                         dt_ini = pd.to_datetime(row['Data_Producao_Programada']).date()
                         dt_fim = pd.to_datetime(row['Data_Limite_Obra']).date()
+                        if dt_ini > dt_fim:
+                            continue  # datas invertidas (erro de cadastro) -- nao aparece no calendario
                         ini_ultima_semana = (pd.to_datetime(dt_fim) - timedelta(days=6)).date()
                         ini_ultima_semana = max(ini_ultima_semana, dt_ini)
                         dia = dt_ini
@@ -4783,17 +4826,21 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         conn = conectar_banco()
                                                         try:
                                                             cursor = conn.cursor()
-                                                            todas_zeradas = True
                                                             for pe in pecas_envio:
-                                                                novo_saldo = pe['saldo_atual'] - pe['qtd_enviar']
-                                                                if novo_saldo > 0:
-                                                                    todas_zeradas = False
                                                                 cursor.execute("""
                                                                     UPDATE op_pecas
                                                                     SET qtd_enviada = qtd_enviada + %s,
                                                                         saldo = saldo - %s
                                                                     WHERE id=%s
                                                                 """, (pe['qtd_enviar'], pe['qtd_enviar'], pe['peca_id']))
+                                                            # So conta como concluido se TODAS as pecas do lote zeraram o
+                                                            # saldo -- nao so as que entraram neste envio. Uma peca deixada
+                                                            # em 0 (guardada pra depois) nao pode ser ignorada aqui.
+                                                            cursor.execute(
+                                                                "SELECT COALESCE(SUM(saldo), 0) FROM op_pecas WHERE lote_id=%s",
+                                                                (int(row['id']),)
+                                                            )
+                                                            todas_zeradas = float(cursor.fetchone()[0]) <= 0
                                                             novo_status = 'Concluido' if todas_zeradas else 'Parcialmente Concluido'
                                                             cursor.execute(
                                                                 "UPDATE itens_detalhado SET Status_Item=%s, Concluido_Em=CASE WHEN %s THEN NOW() ELSE Concluido_Em END WHERE id=%s",
@@ -5035,8 +5082,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 if not df_base_esq.empty:
                     registros_exp_esq = []
                     for _, row in df_base_esq.iterrows():
+                        if not prazo_valido(row['Data_Producao_Programada']) or not prazo_valido(row['Data_Limite_Obra']):
+                            continue  # data faltando -- pula em vez de quebrar a pagina inteira
                         dt_ini = pd.to_datetime(row['Data_Producao_Programada']).date()
                         dt_fim = pd.to_datetime(row['Data_Limite_Obra']).date()
+                        if dt_ini > dt_fim:
+                            continue  # datas invertidas (erro de cadastro) -- nao aparece no calendario
                         ini_ult = max((pd.to_datetime(dt_fim) - timedelta(days=6)).date(), dt_ini)
                         dia = dt_ini
                         while dia <= dt_fim:
@@ -5248,11 +5299,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             key=f"esq_tipo_envio_{row['id']}",
                                             horizontal=True)
                                     if tipo_envio_esq == "Envio Total":
+                                        _pecas_lote_check_esq = carregar_pecas_lote(int(row['id']))
                                         with me2:
-                                            st.info("Todas as peças serão marcadas como concluídas.")
+                                            if _pecas_lote_check_esq.empty:
+                                                st.warning("⚠️ Nenhuma peça lançada neste lote. Lance as peças antes de concluir.")
+                                            else:
+                                                st.info("Todas as peças serão marcadas como concluídas.")
                                         bt1, bt2, _ = st.columns([2, 2, 4])
                                         with bt1:
-                                            if st.button("✅ Confirmar Total", key=f"esq_conf_total_{row['id']}", type="primary", use_container_width=True):
+                                            if st.button("✅ Confirmar Total", key=f"esq_conf_total_{row['id']}", type="primary", use_container_width=True, disabled=_pecas_lote_check_esq.empty):
                                                 conn = conectar_banco()
                                                 try:
                                                     cursor = conn.cursor()
@@ -5310,17 +5365,20 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                     conn = conectar_banco()
                                                     try:
                                                         cursor = conn.cursor()
-                                                        todas_concluidas = True
                                                         for p in pecas_envio_esq:
-                                                            novo_saldo_esq = p['saldo'] - p['qtd']
-                                                            if novo_saldo_esq > 0:
-                                                                todas_concluidas = False
                                                             cursor.execute("""
                                                                 UPDATE op_pecas
                                                                 SET qtd_enviada = qtd_enviada + %s,
                                                                     saldo = saldo - %s
                                                                 WHERE id=%s
                                                             """, (p['qtd'], p['qtd'], p['peca_id']))
+                                                        # So conta como concluido se TODAS as pecas do lote zeraram o
+                                                        # saldo -- nao so as que entraram neste envio.
+                                                        cursor.execute(
+                                                            "SELECT COALESCE(SUM(saldo), 0) FROM op_pecas WHERE lote_id=%s",
+                                                            (int(row['id']),)
+                                                        )
+                                                        todas_concluidas = float(cursor.fetchone()[0]) <= 0
                                                         novo_status = 'Concluido' if todas_concluidas else 'Parcialmente Concluido'
                                                         cursor.execute(
                                                             "UPDATE itens_detalhado SET Status_Item=%s, Concluido_Em=CASE WHEN %s THEN NOW() ELSE Concluido_Em END WHERE id=%s",
