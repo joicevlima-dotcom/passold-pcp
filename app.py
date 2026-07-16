@@ -3087,23 +3087,29 @@ def carregar_saldo_pecas_por_lote():
         liberar_conexao(conn)
     return df
 
-def editar_qtd_caixas_lote(lote_id: int, qtd_caixas: int, m2_item: float, peso_kg: float = None):
-    """Corrige a quantidade de caixas / m² / peso de um lote ja gerado (erro de lancamento).
-    So corrige o planejado (itens_detalhado) — se as pecas desse lote ja foram lancadas em
-    op_pecas, o m2_op_real/peso_op_real ja gravado la NAO e atualizado retroativamente."""
+def editar_qtd_caixas_lote(lote_id: int, qtd_caixas: int, m2_item: float, peso_kg: float = None,
+                            data_producao=None, data_limite=None):
+    """Corrige a quantidade de caixas / m² / peso / datas de um lote ja gerado (erro de
+    lancamento ou atraso). So corrige o planejado (itens_detalhado) — se as pecas desse
+    lote ja foram lancadas em op_pecas, o m2_op_real/peso_op_real ja gravado la NAO e
+    atualizado retroativamente."""
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
-        if peso_kg is None:
-            cursor.execute(
-                "UPDATE itens_detalhado SET Qtd_Caixas=%s, M2_Item=%s, updated_at=NOW() WHERE id=%s",
-                (qtd_caixas, m2_item, lote_id)
-            )
-        else:
-            cursor.execute(
-                "UPDATE itens_detalhado SET Qtd_Caixas=%s, M2_Item=%s, Peso_Kg=%s, updated_at=NOW() WHERE id=%s",
-                (qtd_caixas, m2_item, peso_kg, lote_id)
-            )
+        campos  = ["Qtd_Caixas=%s", "M2_Item=%s"]
+        valores = [qtd_caixas, m2_item]
+        if peso_kg is not None:
+            campos.append("Peso_Kg=%s")
+            valores.append(peso_kg)
+        if data_producao is not None:
+            campos.append("Data_Producao_Programada=%s")
+            valores.append(data_producao)
+        if data_limite is not None:
+            campos.append("Data_Limite_Obra=%s")
+            valores.append(data_limite)
+        campos.append("updated_at=NOW()")
+        valores.append(lote_id)
+        cursor.execute(f"UPDATE itens_detalhado SET {', '.join(campos)} WHERE id=%s", valores)
         conn.commit()
         _limpar_cache_geral()
         return True, "Quantidade corrigida!"
@@ -4659,22 +4665,37 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         m2_edit = st.number_input("m² Total:", min_value=0.0, value=float(row['M2_Item']), step=0.01, key=f"edit_m2_{row['id']}")
                                     with ed3:
                                         peso_edit = st.number_input("Peso (kg):", min_value=0.0, value=float(row.get('Peso_Kg', 0) or 0), step=0.01, key=f"edit_peso_{row['id']}")
+                                    ed4, ed5 = st.columns(2)
+                                    data_prod_atual = pd.to_datetime(row['Data_Producao_Programada']).date() if prazo_valido(row['Data_Producao_Programada']) else hoje_projeto().date()
+                                    data_lim_atual  = pd.to_datetime(row['Data_Limite_Obra']).date() if prazo_valido(row['Data_Limite_Obra']) else hoje_projeto().date()
+                                    with ed4:
+                                        data_prod_edit = st.date_input("Início da produção:", value=data_prod_atual, format="DD/MM/YYYY", key=f"edit_datprod_{row['id']}")
+                                    with ed5:
+                                        data_lim_edit = st.date_input("Data limite (entrega na obra):", value=data_lim_atual, format="DD/MM/YYYY", key=f"edit_datlim_{row['id']}")
                                     st.caption("Isso corrige o planejado do lote. Se as peças já foram lançadas na OP, o valor real gravado lá não muda automaticamente.")
                                     eb1, eb2, _ = st.columns([2, 2, 4])
                                     with eb1:
                                         if st.button("💾 Salvar correção", key=f"salvar_edit_lote_{row['id']}", type="primary", use_container_width=True):
-                                            ok_edit_lote, msg_edit_lote = editar_qtd_caixas_lote(int(row['id']), int(caixas_edit), float(m2_edit), float(peso_edit))
-                                            if ok_edit_lote:
-                                                registrar_auditoria(st.session_state.usuario_nome, "EDITAR_LOTE",
-                                                    f"Lote {row['Cod_Lote']} — Qtd_Caixas: {int(row['Qtd_Caixas'])}→{int(caixas_edit)} | "
-                                                    f"M2: {float(row['M2_Item']):.2f}→{m2_edit:.2f} | "
-                                                    f"Peso: {float(row.get('Peso_Kg', 0) or 0):.2f}→{peso_edit:.2f}")
-                                                st.session_state[f"modal_editar_{row['id']}"] = False
-                                                st.toast("Quantidade corrigida!")
-                                                time.sleep(0.4)
-                                                st.rerun()
+                                            if data_lim_edit < data_prod_edit:
+                                                st.error("A data limite não pode ser antes do início da produção.")
                                             else:
-                                                st.error(msg_edit_lote)
+                                                ok_edit_lote, msg_edit_lote = editar_qtd_caixas_lote(
+                                                    int(row['id']), int(caixas_edit), float(m2_edit), float(peso_edit),
+                                                    data_producao=data_prod_edit, data_limite=data_lim_edit
+                                                )
+                                                if ok_edit_lote:
+                                                    registrar_auditoria(st.session_state.usuario_nome, "EDITAR_LOTE",
+                                                        f"Lote {row['Cod_Lote']} — Qtd_Caixas: {int(row['Qtd_Caixas'])}→{int(caixas_edit)} | "
+                                                        f"M2: {float(row['M2_Item']):.2f}→{m2_edit:.2f} | "
+                                                        f"Peso: {float(row.get('Peso_Kg', 0) or 0):.2f}→{peso_edit:.2f} | "
+                                                        f"Início: {data_prod_atual.strftime('%d/%m/%Y')}→{data_prod_edit.strftime('%d/%m/%Y')} | "
+                                                        f"Limite: {data_lim_atual.strftime('%d/%m/%Y')}→{data_lim_edit.strftime('%d/%m/%Y')}")
+                                                    st.session_state[f"modal_editar_{row['id']}"] = False
+                                                    st.toast("Dados corrigidos!")
+                                                    time.sleep(0.4)
+                                                    st.rerun()
+                                                else:
+                                                    st.error(msg_edit_lote)
                                     with eb2:
                                         if st.button("Cancelar", key=f"cancel_edit_lote_{row['id']}", use_container_width=True):
                                             st.session_state[f"modal_editar_{row['id']}"] = False
@@ -4682,11 +4703,28 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                             # ── ARQUIVOS DA OP ────────────────────────────────
                             arqs_op = carregar_arquivos_op(int(row['id']))
-                            if arqs_op:
-                                with st.expander(f"📎 {len(arqs_op)} arquivo(s) anexado(s)", expanded=False):
+                            label_arq_acm = f"📎 {len(arqs_op)} arquivo(s) anexado(s)" if arqs_op else "📎 Anexar arquivo"
+                            with st.expander(label_arq_acm, expanded=False):
+                                if setor in ["Master", "PCP", "Engenharia", "Producao"]:
+                                    uploaded_list_acm = st.file_uploader(
+                                        "Anexar arquivo(s) (PDF, Excel, imagem):",
+                                        type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg"],
+                                        key=f"upload_acm_{row['id']}",
+                                        accept_multiple_files=True
+                                    )
+                                    if uploaded_list_acm:
+                                        if st.button(f"💾 Salvar {len(uploaded_list_acm)} arquivo(s)", key=f"btn_salvar_acm_{row['id']}", type="primary"):
+                                            n_salvos_acm = 0
+                                            for uploaded in uploaded_list_acm:
+                                                if salvar_arquivo_op(int(row['id']), uploaded.name, uploaded.type or "", uploaded.read(), st.session_state.usuario_nome):
+                                                    n_salvos_acm += 1
+                                            st.toast(f"✅ {n_salvos_acm} arquivo(s) salvo(s)!")
+                                            time.sleep(0.3)
+                                            st.rerun()
+                                if arqs_op:
                                     for arq in arqs_op:
                                         arq_id, arq_nome, arq_tipo, arq_enviado_por, _ = arq
-                                        ca1, ca2, ca3 = st.columns([5, 1, 1])
+                                        ca1, ca2, ca3, ca4 = st.columns([4, 1, 1, 1])
                                         ca1.markdown(f"📄 **{html_escape(arq_nome)}**  \n<small style='color:#94A3B8'>{html_escape(arq_enviado_por)}</small>", unsafe_allow_html=True)
                                         conteudo_arq = carregar_conteudo_arquivo(arq_id)
                                         if conteudo_arq:
@@ -4699,6 +4737,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
                                                 key=f"acm_dl_{arq_id}"
                                             )
+                                        if setor in ["Master", "PCP"]:
+                                            with ca4:
+                                                if st.button("🗑️", key=f"acm_del_arq_{arq_id}"):
+                                                    deletar_arquivo_op(arq_id)
+                                                    st.toast("Arquivo removido.")
+                                                    time.sleep(0.3)
+                                                    st.rerun()
+                                else:
+                                    st.caption("Nenhum arquivo anexado ainda.")
 
                             # ── COMENTÁRIOS ────────────────────────────────────
                             bloco_comentarios('lote_producao', int(row['id']), f"acm_{row['id']}")
@@ -5239,22 +5286,37 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         esq_m2_edit = st.number_input("m² Total:", min_value=0.0, value=float(row['M2_Item']), step=0.01, key=f"esq_edit_m2_{row['id']}")
                                     with eed3:
                                         esq_peso_edit = st.number_input("Peso (kg):", min_value=0.0, value=float(row.get('Peso_Kg', 0) or 0), step=0.01, key=f"esq_edit_peso_{row['id']}")
+                                    eed4, eed5 = st.columns(2)
+                                    esq_data_prod_atual = pd.to_datetime(row['Data_Producao_Programada']).date() if prazo_valido(row['Data_Producao_Programada']) else hoje_projeto().date()
+                                    esq_data_lim_atual  = pd.to_datetime(row['Data_Limite_Obra']).date() if prazo_valido(row['Data_Limite_Obra']) else hoje_projeto().date()
+                                    with eed4:
+                                        esq_data_prod_edit = st.date_input("Início da produção:", value=esq_data_prod_atual, format="DD/MM/YYYY", key=f"esq_edit_datprod_{row['id']}")
+                                    with eed5:
+                                        esq_data_lim_edit = st.date_input("Data limite (entrega na obra):", value=esq_data_lim_atual, format="DD/MM/YYYY", key=f"esq_edit_datlim_{row['id']}")
                                     st.caption("Isso corrige o planejado do lote. Se as peças já foram lançadas na OP, o valor real gravado lá não muda automaticamente.")
                                     eeb1, eeb2, _ = st.columns([2, 2, 4])
                                     with eeb1:
                                         if st.button("💾 Salvar correção", key=f"esq_salvar_edit_lote_{row['id']}", type="primary", use_container_width=True):
-                                            ok_esq_edit, msg_esq_edit = editar_qtd_caixas_lote(int(row['id']), int(esq_caixas_edit), float(esq_m2_edit), float(esq_peso_edit))
-                                            if ok_esq_edit:
-                                                registrar_auditoria(st.session_state.usuario_nome, "EDITAR_LOTE",
-                                                    f"Lote {row['Cod_Lote']} — Qtd_Caixas: {int(row['Qtd_Caixas'])}→{int(esq_caixas_edit)} | "
-                                                    f"M2: {float(row['M2_Item']):.2f}→{esq_m2_edit:.2f} | "
-                                                    f"Peso: {float(row.get('Peso_Kg', 0) or 0):.2f}→{esq_peso_edit:.2f}")
-                                                st.session_state[f"esq_modal_editar_{row['id']}"] = False
-                                                st.toast("Quantidade corrigida!")
-                                                time.sleep(0.4)
-                                                st.rerun()
+                                            if esq_data_lim_edit < esq_data_prod_edit:
+                                                st.error("A data limite não pode ser antes do início da produção.")
                                             else:
-                                                st.error(msg_esq_edit)
+                                                ok_esq_edit, msg_esq_edit = editar_qtd_caixas_lote(
+                                                    int(row['id']), int(esq_caixas_edit), float(esq_m2_edit), float(esq_peso_edit),
+                                                    data_producao=esq_data_prod_edit, data_limite=esq_data_lim_edit
+                                                )
+                                                if ok_esq_edit:
+                                                    registrar_auditoria(st.session_state.usuario_nome, "EDITAR_LOTE",
+                                                        f"Lote {row['Cod_Lote']} — Qtd_Caixas: {int(row['Qtd_Caixas'])}→{int(esq_caixas_edit)} | "
+                                                        f"M2: {float(row['M2_Item']):.2f}→{esq_m2_edit:.2f} | "
+                                                        f"Peso: {float(row.get('Peso_Kg', 0) or 0):.2f}→{esq_peso_edit:.2f} | "
+                                                        f"Início: {esq_data_prod_atual.strftime('%d/%m/%Y')}→{esq_data_prod_edit.strftime('%d/%m/%Y')} | "
+                                                        f"Limite: {esq_data_lim_atual.strftime('%d/%m/%Y')}→{esq_data_lim_edit.strftime('%d/%m/%Y')}")
+                                                    st.session_state[f"esq_modal_editar_{row['id']}"] = False
+                                                    st.toast("Dados corrigidos!")
+                                                    time.sleep(0.4)
+                                                    st.rerun()
+                                                else:
+                                                    st.error(msg_esq_edit)
                                     with eeb2:
                                         if st.button("Cancelar", key=f"esq_cancel_edit_lote_{row['id']}", use_container_width=True):
                                             st.session_state[f"esq_modal_editar_{row['id']}"] = False
@@ -5262,11 +5324,28 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                             # ── ARQUIVOS DA OP ────────────────────────────────
                             arqs_esq = carregar_arquivos_op(int(row['id']))
-                            if arqs_esq:
-                                with st.expander(f"📎 {len(arqs_esq)} arquivo(s) anexado(s)", expanded=False):
+                            label_arq_esq = f"📎 {len(arqs_esq)} arquivo(s) anexado(s)" if arqs_esq else "📎 Anexar arquivo"
+                            with st.expander(label_arq_esq, expanded=False):
+                                if setor in ["Master", "PCP", "Engenharia", "Producao"]:
+                                    uploaded_list_esq = st.file_uploader(
+                                        "Anexar arquivo(s) (PDF, Excel, imagem):",
+                                        type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg"],
+                                        key=f"upload_esq_{row['id']}",
+                                        accept_multiple_files=True
+                                    )
+                                    if uploaded_list_esq:
+                                        if st.button(f"💾 Salvar {len(uploaded_list_esq)} arquivo(s)", key=f"btn_salvar_esq_{row['id']}", type="primary"):
+                                            n_salvos_esq = 0
+                                            for uploaded in uploaded_list_esq:
+                                                if salvar_arquivo_op(int(row['id']), uploaded.name, uploaded.type or "", uploaded.read(), st.session_state.usuario_nome):
+                                                    n_salvos_esq += 1
+                                            st.toast(f"✅ {n_salvos_esq} arquivo(s) salvo(s)!")
+                                            time.sleep(0.3)
+                                            st.rerun()
+                                if arqs_esq:
                                     for arq in arqs_esq:
                                         arq_id, arq_nome, arq_tipo, arq_enviado_por, _ = arq
-                                        ca1, ca2, ca3 = st.columns([5, 1, 1])
+                                        ca1, ca2, ca3, ca4 = st.columns([4, 1, 1, 1])
                                         ca1.markdown(f"📄 **{html_escape(arq_nome)}**  \n<small style='color:#94A3B8'>{html_escape(arq_enviado_por)}</small>", unsafe_allow_html=True)
                                         conteudo_arq = carregar_conteudo_arquivo(arq_id)
                                         if conteudo_arq:
@@ -5279,6 +5358,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
                                                 key=f"esq_dl_{arq_id}"
                                             )
+                                        if setor in ["Master", "PCP"]:
+                                            with ca4:
+                                                if st.button("🗑️", key=f"esq_del_arq_{arq_id}"):
+                                                    deletar_arquivo_op(arq_id)
+                                                    st.toast("Arquivo removido.")
+                                                    time.sleep(0.3)
+                                                    st.rerun()
+                                else:
+                                    st.caption("Nenhum arquivo anexado ainda.")
 
                             # ── COMENTÁRIOS ────────────────────────────────────
                             bloco_comentarios('lote_producao', int(row['id']), f"esq_{row['id']}")
