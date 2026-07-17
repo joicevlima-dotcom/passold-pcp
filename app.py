@@ -5958,13 +5958,21 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             n_lib_card = len(df_banco_micro[df_banco_micro["Status_Item"].isin(["Liberado para Fabrica","Parcialmente Concluido"])]) if not df_banco_micro.empty else 0
             with st.expander(f"✏️ Lançar Peças da OP  ·  {n_lib_card} OP(s) liberada(s)", expanded=False):
                 st.markdown("Selecione a OP liberada e lance as peças do romaneio.")
+                incluir_concluidas_fat = st.toggle(
+                    "Incluir OPs concluídas (somente para tirar 2ª via)",
+                    value=False, key="fat_incl_concluidas"
+                )
                 st.markdown("---")
 
                 obras_fat = sorted(df_banco_micro["Obra_Vinculada"].dropna().unique().tolist()) if not df_banco_micro.empty else []
                 obra_fat_sel = st.selectbox("Filtrar por obra:", ["Todas"] + obras_fat, key="fat_obra_sel")
 
+                status_fat = ["Liberado para Fabrica", "Parcialmente Concluido"]
+                if incluir_concluidas_fat:
+                    status_fat.append("Concluido")
+
                 if not df_banco_micro.empty:
-                    mask_fat = df_banco_micro['Status_Item'].isin(["Liberado para Fabrica", "Parcialmente Concluido"])
+                    mask_fat = df_banco_micro['Status_Item'].isin(status_fat)
                     if obra_fat_sel != "Todas":
                         mask_fat = mask_fat & (df_banco_micro['Obra_Vinculada'] == obra_fat_sel)
                     df_lib = df_banco_micro[mask_fat].copy()
@@ -5982,6 +5990,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         row_lote     = df_lib[df_lib['Num_OP'] == num_op_sel].iloc[0]
                         lote_id      = int(row_lote['id'])
                         edt_lote     = row_lote.get('EDT_Vinculado', '')
+                        op_finalizada = row_lote.get('Status_Item') == 'Concluido'
+                        if op_finalizada:
+                            st.info("🔒 OP concluída — modo somente leitura. Use '📄 Gerar Ordem de Produção' abaixo para tirar a 2ª via.")
 
                         if not df_banco_macro.empty and edt_lote and edt_lote != 'AVULSO':
                             fr_edt = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
@@ -6077,134 +6088,135 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         key="dl_op"
                                     )
 
-                        with st.expander(
-                            "✏️ Editar / Substituir Peças" if not df_pecas_existentes.empty else "➕ Lançar Peças",
-                            expanded=df_pecas_existentes.empty
-                        ):
-                            st.caption("Cole os dados abaixo — um item por linha em cada campo.")
-                            gm1, gm2 = st.columns([2, 3])
-                            eh_esq_pecas = tipo_esc_edt == "Esquadria-Vidro"
-                            with gm1:
-                                if eh_esq_pecas:
-                                    peso_op_real = st.number_input(
-                                        "⚖️ Peso real desta OP (kg):",
-                                        min_value=0.0, value=float(row_lote.get('Peso_Kg', 0)),
-                                        step=0.1, format="%.2f", key="peso_op_real_input",
-                                        help="Será abatido do saldo da etapa."
-                                    )
-                                    m2_op_real = 0.0
-                                else:
-                                    m2_op_real = st.number_input(
-                                        "📐 m² real desta OP:",
-                                        min_value=0.0, value=float(row_lote.get('M2_Item', 0)),
-                                        step=0.1, format="%.2f", key="m2_op_real_input",
-                                        help="Será abatido do saldo da etapa."
-                                    )
-                                    peso_op_real = 0.0
-                            with gm2:
-                                if not df_banco_macro.empty and edt_lote and edt_lote != 'AVULSO':
-                                    fr2 = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
-                                    if not fr2.empty:
-                                        if eh_esq_pecas:
-                                            peso_exec2      = float(fr2.iloc[0].get('Peso_Executado', 0) or 0)
-                                            peso_total2_raw = fr2.iloc[0].get('Peso_Total_Tarefa')
-                                            if pd.notna(peso_total2_raw) and float(peso_total2_raw) > 0:
-                                                saldo_apos = float(peso_total2_raw) - peso_exec2 - peso_op_real
-                                                st.metric("Saldo após este lançamento", f"{saldo_apos:.2f} kg")
-                                            else:
-                                                st.metric("Saldo após este lançamento", "— (total não definido)")
-                                        else:
-                                            m2_exec2      = float(fr2.iloc[0].get('M2_Executado', 0) or 0)
-                                            m2_total2_raw = fr2.iloc[0].get('M2_Total_Tarefa')
-                                            if pd.notna(m2_total2_raw) and float(m2_total2_raw) > 0:
-                                                saldo_apos = float(m2_total2_raw) - m2_exec2 - m2_op_real
-                                                st.metric("Saldo após este lançamento", f"{saldo_apos:.2f} m²")
-                                            else:
-                                                st.metric("Saldo após este lançamento", "— (total não definido)")
-
-                            tab_rom, tab_manual = st.tabs(["📋 Colar Romaneio", "✏️ Manual"])
-
-                            with tab_rom:
-                                st.caption("Cole o romaneio — uma peça por linha: `REF - COD - Descrição - Medida - Ângulos - Qtd`")
-                                txt_rom = st.text_area(
-                                    "Romaneio:",
-                                    height=220,
-                                    placeholder="JA19.AP402 - CT016 - Cantoneira 25x25 Preto Fosco - 3120mm - 90/90 - 1pç\nJA22 - MM035 - Luva da Coluna Central - 4450mm - 90/90 - 2pç",
-                                    key="sec2_romaneio_txt"
-                                )
-                                pecas_rom = parse_romaneio(txt_rom) if txt_rom.strip() else []
-                                if pecas_rom:
-                                    st.success(f"**{len(pecas_rom)} peça(s) reconhecida(s):**")
-                                    st.dataframe(
-                                        pd.DataFrame(pecas_rom).rename(columns={
-                                            "codigo": "Código", "descricao": "Descrição",
-                                            "medida": "Medida", "localizacao": "Localização", "qtd": "Qtd"
-                                        }),
-                                        use_container_width=True, hide_index=True
-                                    )
-                                comp_status_rom = st.radio(
-                                    "Status dos componentes:",
-                                    ["Aguardando Projetista", "Componentes OK"],
-                                    horizontal=True, key="comp_status_rom"
-                                )
-                                if st.button("💾 Salvar Romaneio", key="btn_salvar_rom", type="primary", disabled=not pecas_rom):
-                                    salvar_pecas_lote(
-                                        lote_id, row_lote['Obra_Vinculada'],
-                                        row_lote['Cod_Lote'], row_lote['Num_OP'],
-                                        pecas_rom, comp_status_rom, m2_op_real, peso_op_real
-                                    )
-                                    registrar_auditoria(st.session_state.usuario_nome, "LANCAMENTO_PECAS",
-                                        f"OP {row_lote['Num_OP']} — {len(pecas_rom)} peça(s) via romaneio — Obra: {obra_selecionada}")
-                                    st.toast(f"{len(pecas_rom)} peça(s) salvas!")
-                                    time.sleep(0.3)
-                                    st.rerun()
-
-                            with tab_manual:
-                                p1, p2, p3, p4 = st.columns(4)
-                                with p1:
-                                    codigos_txt = st.text_area("Códigos:", height=180, key="pecas_codigos",
-                                                                placeholder="B24-01C\nB25-01C\nRF.JA.11/CNT")
-                                with p2:
-                                    qtds_txt = st.text_area("Quantidades:", height=180, key="pecas_qtds",
-                                                             placeholder="3\n3\n1")
-                                with p3:
-                                    locs_txt = st.text_area("Localização:", height=180, key="pecas_locs",
-                                                             placeholder="Pav 27-37\nPav 27-37\n(opcional)")
-                                with p4:
-                                    medidas_txt = st.text_area("Medidas:", height=180, key="pecas_medidas",
-                                                                placeholder="550x390\n550x400\n(opcional)")
-                                comp_status = st.radio(
-                                    "Status dos componentes:",
-                                    ["Aguardando Projetista", "Componentes OK"],
-                                    horizontal=True, key="comp_status_radio"
-                                )
-                                if st.button("💾 Salvar Peças", key="btn_salvar_pecas", type="primary"):
-                                    codigos = [l.strip() for l in codigos_txt.strip().split('\n') if l.strip()]
-                                    qtds    = [l.strip() for l in qtds_txt.strip().split('\n') if l.strip()]
-                                    locs    = [l.strip() for l in locs_txt.strip().split('\n')] if locs_txt.strip() else []
-                                    medidas = [l.strip() for l in medidas_txt.strip().split('\n')] if medidas_txt.strip() else []
-                                    if not codigos:
-                                        st.error("Informe pelo menos um código.")
+                        if not op_finalizada:
+                            with st.expander(
+                                "✏️ Editar / Substituir Peças" if not df_pecas_existentes.empty else "➕ Lançar Peças",
+                                expanded=df_pecas_existentes.empty
+                            ):
+                                st.caption("Cole os dados abaixo — um item por linha em cada campo.")
+                                gm1, gm2 = st.columns([2, 3])
+                                eh_esq_pecas = tipo_esc_edt == "Esquadria-Vidro"
+                                with gm1:
+                                    if eh_esq_pecas:
+                                        peso_op_real = st.number_input(
+                                            "⚖️ Peso real desta OP (kg):",
+                                            min_value=0.0, value=float(row_lote.get('Peso_Kg', 0)),
+                                            step=0.1, format="%.2f", key="peso_op_real_input",
+                                            help="Será abatido do saldo da etapa."
+                                        )
+                                        m2_op_real = 0.0
                                     else:
-                                        pecas_list = []
-                                        for i, cod in enumerate(codigos):
-                                            pecas_list.append({
-                                                "codigo":      cod,
-                                                "descricao":   "",
-                                                "qtd":         int(qtds[i]) if i < len(qtds) and qtds[i].isdigit() else 1,
-                                                "localizacao": locs[i] if i < len(locs) else "",
-                                                "medida":      medidas[i] if i < len(medidas) else "",
-                                            })
+                                        m2_op_real = st.number_input(
+                                            "📐 m² real desta OP:",
+                                            min_value=0.0, value=float(row_lote.get('M2_Item', 0)),
+                                            step=0.1, format="%.2f", key="m2_op_real_input",
+                                            help="Será abatido do saldo da etapa."
+                                        )
+                                        peso_op_real = 0.0
+                                with gm2:
+                                    if not df_banco_macro.empty and edt_lote and edt_lote != 'AVULSO':
+                                        fr2 = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
+                                        if not fr2.empty:
+                                            if eh_esq_pecas:
+                                                peso_exec2      = float(fr2.iloc[0].get('Peso_Executado', 0) or 0)
+                                                peso_total2_raw = fr2.iloc[0].get('Peso_Total_Tarefa')
+                                                if pd.notna(peso_total2_raw) and float(peso_total2_raw) > 0:
+                                                    saldo_apos = float(peso_total2_raw) - peso_exec2 - peso_op_real
+                                                    st.metric("Saldo após este lançamento", f"{saldo_apos:.2f} kg")
+                                                else:
+                                                    st.metric("Saldo após este lançamento", "— (total não definido)")
+                                            else:
+                                                m2_exec2      = float(fr2.iloc[0].get('M2_Executado', 0) or 0)
+                                                m2_total2_raw = fr2.iloc[0].get('M2_Total_Tarefa')
+                                                if pd.notna(m2_total2_raw) and float(m2_total2_raw) > 0:
+                                                    saldo_apos = float(m2_total2_raw) - m2_exec2 - m2_op_real
+                                                    st.metric("Saldo após este lançamento", f"{saldo_apos:.2f} m²")
+                                                else:
+                                                    st.metric("Saldo após este lançamento", "— (total não definido)")
+
+                                tab_rom, tab_manual = st.tabs(["📋 Colar Romaneio", "✏️ Manual"])
+
+                                with tab_rom:
+                                    st.caption("Cole o romaneio — uma peça por linha: `REF - COD - Descrição - Medida - Ângulos - Qtd`")
+                                    txt_rom = st.text_area(
+                                        "Romaneio:",
+                                        height=220,
+                                        placeholder="JA19.AP402 - CT016 - Cantoneira 25x25 Preto Fosco - 3120mm - 90/90 - 1pç\nJA22 - MM035 - Luva da Coluna Central - 4450mm - 90/90 - 2pç",
+                                        key="sec2_romaneio_txt"
+                                    )
+                                    pecas_rom = parse_romaneio(txt_rom) if txt_rom.strip() else []
+                                    if pecas_rom:
+                                        st.success(f"**{len(pecas_rom)} peça(s) reconhecida(s):**")
+                                        st.dataframe(
+                                            pd.DataFrame(pecas_rom).rename(columns={
+                                                "codigo": "Código", "descricao": "Descrição",
+                                                "medida": "Medida", "localizacao": "Localização", "qtd": "Qtd"
+                                            }),
+                                            use_container_width=True, hide_index=True
+                                        )
+                                    comp_status_rom = st.radio(
+                                        "Status dos componentes:",
+                                        ["Aguardando Projetista", "Componentes OK"],
+                                        horizontal=True, key="comp_status_rom"
+                                    )
+                                    if st.button("💾 Salvar Romaneio", key="btn_salvar_rom", type="primary", disabled=not pecas_rom):
                                         salvar_pecas_lote(
                                             lote_id, row_lote['Obra_Vinculada'],
                                             row_lote['Cod_Lote'], row_lote['Num_OP'],
-                                            pecas_list, comp_status, m2_op_real, peso_op_real
+                                            pecas_rom, comp_status_rom, m2_op_real, peso_op_real
                                         )
                                         registrar_auditoria(st.session_state.usuario_nome, "LANCAMENTO_PECAS",
-                                            f"OP {row_lote['Num_OP']} — {len(pecas_list)} peça(s) — Obra: {obra_selecionada}")
-                                        st.toast(f"{len(pecas_list)} peça(s) salvas!")
+                                            f"OP {row_lote['Num_OP']} — {len(pecas_rom)} peça(s) via romaneio — Obra: {obra_selecionada}")
+                                        st.toast(f"{len(pecas_rom)} peça(s) salvas!")
                                         time.sleep(0.3)
                                         st.rerun()
+
+                                with tab_manual:
+                                    p1, p2, p3, p4 = st.columns(4)
+                                    with p1:
+                                        codigos_txt = st.text_area("Códigos:", height=180, key="pecas_codigos",
+                                                                    placeholder="B24-01C\nB25-01C\nRF.JA.11/CNT")
+                                    with p2:
+                                        qtds_txt = st.text_area("Quantidades:", height=180, key="pecas_qtds",
+                                                                 placeholder="3\n3\n1")
+                                    with p3:
+                                        locs_txt = st.text_area("Localização:", height=180, key="pecas_locs",
+                                                                 placeholder="Pav 27-37\nPav 27-37\n(opcional)")
+                                    with p4:
+                                        medidas_txt = st.text_area("Medidas:", height=180, key="pecas_medidas",
+                                                                    placeholder="550x390\n550x400\n(opcional)")
+                                    comp_status = st.radio(
+                                        "Status dos componentes:",
+                                        ["Aguardando Projetista", "Componentes OK"],
+                                        horizontal=True, key="comp_status_radio"
+                                    )
+                                    if st.button("💾 Salvar Peças", key="btn_salvar_pecas", type="primary"):
+                                        codigos = [l.strip() for l in codigos_txt.strip().split('\n') if l.strip()]
+                                        qtds    = [l.strip() for l in qtds_txt.strip().split('\n') if l.strip()]
+                                        locs    = [l.strip() for l in locs_txt.strip().split('\n')] if locs_txt.strip() else []
+                                        medidas = [l.strip() for l in medidas_txt.strip().split('\n')] if medidas_txt.strip() else []
+                                        if not codigos:
+                                            st.error("Informe pelo menos um código.")
+                                        else:
+                                            pecas_list = []
+                                            for i, cod in enumerate(codigos):
+                                                pecas_list.append({
+                                                    "codigo":      cod,
+                                                    "descricao":   "",
+                                                    "qtd":         int(qtds[i]) if i < len(qtds) and qtds[i].isdigit() else 1,
+                                                    "localizacao": locs[i] if i < len(locs) else "",
+                                                    "medida":      medidas[i] if i < len(medidas) else "",
+                                                })
+                                            salvar_pecas_lote(
+                                                lote_id, row_lote['Obra_Vinculada'],
+                                                row_lote['Cod_Lote'], row_lote['Num_OP'],
+                                                pecas_list, comp_status, m2_op_real, peso_op_real
+                                            )
+                                            registrar_auditoria(st.session_state.usuario_nome, "LANCAMENTO_PECAS",
+                                                f"OP {row_lote['Num_OP']} — {len(pecas_list)} peça(s) — Obra: {obra_selecionada}")
+                                            st.toast(f"{len(pecas_list)} peça(s) salvas!")
+                                            time.sleep(0.3)
+                                            st.rerun()
 
                         # ── SEÇÃO: ARQUIVOS DA OP ─────────────────────────────
                         st.markdown("---")
