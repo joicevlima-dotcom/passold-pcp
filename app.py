@@ -666,6 +666,20 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE romaneios_manuais ADD COLUMN IF NOT EXISTS numero_projeto TEXT")
         cursor.execute("ALTER TABLE romaneios_manuais ADD COLUMN IF NOT EXISTS etapa TEXT")
         cursor.execute("ALTER TABLE romaneios_manuais ADD COLUMN IF NOT EXISTS terceirizado BOOLEAN DEFAULT FALSE")
+        cursor.execute("ALTER TABLE romaneios_manuais ADD COLUMN IF NOT EXISTS empresa_terceiro TEXT")
+        cursor.execute("ALTER TABLE romaneios_manuais ADD COLUMN IF NOT EXISTS numero_sequencial INTEGER")
+        # Numera retroativamente os romaneios pra terceiro ja existentes (por obra, na ordem em
+        # que foram feitos) -- dai pra frente salvar_romaneio_manual continua a sequencia.
+        cursor.execute("""
+            UPDATE romaneios_manuais r
+            SET numero_sequencial = n.rn
+            FROM (
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY obra_vinculada ORDER BY data_recebimento, id) AS rn
+                FROM romaneios_manuais
+                WHERE terceirizado = TRUE
+            ) n
+            WHERE r.id = n.id AND r.numero_sequencial IS NULL
+        """)
         cursor.execute("ALTER TABLE romaneios_manuais_itens ADD COLUMN IF NOT EXISTS cod TEXT")
         cursor.execute("ALTER TABLE romaneios_manuais_itens ADD COLUMN IF NOT EXISTS peso_kg NUMERIC")
         cursor.execute("ALTER TABLE romaneios_manuais_itens ADD COLUMN IF NOT EXISTS unidade TEXT DEFAULT 'un'")
@@ -2085,15 +2099,27 @@ def deletar_arquivo_romaneio_devolvido(arquivo_id: int):
         liberar_conexao(conn)
 
 def salvar_romaneio_manual(obra: str, data_recebimento, itens: list, usuario: str,
-                            numero_projeto: str = '', etapa: str = '', terceirizado: bool = False):
+                            numero_projeto: str = '', etapa: str = '', terceirizado: bool = False,
+                            empresa_terceiro: str = ''):
     """itens: lista de dicts {'descricao':..., 'quantidade':..., 'cod':..., 'peso_kg':..., 'unidade':...}"""
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
+        numero_sequencial = None
+        if terceirizado:
+            # Numeracao sequencial por obra, so pros romaneios marcados como terceiro --
+            # usa MAX em vez de COUNT pra nao reaproveitar numero se algum for excluido depois.
+            cursor.execute(
+                "SELECT COALESCE(MAX(numero_sequencial),0)+1 FROM romaneios_manuais "
+                "WHERE obra_vinculada=%s AND terceirizado=TRUE",
+                (obra,)
+            )
+            numero_sequencial = cursor.fetchone()[0]
         cursor.execute(
-            "INSERT INTO romaneios_manuais (obra_vinculada, data_recebimento, criado_por, numero_projeto, etapa, terceirizado) "
-            "VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
-            (obra, data_recebimento, usuario, numero_projeto, etapa, terceirizado)
+            "INSERT INTO romaneios_manuais (obra_vinculada, data_recebimento, criado_por, numero_projeto, etapa, "
+            "terceirizado, empresa_terceiro, numero_sequencial) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            (obra, data_recebimento, usuario, numero_projeto, etapa, terceirizado, empresa_terceiro, numero_sequencial)
         )
         romaneio_id = cursor.fetchone()[0]
         for item in itens:
@@ -2117,7 +2143,7 @@ def carregar_romaneios_manuais():
     try:
         return pd.read_sql_query(
             "SELECT r.id, r.obra_vinculada, r.data_recebimento, r.criado_por, r.criado_em, "
-            "r.numero_projeto, r.etapa, r.terceirizado, COUNT(i.id) AS qtd_itens "
+            "r.numero_projeto, r.etapa, r.terceirizado, r.empresa_terceiro, r.numero_sequencial, COUNT(i.id) AS qtd_itens "
             "FROM romaneios_manuais r LEFT JOIN romaneios_manuais_itens i ON i.romaneio_id = r.id "
             "GROUP BY r.id ORDER BY r.data_recebimento DESC, r.id DESC",
             conn
@@ -2211,7 +2237,8 @@ def _inserir_assinaturas(ws, linha: int, assinaturas: list, col_fim_bloco: int, 
     return linha
 
 def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por: str,
-                                numero_projeto: str = '', etapa: str = '', terceirizado: bool = False) -> bytes:
+                                numero_projeto: str = '', etapa: str = '', terceirizado: bool = False,
+                                empresa_terceiro: str = '', numero_sequencial=None) -> bytes:
     """Gera o romaneio manual .xlsx com a lista de itens (sem OP vinculada)."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -2239,8 +2266,11 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
     ws.merge_cells("A1:G1")
     _inserir_logo_cabecalho(ws, "G")
 
+    titulo_rom = "ROMANEIO MANUAL - TERCERIZADO" if terceirizado else "ROMANEIO MANUAL"
+    if terceirizado and numero_sequencial:
+        titulo_rom += f" Nº {int(numero_sequencial)}"
     ws.merge_cells("A2:G2")
-    ws["A2"] = "ROMANEIO MANUAL - TERCERIZADO" if terceirizado else "ROMANEIO MANUAL"
+    ws["A2"] = titulo_rom
     ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
     ws["A2"].fill = fill_cab
     ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
@@ -2249,6 +2279,10 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
         ("Obra:", str(obra)),
         ("Projeto:", str(numero_projeto or '—')),
         ("Etapa:", str(etapa or '—')),
+    ]
+    if terceirizado:
+        infos.append(("Empresa recebedora:", str(empresa_terceiro or '—')))
+    infos += [
         ("Data de recebimento:", pd.to_datetime(data_recebimento).strftime('%d/%m/%Y')),
         ("Cadastrado por:", str(criado_por)),
     ]
@@ -3304,7 +3338,28 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
     # mas ter um lote especifico que a Esquadria produz (ex: perfis de sobra) —
     # sem essa prioridade, a OP saia sempre com o modelo da frente, errado pro lote.
     tipo_escopo = normaliza_escopo(lote_row.get('Escopo')) or normaliza_escopo(macro_row.get('Tipo_Escopo')) or 'ACM'
-    num_projeto  = str(macro_row.get('Numero_Projeto', '') or '')
+    # OP sem frente (avulsa) nao tem macro_row -- o numero do projeto mora direto no lote nesse caso.
+    num_projeto  = str(macro_row.get('Numero_Projeto') or lote_row.get('Numero_Projeto') or '')
+    tarefa_desc  = str(macro_row.get('Tarefa') or '').strip()
+    if num_projeto and tarefa_desc:
+        valor_projeto = f"{num_projeto} — {tarefa_desc}"
+    else:
+        valor_projeto = num_projeto or tarefa_desc or '—'
+
+    # Lotes avulsos guardam "PRJ-<projeto> | <pavimento>" em Romaneio_Chapas (o projeto ja
+    # aparece na linha PROJETO acima) -- aqui mostra so o pavimento, ou "-" se nao foi digitado.
+    etapa_pav = str(lote_row.get('Romaneio_Chapas') or '').strip()
+    if lote_row.get('EDT_Vinculado') == 'AVULSO':
+        partes_etapa = etapa_pav.split('|', 1)
+        etapa_pav = partes_etapa[1].strip() if len(partes_etapa) > 1 else ''
+    etapa_pav = str(campos_extras.get('etapa_pav') or '').strip() or etapa_pav or '—'
+
+    # Cod_Lote de OP avulsa e "OP-<seq> - <projeto> - <obra>" -- projeto e obra ja aparecem
+    # nas linhas PROJETO/OBRA acima, entao aqui mostra so a parte "OP-<seq>".
+    lote_label = str(lote_row.get('Cod_Lote') or '—')
+    if lote_row.get('EDT_Vinculado') == 'AVULSO':
+        lote_label = lote_label.split(' - ')[0].strip() or lote_label
+    lote_label = str(campos_extras.get('lote_label') or '').strip() or lote_label
 
     TITULOS_OP_ESCOPO = {"ACM": "ACM", "Esquadria-Vidro": "ESQUADRIAS", "Terceirizada": "TERCEIRIZADA"}
     titulo_escopo = TITULOS_OP_ESCOPO.get(tipo_escopo, tipo_escopo.upper())
@@ -3338,9 +3393,9 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
     info_row(ws, linha,   "Nº OP:",          lote_row.get('Num_OP', '—'))
     info_row(ws, linha+1, "DATA:",            datetime.now(FUSO_BR).strftime('%d/%m/%Y'))
     info_row(ws, linha+2, "OBRA:",            lote_row.get('Obra_Vinculada', '—'))
-    info_row(ws, linha+3, "PROJETO:",         f"{num_projeto} — {macro_row.get('Tarefa', '—')}" if num_projeto else macro_row.get('Tarefa', '—'))
-    info_row(ws, linha+4, "LOTE:",            lote_row.get('Cod_Lote', '—'))
-    info_row(ws, linha+5, "ETAPA/PAVIMENTOS:",lote_row.get('Romaneio_Chapas', '—'))
+    info_row(ws, linha+3, "PROJETO:",         valor_projeto)
+    info_row(ws, linha+4, "LOTE:",            lote_label)
+    info_row(ws, linha+5, "ETAPA/PAVIMENTOS:",etapa_pav)
     info_row(ws, linha+6, "MATERIAL:",        campos_extras.get('material', lote_row.get('Tipo_Material', '—')))
 
     linha = linha_inicio + 8
@@ -6052,7 +6107,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             with st.expander("Configurar e Gerar OP", expanded=False):
                                 obs_op = st.text_area("Observações:", key="obs_op",
                                                        placeholder="Informações adicionais para a produção...")
-                                campos_extras = {"observacoes": obs_op, "material": row_lote.get('Tipo_Material', '')}
+                                with st.expander("✏️ Personalizar campos LOTE / ETAPA da ficha (opcional)", expanded=False):
+                                    st.caption("Deixe em branco pra usar o texto padrão (resumido automaticamente).")
+                                    lote_custom  = st.text_input("Texto do campo LOTE:", key="op_lote_custom")
+                                    etapa_custom = st.text_input("Texto do campo ETAPA/PAVIMENTOS:", key="op_etapa_custom")
+                                campos_extras = {
+                                    "observacoes": obs_op, "material": row_lote.get('Tipo_Material', ''),
+                                    "lote_label": lote_custom.strip(), "etapa_pav": etapa_custom.strip(),
+                                }
                                 if tipo_esc_edt == "ACM":
                                     gf1, gf2 = st.columns(2)
                                     with gf1:
@@ -8018,6 +8080,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                               format="DD/MM/YYYY", key="rom_data")
                 rom_terceirizado = st.toggle("📦 Envio para terceiro?", key="rom_terceirizado",
                                               help="Marca esse romaneio como Manual - Terceirizado: muda o título e as assinaturas do documento emitido.")
+                rom_empresa = ''
+                if rom_terceirizado:
+                    rom_empresa = st.text_input("Empresa que vai receber:", key="rom_empresa",
+                                                 placeholder="Ex: Metalúrgica XYZ Ltda")
                 rom_etapa = st.text_input("Etapa:", key="rom_etapa", placeholder="Ex: 49º Pavimento - Estrutura")
 
                 st.markdown("**Adicionar item ao romaneio:**")
@@ -8055,10 +8121,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.session_state.rom_itens.pop(i)
                                 st.rerun()
 
-                    if st.button("💾 Salvar Romaneio", type="primary", key="btn_salvar_rom_manual", disabled=not rom_projeto):
+                    if rom_terceirizado and not rom_empresa.strip():
+                        st.warning("Informe a empresa que vai receber antes de salvar.")
+                    if st.button("💾 Salvar Romaneio", type="primary", key="btn_salvar_rom_manual",
+                                 disabled=not rom_projeto or (rom_terceirizado and not rom_empresa.strip())):
                         romaneio_id = salvar_romaneio_manual(
                             rom_obra, rom_data, st.session_state.rom_itens, st.session_state.usuario_nome,
-                            numero_projeto=rom_projeto or '', etapa=rom_etapa.strip(), terceirizado=rom_terceirizado
+                            numero_projeto=rom_projeto or '', etapa=rom_etapa.strip(), terceirizado=rom_terceirizado,
+                            empresa_terceiro=rom_empresa.strip()
                         )
                         if romaneio_id:
                             registrar_auditoria(st.session_state.usuario_nome, "ROMANEIO_MANUAL",
@@ -8085,20 +8155,24 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     st.caption("Nenhum romaneio para essa obra ainda.")
                 for _, rm_row in df_rom_manual.iterrows():
                     rm_terc = bool(rm_row.get('terceirizado', False))
-                    tag_terc = "  🏭 Terceirizado" if rm_terc else ""
+                    rm_num  = rm_row.get('numero_sequencial')
+                    tag_terc = f"  🏭 Terceirizado #{int(rm_num)}" if rm_terc and pd.notna(rm_num) else ("  🏭 Terceirizado" if rm_terc else "")
                     with st.expander(
                         f"{rm_row['obra_vinculada']} — {pd.to_datetime(rm_row['data_recebimento']).strftime('%d/%m/%Y')} "
                         f"({int(rm_row['qtd_itens'])} item(ns)) — por {rm_row['criado_por']}{tag_terc}"
                     ):
                         df_itens_rom = carregar_itens_romaneio_manual(int(rm_row['id']))
                         st.caption(f"Projeto {rm_row.get('numero_projeto') or '—'} · {rm_row.get('etapa') or 'Sem etapa'}")
+                        if rm_terc:
+                            st.caption(f"Empresa recebedora: **{rm_row.get('empresa_terceiro') or '—'}**")
                         st.dataframe(df_itens_rom[['descricao', 'cod', 'peso_kg', 'unidade', 'quantidade']], hide_index=True, use_container_width=True)
                         rmb1, rmb2 = st.columns(2)
                         with rmb1:
                             rom_bytes = gerar_romaneio_manual_xlsx(
                                 rm_row['obra_vinculada'], rm_row['data_recebimento'], df_itens_rom, rm_row['criado_por'],
                                 numero_projeto=rm_row.get('numero_projeto') or '', etapa=rm_row.get('etapa') or '',
-                                terceirizado=rm_terc
+                                terceirizado=rm_terc, empresa_terceiro=rm_row.get('empresa_terceiro') or '',
+                                numero_sequencial=rm_num if pd.notna(rm_num) else None
                             )
                             st.download_button(
                                 "🖨️ Emitir Romaneio", data=rom_bytes,
