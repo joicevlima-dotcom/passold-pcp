@@ -2684,6 +2684,34 @@ def registrar_envio_lista_mestra(lista_id: int, data_envio, destino: str, usuari
     finally:
         liberar_conexao(conn)
 
+def excluir_envio_lista_mestra(envio_id: int):
+    """Estorna um envio registrado por engano: devolve a quantidade de cada item ao saldo
+    da lista mestra e apaga o envio (os itens do envio somem junto, via cascade)."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT item_id, quantidade FROM listas_mestras_envios_itens WHERE envio_id=%s", (envio_id,))
+        itens_envio = cursor.fetchall()
+        if not itens_envio:
+            return False, "Envio não encontrado."
+        for item_id, qtd in itens_envio:
+            cursor.execute(
+                "UPDATE listas_mestras_itens SET qtd_enviada = qtd_enviada - %s WHERE id=%s",
+                (qtd, item_id)
+            )
+        cursor.execute("DELETE FROM listas_mestras_envios WHERE id=%s", (envio_id,))
+        conn.commit()
+        carregar_itens_lista_mestra.clear()
+        carregar_envios_lista_mestra.clear()
+        carregar_itens_envio_lista_mestra.clear()
+        carregar_listas_mestras.clear()
+        return True, "Envio estornado — quantidades devolvidas ao saldo."
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao estornar envio: {e}"
+    finally:
+        liberar_conexao(conn)
+
 def gerar_romaneio_lista_mestra_xlsx(lista_row, envio_row, itens_envio_df) -> bytes:
     """Romaneio de um envio parcial de Lista Mestra — mesma estrutura do Romaneio Manual."""
     from openpyxl import Workbook
@@ -8571,6 +8599,29 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                             key=f"dl_envio_lm_{envio_id}"
                                         )
+                                        if setor in ["Master", "Almoxarifado"]:
+                                            confirm_key_lm = f"confirm_estorno_lm_{envio_id}"
+                                            if not st.session_state.get(confirm_key_lm):
+                                                if st.button("↩️ Estornar", key=f"btn_estornar_lm_{envio_id}",
+                                                             help="Desfaz esse envio e devolve as quantidades pro saldo da lista"):
+                                                    st.session_state[confirm_key_lm] = True
+                                                    st.rerun()
+                                            else:
+                                                st.caption("⚠️ Confirma o estorno?")
+                                                if st.button("✅ Sim, estornar", key=f"btn_confirma_estorno_lm_{envio_id}"):
+                                                    ok_est, msg_est = excluir_envio_lista_mestra(envio_id)
+                                                    if ok_est:
+                                                        registrar_auditoria(st.session_state.usuario_nome, "ESTORNO_ENVIO_LISTA_MESTRA",
+                                                            f"Lista {lista_id} | Envio {envio_id}")
+                                                        st.session_state.pop(confirm_key_lm, None)
+                                                        st.toast(msg_est)
+                                                        time.sleep(0.3)
+                                                        st.rerun()
+                                                    else:
+                                                        st.error(msg_est)
+                                                if st.button("Cancelar", key=f"btn_cancela_estorno_lm_{envio_id}"):
+                                                    st.session_state.pop(confirm_key_lm, None)
+                                                    st.rerun()
 
                         if setor in ["Master", "Almoxarifado"]:
                             st.markdown("---")
