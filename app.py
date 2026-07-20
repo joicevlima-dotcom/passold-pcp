@@ -2345,6 +2345,93 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
     buf.seek(0)
     return buf.getvalue()
 
+def gerar_relatorio_enviados_lista_mestra_xlsx(lista_row, itens_df) -> bytes:
+    """Relatorio consolidado do que ja foi enviado de uma Lista Mestra -- total por item
+    (qtd total x qtd enviada x saldo), sem separar por envio individual."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from io import BytesIO
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Relatorio"
+    ws.sheet_view.showGridLines = False
+    ws.page_setup.orientation = "landscape"
+
+    bd = Side(style='thin', color="000000")
+    borda = Border(left=bd, right=bd, top=bd, bottom=bd)
+    fill_cab = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    fill_sub = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+
+    for col, w in zip("ABCDEFGH", [30, 16, 26, 10, 12, 14, 12, 16]):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells("A1:H1")
+    _inserir_logo_cabecalho(ws, "H")
+
+    ws.merge_cells("A2:H2")
+    ws["A2"] = "RELATÓRIO DE ENVIOS — LISTA MESTRA"
+    ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+    ws["A2"].fill = fill_cab
+    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    infos = [
+        ("Obra:", str(lista_row.get('obra') or '—')),
+        ("Projeto:", str(lista_row.get('numero_projeto') or '—')),
+        ("Lista / Etapa:", str(lista_row.get('titulo') or '—')),
+        ("Emitido em:", hoje_projeto().strftime('%d/%m/%Y')),
+    ]
+    linha = 3
+    for label, valor in infos:
+        ws.cell(linha, 1, label).font = Font(name="Arial", size=11, bold=True)
+        ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=8)
+        ws.cell(linha, 2, valor).font = Font(name="Arial", size=11)
+        for c in range(1, 9):
+            ws.cell(linha, c).border = borda
+        linha += 1
+
+    linha += 1
+    titulos = ["ITEM", "USO", "OBSERVAÇÕES", "UND", "QTD TOTAL", "QTD ENVIADA", "SALDO", "STATUS"]
+    for col, titulo in enumerate(titulos, 1):
+        cel = ws.cell(linha, col, titulo)
+        cel.font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        cel.fill = fill_cab
+        cel.alignment = Alignment(horizontal="center", vertical="center")
+        cel.border = borda
+    linha += 1
+
+    for i, (_, item) in enumerate(itens_df.iterrows()):
+        saldo = float(item.get('saldo') or 0)
+        qtd_enviada = float(item.get('qtd_enviada') or 0)
+        status = "Concluído" if saldo <= 0 else ("Parcial" if qtd_enviada > 0 else "Pendente")
+        dados = [
+            item.get('item', ''), item.get('uso', '') or '—', item.get('observacoes', '') or '—',
+            item.get('unidade', '') or 'un', float(item.get('qtd_total') or 0), qtd_enviada, saldo, status
+        ]
+        for col, val in enumerate(dados, 1):
+            cel = ws.cell(linha, col, val)
+            cel.font = Font(name="Arial", size=11)
+            cel.alignment = Alignment(horizontal="center", vertical="center")
+            cel.border = borda
+            if i % 2 == 0:
+                cel.fill = fill_sub
+        linha += 1
+
+    linha += 1
+    ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=4)
+    ws.cell(linha, 1, "TOTAL DE ITENS:").font = Font(name="Arial", size=11, bold=True)
+    ws.cell(linha, 5, len(itens_df)).font = Font(name="Arial", size=11, bold=True)
+    ws.merge_cells(start_row=linha, start_column=6, end_row=linha, end_column=7)
+    ws.cell(linha, 6, "TOTAL ENVIADO:").font = Font(name="Arial", size=11, bold=True)
+    ws.cell(linha, 8, float(itens_df['qtd_enviada'].sum()) if not itens_df.empty else 0).font = Font(name="Arial", size=11, bold=True)
+    for c in range(1, 9):
+        ws.cell(linha, c).border = borda
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
 # ══════════════════════════════════════════════════════════════════════════
 # LISTA MESTRA — controle de envio parcial de listas de materiais/fixadores
 # ══════════════════════════════════════════════════════════════════════════
@@ -8328,6 +8415,13 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     .rename(columns={'item': 'Item', 'uso': 'Uso', 'observacoes': 'Observações', 'unidade': 'Unidade',
                                                       'qtd_total': 'Qtd Total', 'qtd_enviada': 'Qtd Enviada', 'saldo': 'Saldo'}),
                                 hide_index=True, use_container_width=True
+                            )
+                            rel_lm_bytes = gerar_relatorio_enviados_lista_mestra_xlsx(lista_row, df_itens_lm)
+                            st.download_button(
+                                "📊 Relatório de Envios (Excel)", data=rel_lm_bytes,
+                                file_name=f"Relatorio_Envios_ListaMestra_{lista_id}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"dl_relatorio_lm_{lista_id}"
                             )
 
                         cadd1, cadd2 = st.columns(2)
