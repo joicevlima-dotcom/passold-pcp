@@ -2267,15 +2267,17 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
     _inserir_logo_cabecalho(ws, "G")
 
     titulo_rom = "ROMANEIO MANUAL - TERCERIZADO" if terceirizado else "ROMANEIO MANUAL"
-    if terceirizado and numero_sequencial:
-        titulo_rom += f" Nº {int(numero_sequencial)}"
     ws.merge_cells("A2:G2")
     ws["A2"] = titulo_rom
     ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
     ws["A2"].fill = fill_cab
     ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
 
-    infos = [
+    infos = []
+    if terceirizado and numero_sequencial:
+        codigo_projeto = str(numero_projeto or '').split(' - ')[0].strip() or '—'
+        infos.append(("N° do Romaneio:", f"ROM-{codigo_projeto}-{int(numero_sequencial):02d}"))
+    infos += [
         ("Obra:", str(obra)),
         ("Projeto:", str(numero_projeto or '—')),
         ("Etapa:", str(etapa or '—')),
