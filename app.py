@@ -895,6 +895,9 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN IF NOT EXISTS Detalhado BOOLEAN DEFAULT TRUE")
         cursor.execute("ALTER TABLE op_pecas ADD COLUMN IF NOT EXISTS m2_op_real REAL DEFAULT 0")
         cursor.execute("ALTER TABLE op_pecas ADD COLUMN IF NOT EXISTS descricao TEXT DEFAULT ''")
+        # Quantidade enviada apenas na ultima remessa (parcial ou total) -- usada pra
+        # emitir o romaneio so com as pecas do envio atual, nao o historico acumulado.
+        cursor.execute("ALTER TABLE op_pecas ADD COLUMN IF NOT EXISTS qtd_ultimo_envio INTEGER DEFAULT 0")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_lote ON op_pecas(lote_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_obra ON op_pecas(obra)")
 
@@ -5063,7 +5066,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         (row['id'],)
                                                     )
                                                     cursor.execute(
-                                                        "UPDATE op_pecas SET qtd_enviada=qtd_total, saldo=0 WHERE lote_id=%s",
+                                                        "UPDATE op_pecas SET qtd_ultimo_envio=saldo, qtd_enviada=qtd_total, saldo=0 WHERE lote_id=%s",
                                                         (row['id'],)
                                                     )
                                                     conn.commit()
@@ -5127,7 +5130,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         "",
                                                         min_value=0,
                                                         max_value=saldo_peca,
-                                                        value=saldo_peca,
+                                                        value=0,
                                                         key=f"parc_{row['id']}_{peca['id']}",
                                                         label_visibility="collapsed"
                                                     )
@@ -5149,13 +5152,18 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         conn = conectar_banco()
                                                         try:
                                                             cursor = conn.cursor()
+                                                            cursor.execute(
+                                                                "UPDATE op_pecas SET qtd_ultimo_envio=0 WHERE lote_id=%s",
+                                                                (int(row['id']),)
+                                                            )
                                                             for pe in pecas_envio:
                                                                 cursor.execute("""
                                                                     UPDATE op_pecas
                                                                     SET qtd_enviada = qtd_enviada + %s,
-                                                                        saldo = saldo - %s
+                                                                        saldo = saldo - %s,
+                                                                        qtd_ultimo_envio = %s
                                                                     WHERE id=%s
-                                                                """, (pe['qtd_enviar'], pe['qtd_enviar'], pe['peca_id']))
+                                                                """, (pe['qtd_enviar'], pe['qtd_enviar'], pe['qtd_enviar'], pe['peca_id']))
                                                             # So conta como concluido se TODAS as pecas do lote zeraram o
                                                             # saldo -- nao so as que entraram neste envio. Uma peca deixada
                                                             # em 0 (guardada pra depois) nao pode ser ignorada aqui.
@@ -5708,7 +5716,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         "Romaneio_Emitido=FALSE, Romaneio_Emitido_Em=NULL, Romaneio_Emitido_Por=NULL WHERE id=%s",
                                                         (row['id'],)
                                                     )
-                                                    cursor.execute("UPDATE op_pecas SET qtd_enviada=qtd_total, saldo=0 WHERE lote_id=%s", (row['id'],))
+                                                    cursor.execute("UPDATE op_pecas SET qtd_ultimo_envio=saldo, qtd_enviada=qtd_total, saldo=0 WHERE lote_id=%s", (row['id'],))
                                                     conn.commit()
                                                 except Exception as e:
                                                     conn.rollback(); st.error(f"Erro: {e}")
@@ -5750,7 +5758,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 p3.write(peca.get('medida','—')); p4.write(saldo_peca_esq)
                                                 qtd_env = p5.number_input("", min_value=0,
                                                     max_value=saldo_peca_esq,
-                                                    value=saldo_peca_esq,
+                                                    value=0,
                                                     key=f"esq_env_{row['id']}_{peca['id']}", label_visibility="collapsed")
                                                 if qtd_env > 0:
                                                     pecas_envio_esq.append({"peca_id": int(peca['id']), "qtd": qtd_env, "saldo": saldo_peca_esq})
@@ -5761,13 +5769,18 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                     conn = conectar_banco()
                                                     try:
                                                         cursor = conn.cursor()
+                                                        cursor.execute(
+                                                            "UPDATE op_pecas SET qtd_ultimo_envio=0 WHERE lote_id=%s",
+                                                            (int(row['id']),)
+                                                        )
                                                         for p in pecas_envio_esq:
                                                             cursor.execute("""
                                                                 UPDATE op_pecas
                                                                 SET qtd_enviada = qtd_enviada + %s,
-                                                                    saldo = saldo - %s
+                                                                    saldo = saldo - %s,
+                                                                    qtd_ultimo_envio = %s
                                                                 WHERE id=%s
-                                                            """, (p['qtd'], p['qtd'], p['peca_id']))
+                                                            """, (p['qtd'], p['qtd'], p['qtd'], p['peca_id']))
                                                         # So conta como concluido se TODAS as pecas do lote zeraram o
                                                         # saldo -- nao so as que entraram neste envio.
                                                         cursor.execute(
@@ -7651,8 +7664,22 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         fr_c = df_banco_macro[df_banco_macro['EDT'] == edt_c]
                                         if not fr_c.empty:
                                             etapa_c = str(fr_c.iloc[0].get('Tarefa') or '')
+
+                                    # So entram no romaneio impresso as pecas da ultima remessa
+                                    # (nao o historico acumulado do lote inteiro). Lotes antigos, de
+                                    # antes dessa coluna existir, caem no fallback (qtd_enviada > 0).
+                                    if 'qtd_ultimo_envio' in df_pecas_c.columns:
+                                        df_pecas_rom_c = df_pecas_c[df_pecas_c['qtd_ultimo_envio'] > 0]
+                                    else:
+                                        df_pecas_rom_c = df_pecas_c.iloc[0:0]
+                                    if df_pecas_rom_c.empty:
+                                        df_pecas_rom_c = df_pecas_c[df_pecas_c['qtd_enviada'] > 0]
+                                    else:
+                                        df_pecas_rom_c = df_pecas_rom_c.copy()
+                                        df_pecas_rom_c['qtd_enviada'] = df_pecas_rom_c['qtd_ultimo_envio']
+
                                     rom_bytes = gerar_romaneio_xlsx(
-                                        row_c, df_pecas_c, end_r,
+                                        row_c, df_pecas_rom_c, end_r,
                                         st.session_state.usuario_nome, etapa=etapa_c,
                                         num_volumes=int(volumes_c) if eh_esq_log else None
                                     )
