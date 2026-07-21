@@ -5058,7 +5058,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 try:
                                                     cursor = conn.cursor()
                                                     cursor.execute(
-                                                        "UPDATE itens_detalhado SET Status_Item='Concluido', Concluido_Em=NOW() WHERE id=%s",
+                                                        "UPDATE itens_detalhado SET Status_Item='Concluido', Concluido_Em=NOW(), "
+                                                        "Romaneio_Emitido=FALSE, Romaneio_Emitido_Em=NULL, Romaneio_Emitido_Por=NULL WHERE id=%s",
                                                         (row['id'],)
                                                     )
                                                     cursor.execute(
@@ -5165,7 +5166,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                             todas_zeradas = float(cursor.fetchone()[0]) <= 0
                                                             novo_status = 'Concluido' if todas_zeradas else 'Parcialmente Concluido'
                                                             cursor.execute(
-                                                                "UPDATE itens_detalhado SET Status_Item=%s, Concluido_Em=CASE WHEN %s THEN NOW() ELSE Concluido_Em END WHERE id=%s",
+                                                                "UPDATE itens_detalhado SET Status_Item=%s, Concluido_Em=CASE WHEN %s THEN NOW() ELSE Concluido_Em END, "
+                                                                "Romaneio_Emitido=FALSE, Romaneio_Emitido_Em=NULL, Romaneio_Emitido_Por=NULL WHERE id=%s",
                                                                 (novo_status, todas_zeradas, int(row['id']))
                                                             )
                                                             conn.commit()
@@ -5701,7 +5703,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 conn = conectar_banco()
                                                 try:
                                                     cursor = conn.cursor()
-                                                    cursor.execute("UPDATE itens_detalhado SET Status_Item='Concluido', Concluido_Em=NOW() WHERE id=%s", (row['id'],))
+                                                    cursor.execute(
+                                                        "UPDATE itens_detalhado SET Status_Item='Concluido', Concluido_Em=NOW(), "
+                                                        "Romaneio_Emitido=FALSE, Romaneio_Emitido_Em=NULL, Romaneio_Emitido_Por=NULL WHERE id=%s",
+                                                        (row['id'],)
+                                                    )
                                                     cursor.execute("UPDATE op_pecas SET qtd_enviada=qtd_total, saldo=0 WHERE lote_id=%s", (row['id'],))
                                                     conn.commit()
                                                 except Exception as e:
@@ -5771,7 +5777,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         todas_concluidas = float(cursor.fetchone()[0]) <= 0
                                                         novo_status = 'Concluido' if todas_concluidas else 'Parcialmente Concluido'
                                                         cursor.execute(
-                                                            "UPDATE itens_detalhado SET Status_Item=%s, Concluido_Em=CASE WHEN %s THEN NOW() ELSE Concluido_Em END WHERE id=%s",
+                                                            "UPDATE itens_detalhado SET Status_Item=%s, Concluido_Em=CASE WHEN %s THEN NOW() ELSE Concluido_Em END, "
+                                                            "Romaneio_Emitido=FALSE, Romaneio_Emitido_Em=NULL, Romaneio_Emitido_Por=NULL WHERE id=%s",
                                                             (novo_status, todas_concluidas, row['id'])
                                                         )
                                                         conn.commit()
@@ -7570,11 +7577,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
             st.markdown("---")
 
-            # ── OPs FINALIZADAS — EMITIR ROMANEIO ─────────────────
-            with st.expander("✅ OPs Finalizadas — Emitir Romaneio", expanded=True):
+            # ── OPs FINALIZADAS / PARCIAIS — EMITIR ROMANEIO ─────────────────
+            with st.expander("✅ OPs Prontas — Emitir Romaneio", expanded=True):
                 df_micro_completo_log = carregar_micro_completo()
                 df_conc_log = df_micro_completo_log[
-                    (df_micro_completo_log['Status_Item'] == 'Concluido') &
+                    (df_micro_completo_log['Status_Item'].isin(['Concluido', 'Parcialmente Concluido'])) &
                     (df_micro_completo_log['Romaneio_Emitido'] != True)
                 ].copy() if not df_micro_completo_log.empty else pd.DataFrame()
 
@@ -7582,14 +7589,23 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     df_conc_log = df_conc_log[df_conc_log['Obra_Vinculada'] == obra_selecionada]
 
                 if df_conc_log.empty:
-                    st.info("Nenhuma OP finalizada aguardando romaneio.")
+                    st.info("Nenhuma OP finalizada ou com envio parcial aguardando romaneio.")
                 else:
                     for _, row_c in df_conc_log.iterrows():
                         df_pecas_c = carregar_pecas_lote(int(row_c['id']))
+                        eh_parcial_c = row_c.get('Status_Item') == 'Parcialmente Concluido'
                         with st.container(border=True):
                             cc1, cc2, cc3 = st.columns([4, 2, 2])
                             with cc1:
+                                badge_status_c = (
+                                    '<span style="background:#FFFBEB;color:#D97706;border:1px solid #D97706;'
+                                    'border-radius:6px;padding:1px 8px;font-size:12px;font-weight:700;">🟠 PARCIAL</span>&nbsp;'
+                                    if eh_parcial_c else
+                                    '<span style="background:#F0FDF4;color:#15803D;border:1px solid #15803D;'
+                                    'border-radius:6px;padding:1px 8px;font-size:12px;font-weight:700;">✔ COMPLETO</span>&nbsp;'
+                                )
                                 st.markdown(
+                                    badge_status_c +
                                     f'<span class="badge-obra">{row_c["Obra_Vinculada"]}</span>&nbsp;'
                                     f'<span class="badge-edt">{row_c["EDT_Vinculado"]}</span>&nbsp;'
                                     f'<span class="badge-lote">{row_c["Cod_Lote"]}</span>',
@@ -7599,7 +7615,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.markdown(f"**OP:** `{num_op_c}` &nbsp;|&nbsp; **{row_c['Tipo_Material']}**")
                                 st.caption(f"{row_c['M2_Item']:.2f} m² &nbsp;|&nbsp; {int(row_c['Qtd_Caixas'])} cx &nbsp;|&nbsp; {row_c['Romaneio_Chapas']}")
                                 if not df_pecas_c.empty:
-                                    st.caption(f"🔩 {len(df_pecas_c)} peça(s) | Total: {int(df_pecas_c['qtd_total'].sum())} un")
+                                    if eh_parcial_c:
+                                        st.caption(f"🔩 {len(df_pecas_c)} peça(s) | Enviado: {int(df_pecas_c['qtd_enviada'].sum())} de {int(df_pecas_c['qtd_total'].sum())} un")
+                                    else:
+                                        st.caption(f"🔩 {len(df_pecas_c)} peça(s) | Total: {int(df_pecas_c['qtd_total'].sum())} un")
                                 else:
                                     st.caption("⚠️ Sem peças lançadas")
                             with cc2:
@@ -7637,10 +7656,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         st.session_state.usuario_nome, etapa=etapa_c,
                                         num_volumes=int(volumes_c) if eh_esq_log else None
                                     )
+                                    sufixo_arq_c = "_PARCIAL" if eh_parcial_c else ""
                                     romaneio_baixado = st.download_button(
-                                        label="🖨️ Emitir Romaneio",
+                                        label="🖨️ Emitir Romaneio" + (" (Parcial)" if eh_parcial_c else ""),
                                         data=rom_bytes,
-                                        file_name=f"Romaneio_{num_op_c}_{row_c['Cod_Lote']}.xlsx",
+                                        file_name=f"Romaneio_{num_op_c}_{row_c['Cod_Lote']}{sufixo_arq_c}.xlsx",
                                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                         key=f"dl_rom_{row_c['id']}",
                                         use_container_width=True
