@@ -2517,6 +2517,24 @@ def carregar_envios_lista_mestra(lista_id: int):
         liberar_conexao(conn)
 
 @st.cache_data(ttl=15)
+def carregar_envios_lista_mestra_todos():
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            "SELECT e.id, e.lista_id, e.data_envio, e.destino, e.enviado_por, e.criado_em, "
+            "l.obra, l.numero_projeto, l.titulo, COUNT(ei.id) AS qtd_itens "
+            "FROM listas_mestras_envios e "
+            "JOIN listas_mestras l ON l.id = e.lista_id "
+            "LEFT JOIN listas_mestras_envios_itens ei ON ei.envio_id = e.id "
+            "GROUP BY e.id, l.obra, l.numero_projeto, l.titulo ORDER BY e.data_envio DESC, e.id DESC",
+            conn
+        )
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=15)
 def carregar_itens_envio_lista_mestra(envio_id: int):
     conn = conectar_banco()
     try:
@@ -2679,6 +2697,7 @@ def registrar_envio_lista_mestra(lista_id: int, data_envio, destino: str, usuari
         conn.commit()
         carregar_itens_lista_mestra.clear()
         carregar_envios_lista_mestra.clear()
+        carregar_envios_lista_mestra_todos.clear()
         carregar_itens_envio_lista_mestra.clear()
         return True, f"Envio registrado com {len(itens_qtds)} item(ns)!", envio_id
     except Exception as e:
@@ -2706,6 +2725,7 @@ def excluir_envio_lista_mestra(envio_id: int):
         conn.commit()
         carregar_itens_lista_mestra.clear()
         carregar_envios_lista_mestra.clear()
+        carregar_envios_lista_mestra_todos.clear()
         carregar_itens_envio_lista_mestra.clear()
         carregar_listas_mestras.clear()
         return True, "Envio estornado — quantidades devolvidas ao saldo."
@@ -8736,8 +8756,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     else:
                         st.caption("Nenhum anexo ainda.")
 
-            tab_rd_op, tab_rd_comp, tab_rd_ins, tab_rd_man = st.tabs([
-                "📋 Romaneios de OP / Peças", "🧩 Romaneios de Componentes", "📦 Romaneios de Insumos", "🗒️ Romaneio Manual"
+            tab_rd_op, tab_rd_comp, tab_rd_ins, tab_rd_man, tab_rd_lm = st.tabs([
+                "📋 Romaneios de OP / Peças", "🧩 Romaneios de Componentes", "📦 Romaneios de Insumos", "🗒️ Romaneio Manual", "📑 Lista Mestra"
             ])
 
             with tab_rd_op:
@@ -8825,6 +8845,28 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             with cman2:
                                 st.markdown(badge_rm)
                             _bloco_anexo_rd('MANUAL', romaneio_id_rd, f"man_{romaneio_id_rd}")
+
+            with tab_rd_lm:
+                df_rd_lm = carregar_envios_lista_mestra_todos()
+                if not df_rd_lm.empty:
+                    df_rd_lm['_devolvido'] = df_rd_lm['id'].apply(lambda i: ('LISTA_MESTRA', int(i)) in status_rd)
+                    if filtro_rd == "Pendentes":
+                        df_rd_lm = df_rd_lm[~df_rd_lm['_devolvido']]
+                    df_rd_lm = df_rd_lm.sort_values('data_envio', ascending=False, na_position='last')
+                if df_rd_lm.empty:
+                    st.info("Nenhum envio de lista mestra pendente de devolução." if filtro_rd == "Pendentes" else "Nenhum envio de lista mestra registrado ainda.")
+                else:
+                    for _, row_rlm in df_rd_lm.iterrows():
+                        envio_id_rlm = int(row_rlm['id'])
+                        badge_rlm = "🟢 Devolvido assinado" if row_rlm['_devolvido'] else "🔴 Pendente"
+                        with st.container(border=True):
+                            clm1, clm2 = st.columns([4, 1])
+                            with clm1:
+                                st.markdown(f"**{row_rlm['titulo']}** — {row_rlm['obra']} · {row_rlm.get('numero_projeto') or '—'}")
+                                st.caption(f"{pd.to_datetime(row_rlm['data_envio']).strftime('%d/%m/%Y')} · {row_rlm.get('destino') or 'Sem destino'} · {int(row_rlm.get('qtd_itens') or 0)} item(ns) · {row_rlm.get('enviado_por','—')}")
+                            with clm2:
+                                st.markdown(badge_rlm)
+                            _bloco_anexo_rd('LISTA_MESTRA', envio_id_rlm, f"lm_{envio_id_rlm}")
 
     # ==================================================
     # SISTEMA DE MEDICAO — agora 100% no banco
