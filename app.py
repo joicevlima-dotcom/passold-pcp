@@ -4776,8 +4776,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             continue  # datas invertidas (erro de cadastro) -- nao aparece no calendario
                         ini_ultima_semana = (pd.to_datetime(dt_fim) - timedelta(days=6)).date()
                         ini_ultima_semana = max(ini_ultima_semana, dt_ini)
+                        dt_fim_loop = max(dt_fim, hoje_projeto().date())  # atrasado continua aparecendo ate ser concluido
                         dia = dt_ini
-                        while dia <= dt_fim:
+                        while dia <= dt_fim_loop:
                             if dia.weekday() < 5:  # sem producao aos finais de semana
                                 r = row.to_dict()
                                 r['_dia'] = dia
@@ -4869,10 +4870,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             # Parcialmente Concluido sempre pode concluir o restante
                             eh_parcial    = row.get('Status_Item', '') == 'Parcialmente Concluido'
                             pode_concluir = bool(row.get('_pode_concluir', False)) or eh_parcial
+                            atrasado      = dia_sel > pd.to_datetime(row['Data_Limite_Obra']).date()
                             dt_i = pd.to_datetime(row['Data_Producao_Programada']).strftime('%d/%m/%Y')
                             dt_f = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
-                            border_color = "#D97706" if eh_parcial else ("#1A56DB" if pode_concluir else "#3B82F6")
-                            bg_color     = "#FFFBEB" if eh_parcial else ("#FFF7ED" if pode_concluir else "#F8FAFC")
+                            border_color = "#DC2626" if atrasado else ("#D97706" if eh_parcial else ("#1A56DB" if pode_concluir else "#3B82F6"))
+                            bg_color     = "#FEF2F2" if atrasado else ("#FFFBEB" if eh_parcial else ("#FFF7ED" if pode_concluir else "#F8FAFC"))
                             st.markdown(
                                 f"<div style='border-left:4px solid {border_color};background:{bg_color};"
                                 f"padding:12px 16px;border-radius:6px;margin-bottom:4px;'></div>",
@@ -4896,6 +4898,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     motivo_op    = html_escape(str(_motivo_op_raw)) if pd.notna(_motivo_op_raw) else ''
                                     if em_parada_op:
                                         st.markdown(f"<span style='color:#DC2626;font-size:12px;font-weight:700;'>⛔ EM PARADA — {motivo_op}</span>", unsafe_allow_html=True)
+                                    elif atrasado:
+                                        dias_atraso = (dia_sel - pd.to_datetime(row['Data_Limite_Obra']).date()).days
+                                        st.markdown(f"<span style='color:#DC2626;font-size:12px;font-weight:700;'>🔴 ATRASADO — {dias_atraso} dia(s) após o prazo</span>", unsafe_allow_html=True)
                                     elif eh_parcial:
                                         st.markdown("<span style='color:#D97706;font-size:12px;font-weight:700;'>🟠 Envio parcial registrado — ainda há peças pendentes</span>", unsafe_allow_html=True)
                                     elif pode_concluir:
@@ -5441,8 +5446,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         if dt_ini > dt_fim:
                             continue  # datas invertidas (erro de cadastro) -- nao aparece no calendario
                         ini_ult = max((pd.to_datetime(dt_fim) - timedelta(days=6)).date(), dt_ini)
+                        dt_fim_loop = max(dt_fim, hoje_projeto().date())  # atrasado continua aparecendo ate ser concluido
                         dia = dt_ini
-                        while dia <= dt_fim:
+                        while dia <= dt_fim_loop:
                             if dia.weekday() < 5:  # sem producao aos finais de semana
                                 r = row.to_dict(); r['_dia'] = dia; r['_pode_concluir'] = (dia >= ini_ult)
                                 registros_exp_esq.append(r)
@@ -5525,10 +5531,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         for _, row in lotes_sel_esq.iterrows():
                             eh_parcial = row.get('Status_Item', '') == 'Parcialmente Concluido'
                             pode_concluir = bool(row.get('_pode_concluir', False)) or eh_parcial
+                            atrasado = dia_sel_esq > pd.to_datetime(row['Data_Limite_Obra']).date()
                             dt_i = pd.to_datetime(row['Data_Producao_Programada']).strftime('%d/%m/%Y')
                             dt_f = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
-                            border_color = "#D97706" if eh_parcial else ("#1A56DB" if pode_concluir else "#3B82F6")
-                            bg_color = "#FFFBEB" if eh_parcial else ("#FFF7ED" if pode_concluir else "#F8FAFC")
+                            border_color = "#DC2626" if atrasado else ("#D97706" if eh_parcial else ("#1A56DB" if pode_concluir else "#3B82F6"))
+                            bg_color = "#FEF2F2" if atrasado else ("#FFFBEB" if eh_parcial else ("#FFF7ED" if pode_concluir else "#F8FAFC"))
                             st.markdown(
                                 f"<div style='border-left:4px solid {border_color};background:{bg_color};"
                                 f"padding:12px 16px;border-radius:6px;margin-bottom:4px;'></div>",
@@ -5551,6 +5558,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     motivo_esq    = html_escape(str(_motivo_esq_raw)) if pd.notna(_motivo_esq_raw) else ''
                                     if em_parada_esq:
                                         st.markdown(f"<span style='color:#DC2626;font-size:12px;font-weight:700;'>⛔ EM PARADA — {motivo_esq}</span>", unsafe_allow_html=True)
+                                    elif atrasado:
+                                        dias_atraso = (dia_sel_esq - pd.to_datetime(row['Data_Limite_Obra']).date()).days
+                                        st.markdown(f"<span style='color:#DC2626;font-size:12px;font-weight:700;'>🔴 ATRASADO — {dias_atraso} dia(s) após o prazo</span>", unsafe_allow_html=True)
                                     elif eh_parcial:
                                         st.markdown("<span style='color:#D97706;font-size:12px;font-weight:700;'>Envio parcial registrado — ainda há peças pendentes</span>", unsafe_allow_html=True)
                                     elif pode_concluir:
