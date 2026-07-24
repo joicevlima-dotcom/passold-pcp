@@ -6065,6 +6065,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         av_m2 = st.number_input("m²:", min_value=0.0, value=0.0, step=0.1, key="av_m2")
                     av_peso = 0.0
                     av_unidade = "cx"
+                    av_dificuldade = st.selectbox("Dificuldade:", [1, 2, 3, 4, 5], index=2, key="av_dificuldade")
                 elif av_escopo == "Esquadria-Vidro":
                     with av4:
                         av_qtd_cx = st.number_input("Quantidade (un):", min_value=0, value=1, key="av_qtd_cx")
@@ -6072,6 +6073,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         av_peso = st.number_input("Peso (kg):", min_value=0.0, value=0.0, step=0.1, key="av_peso")
                     av_m2 = 0.0
                     av_unidade = "un"
+                    av_dificuldade = 1
                 else:
                     with av4:
                         av_unidade = st.selectbox("Unidade:", ["un", "kg", "m", "m²", "cx", "pç"], key="av_unidade")
@@ -6079,6 +6081,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         av_qtd_cx = st.number_input("Quantidade:", min_value=0, value=1, key="av_qtd_cx")
                     av_m2  = 0.0
                     av_peso = 0.0
+                    av_dificuldade = 1
 
                 if st.button("➕ Adicionar Item", key="btn_add_item"):
                     if not av_desc.strip():
@@ -6090,6 +6093,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             "m2": float(av_m2),
                             "peso": float(av_peso),
                             "unidade": av_unidade,
+                            "dificuldade": int(av_dificuldade),
                         })
                         st.rerun()
 
@@ -6098,7 +6102,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     for i, item in enumerate(st.session_state.av_itens):
                         col_desc, col_qtd, col_rem = st.columns([5, 2, 1])
                         with col_desc:
-                            st.write(f"{i+1}. {item['desc']}")
+                            sufixo_dif = f" (Dificuldade {item['dificuldade']})" if item['unidade'] == "cx" else ""
+                            st.write(f"{i+1}. {item['desc']}{sufixo_dif}")
                         with col_qtd:
                             if item['m2'] > 0:
                                 st.write(f"{item['qtd']} cx | {item['m2']} m²")
@@ -6142,7 +6147,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                      Qtd_Caixas, M2_Item, Peso_Kg, Data_Producao_Programada, Data_Limite_Obra,
                                      Data_Despacho, Romaneio_Chapas, Status_Item, Dificuldade,
                                      Fase_Produtiva, Enviado_Logistica, Escopo, Numero_Projeto, Uso_Interno)
-                                    VALUES (%s,'AVULSO',%s,NULL,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente',1,%s,%s,%s,%s,%s)
+                                    VALUES (%s,'AVULSO',%s,NULL,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente',%s,%s,%s,%s,%s,%s)
                                 """, (
                                     av_obra,
                                     cod_lote_av,
@@ -6154,6 +6159,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     av_dt_fim.strftime('%Y-%m-%d'),
                                     av_dt_fim.strftime('%Y-%m-%d'),
                                     f"PRJ-{av_projeto} | {av_pav}",
+                                    item["dificuldade"],
                                     f"LOTE SEM FRENTE — {av_escopo} | {'Envio para Obra' if av_destino == 'Envio para Obra' else 'Uso Interno'}",
                                     1 if av_destino == "Envio para Obra" else 0,
                                     av_escopo,
