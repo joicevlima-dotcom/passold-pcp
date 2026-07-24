@@ -1781,6 +1781,38 @@ def reverter_baixa_romaneio(item_id: int):
     finally:
         liberar_conexao(conn)
 
+def reverter_conclusao_op(lote_id: int):
+    """Desfaz uma OP marcada como Concluida por engano: zera as pecas de volta ao saldo total,
+    tira da fila da logistica (se ainda nao foi agendada) e volta o status para 'Liberado para
+    Fabrica'. Nao reconstroi progresso parcial anterior ao clique errado -- assume que era zero,
+    entao so deve ser usado quando a conclusao foi de fato indevida."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT Status_Logistica FROM logistica_envios WHERE item_id=%s", (lote_id,))
+        row_log = cursor.fetchone()
+        if row_log and row_log[0] != 'Aguardando Agendamento':
+            return False, (f"Essa OP já está na Logística com status '{row_log[0]}'. "
+                            "Ajuste/cancele por lá antes de reverter a conclusão.")
+        cursor.execute("DELETE FROM logistica_envios WHERE item_id=%s AND Status_Logistica='Aguardando Agendamento'", (lote_id,))
+        cursor.execute("UPDATE op_pecas SET qtd_enviada=0, saldo=qtd_total, qtd_ultimo_envio=0 WHERE lote_id=%s", (lote_id,))
+        cursor.execute("""
+            UPDATE itens_detalhado
+            SET Status_Item='Liberado para Fabrica', Concluido_Em=NULL, Enviado_Logistica=0,
+                Romaneio_Emitido=FALSE, Romaneio_Emitido_Em=NULL, Romaneio_Emitido_Por=NULL,
+                updated_at=NOW()
+            WHERE id=%s
+        """, (lote_id,))
+        conn.commit()
+        _limpar_cache_geral()
+        carregar_fila_logistica.clear()
+        return True, "Conclusão revertida — OP voltou para 'Liberado para Fabrica' com o saldo total das peças de volta."
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao reverter conclusão: {e}"
+    finally:
+        liberar_conexao(conn)
+
 @st.cache_data(ttl=30)
 def carregar_produtividade_semanal(escopo: str = None):
     conn = conectar_banco()
@@ -6231,6 +6263,34 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         op_finalizada = row_lote.get('Status_Item') == 'Concluido'
                         if op_finalizada:
                             st.info("🔒 OP concluída — modo somente leitura. Use '📄 Gerar Ordem de Produção' abaixo para tirar a 2ª via.")
+                            if setor == "Master":
+                                confirm_key_rev = f"confirm_reverter_concl_{lote_id}"
+                                if not st.session_state.get(confirm_key_rev):
+                                    if st.button("↩️ Reverter Conclusão", key=f"btn_reverter_concl_{lote_id}",
+                                                 help="Desfaz a conclusão desta OP: zera as peças de volta ao saldo total, "
+                                                      "tira da fila da Logística e volta pra 'Liberado para Fábrica'."):
+                                        st.session_state[confirm_key_rev] = True
+                                        st.rerun()
+                                else:
+                                    st.warning("⚠️ Isso vai zerar o que foi enviado/produzido nesta OP e trazê-la de volta pra "
+                                               "produção, como se a conclusão nunca tivesse acontecido. Confirma?")
+                                    rv1, rv2 = st.columns(2)
+                                    with rv1:
+                                        if st.button("✅ Sim, reverter", key=f"btn_confirma_reverter_{lote_id}", type="primary"):
+                                            ok_rev, msg_rev = reverter_conclusao_op(lote_id)
+                                            if ok_rev:
+                                                registrar_auditoria(st.session_state.usuario_nome, "REVERTER_CONCLUSAO_OP",
+                                                    f"OP {num_op_sel} — {row_lote['Cod_Lote']} — Obra: {row_lote['Obra_Vinculada']}")
+                                                st.session_state.pop(confirm_key_rev, None)
+                                                st.toast(msg_rev)
+                                                time.sleep(0.5)
+                                                st.rerun()
+                                            else:
+                                                st.error(msg_rev)
+                                    with rv2:
+                                        if st.button("Cancelar", key=f"btn_cancela_reverter_{lote_id}"):
+                                            st.session_state.pop(confirm_key_rev, None)
+                                            st.rerun()
 
                         if not df_banco_macro.empty and edt_lote and edt_lote != 'AVULSO':
                             fr_edt = df_banco_macro[df_banco_macro['EDT'] == edt_lote]
