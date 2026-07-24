@@ -32,6 +32,10 @@ LIMITE_REGISTROS_LOAD = 2000   # máx de linhas carregadas de uma vez
 # Meta oficial de produtividade por colaborador/mês, por escopo (kg p/ Esquadria-Vidro, m² p/ ACM)
 METAS_PRODUTIVIDADE = {"Esquadria-Vidro": 450, "ACM": 382}
 
+# Material mais complexo rende menos por hora trabalhada — a meta da semana é reduzida
+# proporcionalmente à dificuldade predominante do material produzido naquele período.
+FATOR_PRODUTIVIDADE_DIFICULDADE = {1: 1.00, 2: 0.90, 3: 0.80, 4: 0.70, 5: 0.50}
+
 st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide", page_icon="🏭", initial_sidebar_state="expanded")
 
 st.markdown("""
@@ -1023,6 +1027,9 @@ def inicializar_banco_de_dados():
             )
         """)
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_produtividade_semanal_escopo_semana ON produtividade_semanal(escopo, semana_inicio)")
+        # Dificuldade predominante da semana (1 a 5) — pondera a meta via FATOR_PRODUTIVIDADE_DIFICULDADE.
+        # Default 1 (fator 100%) pra não alterar retroativamente o % das semanas já lançadas.
+        cursor.execute("ALTER TABLE produtividade_semanal ADD COLUMN IF NOT EXISTS dificuldade INTEGER DEFAULT 1")
 
 # ── Tabela de auditoria (nova) ──────────────────────
         cursor.execute("""
@@ -1793,21 +1800,24 @@ def carregar_produtividade_semanal(escopo: str = None):
     for col in ['colaboradores', 'executado']:
         if col in df.columns:
             df[col] = df[col].astype(float)
+    if 'dificuldade' in df.columns:
+        df['dificuldade'] = df['dificuldade'].fillna(1).astype(int)
     return df
 
-def salvar_produtividade_semanal(escopo, semana_inicio, semana_fim, colaboradores, executado, usuario):
+def salvar_produtividade_semanal(escopo, semana_inicio, semana_fim, colaboradores, executado, usuario, dificuldade=1):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO produtividade_semanal (escopo, semana_inicio, semana_fim, colaboradores, executado, criado_por)
-            VALUES (%s,%s,%s,%s,%s,%s)
+            INSERT INTO produtividade_semanal (escopo, semana_inicio, semana_fim, colaboradores, executado, criado_por, dificuldade)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (escopo, semana_inicio) DO UPDATE SET
                 semana_fim=EXCLUDED.semana_fim,
                 colaboradores=EXCLUDED.colaboradores,
                 executado=EXCLUDED.executado,
-                criado_por=EXCLUDED.criado_por
-        """, (escopo, semana_inicio, semana_fim, colaboradores, executado, usuario))
+                criado_por=EXCLUDED.criado_por,
+                dificuldade=EXCLUDED.dificuldade
+        """, (escopo, semana_inicio, semana_fim, colaboradores, executado, usuario, int(dificuldade)))
         conn.commit()
         carregar_produtividade_semanal.clear()
     except Exception as e:
@@ -9681,7 +9691,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             meta_mensal_prod = METAS_PRODUTIVIDADE[escopo_prod]
 
             with st.expander("➕ Lançar semana", expanded=False):
-                lp1, lp2, lp3, lp4 = st.columns(4)
+                lp1, lp2, lp3, lp4, lp5 = st.columns(5)
                 with lp1:
                     prod_semana_ini = st.date_input("De:", format="DD/MM/YYYY", key="prod_semana_ini")
                 with lp2:
@@ -9690,6 +9700,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     prod_colaboradores = st.number_input("Colaboradores:", min_value=0.0, step=0.5, format="%.1f", key="prod_colaboradores")
                 with lp4:
                     prod_executado = st.number_input(f"Executado ({label_medida_prod}):", min_value=0.0, step=1.0, format="%.2f", key="prod_executado")
+                with lp5:
+                    prod_dificuldade = st.selectbox(
+                        "Dificuldade média:", [1, 2, 3, 4, 5], index=0, key="prod_dificuldade",
+                        help="Dificuldade predominante do material produzido na semana. Reduz a meta proporcionalmente "
+                             f"({', '.join(f'{k}={v:.0%}' for k, v in FATOR_PRODUTIVIDADE_DIFICULDADE.items())})."
+                    )
                 if st.button("💾 Salvar", key="prod_salvar", type="primary"):
                     if prod_semana_fim < prod_semana_ini:
                         st.error("A data 'Até' não pode ser anterior à data 'De'.")
@@ -9698,7 +9714,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     else:
                         salvar_produtividade_semanal(
                             escopo_prod, prod_semana_ini, prod_semana_fim,
-                            prod_colaboradores, prod_executado, st.session_state.usuario_nome
+                            prod_colaboradores, prod_executado, st.session_state.usuario_nome,
+                            dificuldade=prod_dificuldade
                         )
                         registrar_auditoria(st.session_state.usuario_nome, "LANCAR_PRODUTIVIDADE_SEMANAL",
                             f"{escopo_prod} — {prod_semana_ini.strftime('%d/%m/%Y')} a {prod_semana_fim.strftime('%d/%m/%Y')}")
@@ -9712,7 +9729,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 st.info("Nenhuma semana lançada ainda para este escopo.")
             else:
                 df_prod = df_prod.sort_values('semana_inicio').copy()
-                df_prod['meta'] = (meta_mensal_prod / 22) * df_prod['colaboradores'] * 5
+                # Material mais complexo rende menos por hora — a meta da semana (e sua equivalente
+                # mensal) é reduzida proporcionalmente à dificuldade predominante lançada naquela semana.
+                df_prod['fator_dificuldade']  = df_prod['dificuldade'].map(FATOR_PRODUTIVIDADE_DIFICULDADE).fillna(1.0)
+                df_prod['meta']               = (meta_mensal_prod / 22) * df_prod['colaboradores'] * 5 * df_prod['fator_dificuldade']
+                df_prod['meta_mensal_efetiva'] = meta_mensal_prod * df_prod['fator_dificuldade']
                 df_prod['media_mensal'] = (df_prod['executado'] / df_prod['colaboradores'] / 5) * 22
                 df_prod['pct_atingido'] = (df_prod['executado'] / df_prod['meta'] * 100).round(1)
                 df_prod['semana_label'] = (
@@ -9721,14 +9742,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                 # ── KPIs ─────────────────────────────────────────
                 media_alcancada = df_prod['media_mensal'].mean()
+                meta_efetiva_media = df_prod['meta_mensal_efetiva'].mean()
                 n_semanas = len(df_prod)
-                n_acima = int((df_prod['media_mensal'] > meta_mensal_prod).sum())
+                n_acima = int((df_prod['media_mensal'] > df_prod['meta_mensal_efetiva']).sum())
                 n_abaixo = n_semanas - n_acima
 
                 kp1, kp2, kp3, kp4 = st.columns(4)
                 kp1.metric(f"Média mensal alcançada ({label_medida_prod}/colab.)", f"{media_alcancada:,.1f}",
-                           delta=f"{media_alcancada - meta_mensal_prod:,.1f} vs meta", delta_color="normal")
-                kp2.metric("Meta", f"{meta_mensal_prod} {label_medida_prod}/colab./mês")
+                           delta=f"{media_alcancada - meta_efetiva_media:,.1f} vs meta ajustada", delta_color="normal")
+                kp2.metric("Meta base", f"{meta_mensal_prod} {label_medida_prod}/colab./mês",
+                           help="Meta cheia (dificuldade 1). Cada semana é comparada contra a meta ajustada pela sua dificuldade.")
                 kp3.metric("Semanas acima da meta", f"{n_acima}/{n_semanas}")
                 kp4.metric("Semanas abaixo da meta", f"{n_abaixo}/{n_semanas}")
 
@@ -9757,13 +9780,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 st.markdown("#### Semanas lançadas")
                 for _, row_p in df_prod.sort_values('semana_inicio', ascending=False).iterrows():
                     with st.container(border=True):
-                        pc1, pc2, pc3, pc4, pc5, pc6 = st.columns([2, 1.4, 1.4, 1.4, 1.6, 1])
+                        pc1, pc2, pc3, pc4, pc5, pc6, pc7 = st.columns([1.8, 1.2, 1.3, 1.3, 1.5, 1.3, 1])
                         pc1.markdown(f"**{row_p['semana_label']}**")
                         pc2.caption(f"Colaboradores\n\n**{row_p['colaboradores']:.1f}**")
-                        pc3.caption(f"Meta ({label_medida_prod})\n\n**{row_p['meta']:.1f}**")
-                        pc4.caption(f"Executado ({label_medida_prod})\n\n**{row_p['executado']:.1f}** ({row_p['pct_atingido']:.0f}%)")
-                        pc5.caption(f"Média mensal/colab.\n\n**{row_p['media_mensal']:.1f}**")
-                        with pc6:
+                        pc3.caption(f"Dificuldade\n\n**{int(row_p['dificuldade'])}** ({row_p['fator_dificuldade']:.0%})")
+                        pc4.caption(f"Meta ({label_medida_prod})\n\n**{row_p['meta']:.1f}**")
+                        pc5.caption(f"Executado ({label_medida_prod})\n\n**{row_p['executado']:.1f}** ({row_p['pct_atingido']:.0f}%)")
+                        pc6.caption(f"Média mensal/colab.\n\n**{row_p['media_mensal']:.1f}**")
+                        with pc7:
                             if st.button("🗑️", key=f"del_prod_{row_p['id']}", help="Excluir lançamento"):
                                 excluir_produtividade_semanal(int(row_p['id']))
                                 registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_PRODUTIVIDADE_SEMANAL",
