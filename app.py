@@ -1783,18 +1783,22 @@ def reverter_baixa_romaneio(item_id: int):
 
 def reverter_conclusao_op(lote_id: int):
     """Desfaz uma OP marcada como Concluida por engano: zera as pecas de volta ao saldo total,
-    tira da fila da logistica (se ainda nao foi agendada) e volta o status para 'Liberado para
-    Fabrica'. Nao reconstroi progresso parcial anterior ao clique errado -- assume que era zero,
-    entao so deve ser usado quando a conclusao foi de fato indevida."""
+    tira da fila da logistica (inclusive se ja foi despachada) e volta o status para 'Liberado
+    para Fabrica'. Nao reconstroi progresso parcial anterior ao clique errado -- assume que era
+    zero, entao so deve ser usado quando a conclusao foi de fato indevida.
+    Se a OP ja estiver com 'Envio Agendado', pede pra reagendar (volta pra 'Aguardando
+    Agendamento' na Logistica) antes -- reverter direto de um envio ja agendado poderia
+    surpreender quem esta de olho na agenda de transporte."""
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT Status_Logistica FROM logistica_envios WHERE item_id=%s", (lote_id,))
         row_log = cursor.fetchone()
-        if row_log and row_log[0] != 'Aguardando Agendamento':
-            return False, (f"Essa OP já está na Logística com status '{row_log[0]}'. "
-                            "Ajuste/cancele por lá antes de reverter a conclusão.")
-        cursor.execute("DELETE FROM logistica_envios WHERE item_id=%s AND Status_Logistica='Aguardando Agendamento'", (lote_id,))
+        status_log = row_log[0] if row_log else None
+        if status_log == 'Envio Agendado':
+            return False, ("Essa OP já está com envio agendado na Logística. Use 'Reagendar' lá "
+                            "(volta para 'Aguardando Agendamento') antes de reverter a conclusão.")
+        cursor.execute("DELETE FROM logistica_envios WHERE item_id=%s", (lote_id,))
         cursor.execute("UPDATE op_pecas SET qtd_enviada=0, saldo=qtd_total, qtd_ultimo_envio=0 WHERE lote_id=%s", (lote_id,))
         cursor.execute("""
             UPDATE itens_detalhado
@@ -1806,7 +1810,11 @@ def reverter_conclusao_op(lote_id: int):
         conn.commit()
         _limpar_cache_geral()
         carregar_fila_logistica.clear()
-        return True, "Conclusão revertida — OP voltou para 'Liberado para Fabrica' com o saldo total das peças de volta."
+        msg = "Conclusão revertida — OP voltou para 'Liberado para Fabrica' com o saldo total das peças de volta."
+        if status_log == 'Despachado':
+            msg += (" O registro de despacho na Logística também foi removido — confirme com a "
+                     "transportadora/obra que o material físico foi interceptado antes de produzir/enviar de novo.")
+        return True, msg
     except Exception as e:
         conn.rollback()
         return False, f"Erro ao reverter conclusão: {e}"
@@ -6273,7 +6281,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         st.rerun()
                                 else:
                                     st.warning("⚠️ Isso vai zerar o que foi enviado/produzido nesta OP e trazê-la de volta pra "
-                                               "produção, como se a conclusão nunca tivesse acontecido. Confirma?")
+                                               "produção, como se a conclusão nunca tivesse acontecido. Se essa OP já foi "
+                                               "despachada, o registro de despacho também será removido — só confirme se "
+                                               "der pra interceptar/recolher o material físico. Confirma?")
                                     rv1, rv2 = st.columns(2)
                                     with rv1:
                                         if st.button("✅ Sim, reverter", key=f"btn_confirma_reverter_{lote_id}", type="primary"):
