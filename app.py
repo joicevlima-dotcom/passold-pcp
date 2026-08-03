@@ -582,6 +582,7 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Romaneio_Emitido_Em TIMESTAMP")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Romaneio_Emitido_Por TEXT")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Concluido_Em TIMESTAMP")
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Possui_Lista_Componentes TEXT")
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_itens_detalhado_num_op ON itens_detalhado(Num_OP) WHERE Num_OP IS NOT NULL")
         # Escopo oficial (enum unico usado em toda a aplicacao): ACM / Esquadria-Vidro / Terceirizada.
         # Itens ligados a EDT herdam o Tipo_Escopo do cronograma (normalizado pro enum);
@@ -3587,8 +3588,9 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
     info_row(ws, linha+4, "LOTE:",            lote_label)
     info_row(ws, linha+5, "ETAPA/PAVIMENTOS:",etapa_pav)
     info_row(ws, linha+6, "MATERIAL:",        campos_extras.get('material', lote_row.get('Tipo_Material', '—')))
+    info_row(ws, linha+7, "POSSUI LISTA DE COMPONENTES:", campos_extras.get('possui_componentes') or lote_row.get('Possui_Lista_Componentes') or '—')
 
-    linha = linha_inicio + 8
+    linha = linha_inicio + 9
 
     # ── CAMPOS ESPECÍFICOS POR TIPO ────────────────────────
     if tipo_escopo == "ACM":
@@ -3780,16 +3782,23 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
             ws.cell(linha, c).border = borda
 
     # Perguntas de conferência (com borda ao redor do bloco inteiro)
+    def _texto_sim_nao(resposta):
+        if resposta == "Sim":
+            return " ✔ SIM                                    NÃO"
+        if resposta == "Não":
+            return " SIM                                    ✔ NÃO"
+        return " SIM                                       NÃO"
+
     linha += 2
     linha_perguntas_ini = linha
     perguntas = [
-        "Possui lista de componentes?",
-        "Envio de projeto/imagem complementar?",
+        ("Possui lista de componentes?", lote_row.get('Possui_Lista_Componentes')),
+        ("Envio de projeto/imagem complementar?", None),
     ]
-    for pergunta in perguntas:
+    for pergunta, resposta in perguntas:
         ws.cell(linha, 1, pergunta).font = Font(name="Calibri", size=11)
         ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=3)
-        ws.cell(linha, 2, " SIM                                       NÃO").font = Font(name="Calibri", size=11, bold=True)
+        ws.cell(linha, 2, _texto_sim_nao(resposta)).font = Font(name="Calibri", size=11, bold=True)
         linha += 1
     for r in range(linha_perguntas_ini, linha):
         for c in range(1, 4):
@@ -6360,6 +6369,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             with st.expander("Configurar e Gerar OP", expanded=False):
                                 obs_op = st.text_area("Observações:", key="obs_op",
                                                        placeholder="Informações adicionais para a produção...")
+                                opcoes_comp_op = ["Sim", "Não"]
+                                comp_atual_op = row_lote.get('Possui_Lista_Componentes')
+                                idx_comp_op = opcoes_comp_op.index(comp_atual_op) if comp_atual_op in opcoes_comp_op else 1
+                                possui_comp_op = st.radio("Possui lista de componentes?", opcoes_comp_op,
+                                                           index=idx_comp_op, horizontal=True, key="op_possui_comp")
                                 with st.expander("✏️ Personalizar campos LOTE / ETAPA da ficha (opcional)", expanded=False):
                                     st.caption("Deixe em branco pra usar o texto padrão (resumido automaticamente).")
                                     lote_custom  = st.text_input("Texto do campo LOTE:", key="op_lote_custom")
@@ -6367,6 +6381,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 campos_extras = {
                                     "observacoes": obs_op, "material": row_lote.get('Tipo_Material', ''),
                                     "lote_label": lote_custom.strip(), "etapa_pav": etapa_custom.strip(),
+                                    "possui_componentes": possui_comp_op,
                                 }
                                 if tipo_esc_edt == "ACM":
                                     gf1, gf2 = st.columns(2)
@@ -6395,6 +6410,20 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     campos_extras.update({"empresa": empresa, "material": mat_terc})
                                 if st.button("🖨️ Gerar OP", key="btn_gerar_op", type="primary"):
                                     op_bytes = gerar_op_xlsx(row_lote, df_pecas_existentes, macro_row_sel, campos_extras)
+                                    conn_pc = conectar_banco()
+                                    try:
+                                        cursor_pc = conn_pc.cursor()
+                                        cursor_pc.execute(
+                                            "UPDATE itens_detalhado SET Possui_Lista_Componentes=%s WHERE id=%s",
+                                            (possui_comp_op, lote_id)
+                                        )
+                                        conn_pc.commit()
+                                        _limpar_cache_geral()
+                                    except Exception as e:
+                                        conn_pc.rollback()
+                                        st.error(f"Erro ao salvar campo de componentes: {e}")
+                                    finally:
+                                        liberar_conexao(conn_pc)
                                     st.download_button(
                                         label="📥 Baixar Ordem de Produção",
                                         data=op_bytes,
