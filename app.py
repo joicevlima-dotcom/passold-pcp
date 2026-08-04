@@ -4777,7 +4777,7 @@ if nome_aba == "Dashboard":
             st.markdown("#### 📦 Lotes por Obra")
             if not df_micro_dash.empty:
                 por_obra = df_micro_dash.groupby('Obra_Vinculada').size().reset_index(name='Lotes')
-                por_obra = por_obra.sort_values('Lotes', ascending=False).head(8)
+                por_obra = por_obra.sort_values('Lotes', ascending=False)
                 st.dataframe(por_obra, hide_index=True, use_container_width=True,
                              column_config={"Obra_Vinculada": "Obra", "Lotes": "Qtd Lotes"})
 
