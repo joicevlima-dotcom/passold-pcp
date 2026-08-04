@@ -5442,7 +5442,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                  (f"Vencido há {abs(dias)}d" if dias < 0 else (f"Faltam {dias} dia(s)" if dias < 9999 else "Sem prazo")))
                     em, ec, _ = STATUS_EMOJI.get(row['Status_Item'], ('❓', '#64748B', '#F8FAFC'))
                     prazo_fmt = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y') if prazo_valido(row['Data_Limite_Obra']) else '—'
-                    op_txt    = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
+                    op_txt    = html_escape(str(row['Num_OP'])) if row.get('Num_OP') else 'S/ OP'
+                    obra_txt  = html_escape(str(row["Obra_Vinculada"]))
+                    material_txt = html_escape(str(row["Tipo_Material"]))
+                    romaneio_txt = html_escape(str(row["Romaneio_Chapas"])) if row["Romaneio_Chapas"] else "—"
                     arqs_tv   = carregar_arquivos_op(int(row['id']))
                     clipe_badge = f"<div style='margin-top:6px;font-size:10px;color:#475569;'>📎 {len(arqs_tv)} arquivo(s)</div>" if arqs_tv else ""
                     em_parada_tv = bool(row.get('Em_Parada', False))
@@ -5454,8 +5457,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             <span style='font-size:10px;font-weight:700;color:{cfg["tag_color"]};border:1px solid {cfg["border"]};padding:1px 6px;border-radius:4px;'>{cfg["tag"]}</span>
                             <span style='font-size:10px;color:#64748B;font-weight:600;'>{dias_txt}</span>
                         </div>
-                        <div style='font-size:14px;font-weight:800;color:#0F172A;margin-bottom:2px;'>{row["Obra_Vinculada"]}</div>
-                        <div style='font-size:11px;color:#475569;margin-bottom:8px;'>{row["Tipo_Material"]} · {row["Romaneio_Chapas"] or "—"}</div>
+                        <div style='font-size:14px;font-weight:800;color:#0F172A;margin-bottom:2px;'>{obra_txt}</div>
+                        <div style='font-size:11px;color:#475569;margin-bottom:8px;'>{material_txt} · {romaneio_txt}</div>
                         <div style='display:grid;grid-template-columns:1fr 1fr;gap:5px;'>
                             <div style='background:white;border-radius:5px;padding:5px 7px;'><div style='font-size:8px;color:#94A3B8;text-transform:uppercase;'>OP</div><div style='font-size:12px;font-weight:700;color:#1E293B;'>{op_txt}</div></div>
                             <div style='background:white;border-radius:5px;padding:5px 7px;'><div style='font-size:8px;color:#94A3B8;text-transform:uppercase;'>M²</div><div style='font-size:12px;font-weight:700;color:#1E293B;'>{row["M2_Item"]:.2f}</div></div>
@@ -6051,8 +6054,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     dias_txt  = ('Concluído' if row['Status_Item'] == 'Concluido' else
                                  (f"Vencido há {abs(dias)}d" if dias < 0 else (f"Faltam {dias} dia(s)" if dias < 9999 else "Sem prazo")))
                     prazo_fmt = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y') if prazo_valido(row['Data_Limite_Obra']) else '—'
-                    op_txt    = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
+                    op_txt    = html_escape(str(row['Num_OP'])) if row.get('Num_OP') else 'S/ OP'
                     kg_v      = row.get('Peso_Kg', 0.0) or 0.0
+                    obra_txt  = html_escape(str(row["Obra_Vinculada"]))
+                    lote_txt  = html_escape(str(row["Cod_Lote"]))
+                    material_txt = html_escape(str(row["Tipo_Material"]))
                     arqs_tv   = carregar_arquivos_op(int(row['id']))
                     clipe_badge = f"<div style='margin-top:6px;font-size:10px;color:#475569;'>📎 {len(arqs_tv)} arquivo(s)</div>" if arqs_tv else ""
                     em_parada_tv = bool(row.get('Em_Parada', False))
@@ -6064,8 +6070,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             <span style='font-size:10px;font-weight:700;color:{cfg["tag_color"]};border:1px solid {cfg["border"]};padding:1px 6px;border-radius:4px;'>{cfg["tag"]}</span>
                             <span style='font-size:10px;color:#64748B;font-weight:600;'>{dias_txt}</span>
                         </div>
-                        <div style='font-size:14px;font-weight:800;color:#0F172A;margin-bottom:2px;'>{row["Obra_Vinculada"]}</div>
-                        <div style='font-size:11px;color:#475569;margin-bottom:8px;'>{row["Cod_Lote"]} · {row["Tipo_Material"]}</div>
+                        <div style='font-size:14px;font-weight:800;color:#0F172A;margin-bottom:2px;'>{obra_txt}</div>
+                        <div style='font-size:11px;color:#475569;margin-bottom:8px;'>{lote_txt} · {material_txt}</div>
                         <div style='display:grid;grid-template-columns:1fr 1fr;gap:5px;'>
                             <div style='background:white;border-radius:5px;padding:5px 7px;'><div style='font-size:8px;color:#94A3B8;text-transform:uppercase;'>OP</div><div style='font-size:12px;font-weight:700;color:#1E293B;'>{op_txt}</div></div>
                             <div style='background:white;border-radius:5px;padding:5px 7px;'><div style='font-size:8px;color:#94A3B8;text-transform:uppercase;'>KG</div><div style='font-size:12px;font-weight:700;color:#1E293B;'>{kg_v:.2f}</div></div>
