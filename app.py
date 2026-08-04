@@ -1965,6 +1965,7 @@ def salvar_arquivo_op(item_id: int, nome: str, tipo: str, conteudo: bytes, usuar
             (item_id, nome, tipo, conteudo, usuario)
         )
         conn.commit()
+        carregar_arquivos_op.clear()
         return True
     except Exception as e:
         conn.rollback()
@@ -1973,6 +1974,7 @@ def salvar_arquivo_op(item_id: int, nome: str, tipo: str, conteudo: bytes, usuar
     finally:
         liberar_conexao(conn)
 
+@st.cache_data(ttl=20)
 def carregar_arquivos_op(item_id: int):
     conn = conectar_banco()
     try:
@@ -1988,6 +1990,7 @@ def carregar_arquivos_op(item_id: int):
     finally:
         liberar_conexao(conn)
 
+@st.cache_data(ttl=60)
 def carregar_conteudo_arquivo(arquivo_id: int):
     conn = conectar_banco()
     try:
@@ -2017,6 +2020,7 @@ def deletar_arquivo_op(arquivo_id: int):
         cursor = conn.cursor()
         cursor.execute("DELETE FROM arquivos_op WHERE id=%s", (arquivo_id,))
         conn.commit()
+        carregar_arquivos_op.clear()
         return True
     except Exception as e:
         conn.rollback()
@@ -2092,6 +2096,8 @@ def salvar_arquivo_romaneio_devolvido(tipo_origem: str, origem_id: int, nome: st
             (tipo_origem, origem_id, nome, tipo, conteudo, usuario)
         )
         conn.commit()
+        carregar_arquivos_romaneio_devolvido.clear()
+        carregar_status_romaneios_devolvidos.clear()
         return True
     except Exception as e:
         conn.rollback()
@@ -2100,6 +2106,7 @@ def salvar_arquivo_romaneio_devolvido(tipo_origem: str, origem_id: int, nome: st
     finally:
         liberar_conexao(conn)
 
+@st.cache_data(ttl=20)
 def carregar_arquivos_romaneio_devolvido(tipo_origem: str, origem_id: int):
     conn = conectar_banco()
     try:
@@ -2115,6 +2122,7 @@ def carregar_arquivos_romaneio_devolvido(tipo_origem: str, origem_id: int):
     finally:
         liberar_conexao(conn)
 
+@st.cache_data(ttl=20)
 def carregar_status_romaneios_devolvidos():
     """Conjunto de (tipo_origem, origem_id) que ja tem pelo menos 1 anexo — evita 1 query por linha na listagem."""
     conn = conectar_banco()
@@ -2127,6 +2135,7 @@ def carregar_status_romaneios_devolvidos():
     finally:
         liberar_conexao(conn)
 
+@st.cache_data(ttl=60)
 def carregar_conteudo_arquivo_romaneio_devolvido(arquivo_id: int):
     conn = conectar_banco()
     try:
@@ -2144,6 +2153,8 @@ def deletar_arquivo_romaneio_devolvido(arquivo_id: int):
         cursor = conn.cursor()
         cursor.execute("DELETE FROM arquivos_romaneio_devolvido WHERE id=%s", (arquivo_id,))
         conn.commit()
+        carregar_arquivos_romaneio_devolvido.clear()
+        carregar_status_romaneios_devolvidos.clear()
         return True
     except Exception as e:
         conn.rollback()
@@ -2184,6 +2195,7 @@ def salvar_romaneio_manual(obra: str, data_recebimento, itens: list, usuario: st
                  item.get('cod', ''), item.get('peso_kg', 0.0), item.get('unidade', 'un'))
             )
         conn.commit()
+        carregar_romaneios_manuais.clear()
         return romaneio_id
     except Exception as e:
         conn.rollback()
@@ -2192,6 +2204,7 @@ def salvar_romaneio_manual(obra: str, data_recebimento, itens: list, usuario: st
     finally:
         liberar_conexao(conn)
 
+@st.cache_data(ttl=20)
 def carregar_romaneios_manuais():
     conn = conectar_banco()
     try:
@@ -2207,6 +2220,7 @@ def carregar_romaneios_manuais():
     finally:
         liberar_conexao(conn)
 
+@st.cache_data(ttl=20)
 def carregar_itens_romaneio_manual(romaneio_id: int):
     conn = conectar_banco()
     try:
@@ -2225,6 +2239,8 @@ def excluir_romaneio_manual(romaneio_id: int):
         cursor = conn.cursor()
         cursor.execute("DELETE FROM romaneios_manuais WHERE id=%s", (romaneio_id,))
         conn.commit()
+        carregar_romaneios_manuais.clear()
+        carregar_itens_romaneio_manual.clear()
         return True
     except Exception as e:
         conn.rollback()
@@ -2901,6 +2917,7 @@ def salvar_arquivo_solicitacao(solicitacao_id: int, nome: str, tipo: str, conteu
             (solicitacao_id, nome, tipo, conteudo, usuario)
         )
         conn.commit()
+        carregar_arquivos_solicitacao.clear()
         return True
     except Exception as e:
         conn.rollback()
@@ -2909,6 +2926,7 @@ def salvar_arquivo_solicitacao(solicitacao_id: int, nome: str, tipo: str, conteu
     finally:
         liberar_conexao(conn)
 
+@st.cache_data(ttl=20)
 def carregar_arquivos_solicitacao(solicitacao_id: int):
     conn = conectar_banco()
     try:
@@ -2923,6 +2941,7 @@ def carregar_arquivos_solicitacao(solicitacao_id: int):
     finally:
         liberar_conexao(conn)
 
+@st.cache_data(ttl=60)
 def carregar_conteudo_arquivo_solicitacao(arquivo_id: int):
     conn = conectar_banco()
     try:
@@ -3365,6 +3384,22 @@ def editar_qtd_caixas_lote(lote_id: int, qtd_caixas: int, m2_item: float, peso_k
     finally:
         liberar_conexao(conn)
 
+def _proxima_sequencia_op(cursor, numero_projeto: str) -> int:
+    """Proxima sequencia de Num_OP pro projeto, baseada no MAIOR numero ja usado --
+    nao no COUNT de linhas, que reaproveita (e colide com) um numero ja existente
+    se algum Num_OP no meio da sequencia foi excluido antes."""
+    cursor.execute(
+        "SELECT Num_OP FROM itens_detalhado WHERE Numero_Projeto=%s AND Num_OP IS NOT NULL",
+        (numero_projeto,)
+    )
+    maior = 0
+    for (num_op,) in cursor.fetchall():
+        try:
+            maior = max(maior, int(str(num_op).rsplit('-', 1)[-1]))
+        except (ValueError, IndexError):
+            pass
+    return maior + 1
+
 def editar_obra_projeto_lote(lote_id: int, nova_obra: str, novo_projeto: str):
     """Corrige a Obra/Projeto de um lote AVULSO (sem frente vinculada, EDT_Vinculado
     nulo ou 'AVULSO'). Lotes com frente real (EDT de uma cronograma_macro) precisam ser
@@ -3386,11 +3421,7 @@ def editar_obra_projeto_lote(lote_id: int, nova_obra: str, novo_projeto: str):
         num_op_atual = row[0] if row else None
         num_op_novo = None
         if num_op_atual:
-            cursor.execute(
-                "SELECT COUNT(*) FROM itens_detalhado WHERE Numero_Projeto=%s AND Num_OP IS NOT NULL",
-                (novo_projeto,)
-            )
-            seq = cursor.fetchone()[0] + 1
+            seq = _proxima_sequencia_op(cursor, novo_projeto)
             num_op_novo = f"OP-{novo_projeto}-{str(seq).zfill(3)}"
             cursor.execute(
                 "UPDATE itens_detalhado SET Obra_Vinculada=%s, Numero_Projeto=%s, Num_OP=%s, updated_at=NOW() WHERE id=%s",
@@ -6806,11 +6837,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 conn = conectar_banco()
                 try:
                     cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT COUNT(*) FROM itens_detalhado WHERE Numero_Projeto=%s AND Num_OP IS NOT NULL",
-                        (numero_projeto,)
-                    )
-                    seq = cursor.fetchone()[0] + 1
+                    seq = _proxima_sequencia_op(cursor, numero_projeto)
                     num_op = f"OP-{numero_projeto}-{str(seq).zfill(3)}"
                     cursor.execute(
                         "UPDATE itens_detalhado SET Status_Item='Liberado para Fabrica', Num_OP=%s WHERE id=%s",
