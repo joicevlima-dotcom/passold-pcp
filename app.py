@@ -4775,12 +4775,49 @@ if nome_aba == "Dashboard":
 
         with col_dir:
             st.markdown("#### 📦 OPs por Obra")
-            st.caption("OPs em aberto ou concluídas nos últimos 90 dias")
+            st.caption("OPs em aberto ou concluídas nos últimos 90 dias — clique numa obra pra ver o detalhe")
             if not df_micro_dash.empty:
                 por_obra = df_micro_dash.groupby('Obra_Vinculada')['Cod_Lote'].nunique().reset_index(name='OPs')
                 por_obra = por_obra.sort_values('OPs', ascending=False)
-                st.dataframe(por_obra, hide_index=True, use_container_width=True,
-                             column_config={"Obra_Vinculada": "Obra", "OPs": "Qtd OPs"})
+                max_ops = int(por_obra['OPs'].max()) or 1
+
+                if "dash_obra_sel" not in st.session_state:
+                    st.session_state.dash_obra_sel = None
+
+                for _, row_obra in por_obra.iterrows():
+                    obra_nome = row_obra['Obra_Vinculada']
+                    qtd_ops   = int(row_obra['OPs'])
+                    largura   = max(6, round(qtd_ops / max_ops * 100))
+                    rc1, rc2 = st.columns([10, 1])
+                    with rc1:
+                        st.markdown(f"""
+                        <div style="display:grid;grid-template-columns:120px 1fr 30px;align-items:center;gap:10px;padding:8px 0;">
+                            <span style="font-size:0.82rem;color:var(--text);">{html_escape(str(obra_nome))}</span>
+                            <div style="background:var(--bg);border-radius:4px;height:10px;">
+                                <div style="width:{largura}%;background:var(--accent);border-radius:4px;height:10px;"></div>
+                            </div>
+                            <span style="font-size:0.82rem;font-weight:700;color:var(--primary);text-align:right;">{qtd_ops}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    with rc2:
+                        if st.button("▸", key=f"dash_obra_btn_{obra_nome}", use_container_width=True):
+                            st.session_state.dash_obra_sel = None if st.session_state.dash_obra_sel == obra_nome else obra_nome
+                            st.rerun()
+
+                if st.session_state.dash_obra_sel:
+                    obra_sel_nome = st.session_state.dash_obra_sel
+                    df_obra_sel   = df_micro_dash[df_micro_dash['Obra_Vinculada'] == obra_sel_nome]
+                    concluido_sel = df_obra_sel[df_obra_sel['Status_Item'] == 'Concluido']['Cod_Lote'].nunique()
+                    producao_sel  = df_obra_sel[df_obra_sel['Status_Item'] != 'Concluido']['Cod_Lote'].nunique()
+                    st.markdown(f"""
+                    <div style="border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;margin-top:4px;background:var(--bg-card);box-shadow:var(--shadow-xs);">
+                        <div style="font-weight:700;color:var(--primary);margin-bottom:10px;font-size:0.9rem;">{html_escape(str(obra_sel_nome))}</div>
+                        <div style="display:flex;gap:32px;">
+                            <div><span style="font-size:1.4rem;font-weight:800;color:var(--accent);">{producao_sel}</span><br><span style="font-size:0.7rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Em produção</span></div>
+                            <div><span style="font-size:1.4rem;font-weight:800;color:var(--success);">{concluido_sel}</span><br><span style="font-size:0.7rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Concluído</span></div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
 elif nome_aba not in abas_disponiveis:
     st.warning("Página não encontrada.")
