@@ -2068,7 +2068,10 @@ def carregar_conteudo_arquivo(arquivo_id: int):
         cursor = conn.cursor()
         cursor.execute("SELECT nome_arquivo, tipo_arquivo, conteudo FROM arquivos_op WHERE id=%s", (arquivo_id,))
         row = cursor.fetchone()
-        return row  # (nome, tipo, bytes)
+        if row is None:
+            return None
+        nome, tipo, conteudo = row
+        return (nome, tipo, bytes(conteudo))  # bytes puro -- memoryview do psycopg2 nao e picklable pro cache
     except Exception:
         return None
     finally:
@@ -2212,7 +2215,11 @@ def carregar_conteudo_arquivo_romaneio_devolvido(arquivo_id: int):
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT nome_arquivo, tipo_arquivo, conteudo FROM arquivos_romaneio_devolvido WHERE id=%s", (arquivo_id,))
-        return cursor.fetchone()
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        nome, tipo, conteudo = row
+        return (nome, tipo, bytes(conteudo))  # bytes puro -- memoryview do psycopg2 nao e picklable pro cache
     except Exception:
         return None
     finally:
@@ -3018,7 +3025,11 @@ def carregar_conteudo_arquivo_solicitacao(arquivo_id: int):
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT nome_arquivo, tipo_arquivo, conteudo FROM arquivos_solicitacao_op WHERE id=%s", (arquivo_id,))
-        return cursor.fetchone()
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        nome, tipo, conteudo = row
+        return (nome, tipo, bytes(conteudo))  # bytes puro -- memoryview do psycopg2 nao e picklable pro cache
     except Exception:
         return None
     finally:
