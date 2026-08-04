@@ -4642,7 +4642,6 @@ if nome_aba == "Dashboard":
         """, unsafe_allow_html=True)
 
         df_micro_dash = carregar_micro()
-        df_macro_dash = carregar_macro()
 
         ops_pendentes    = len(df_micro_dash[df_micro_dash['Status_Item'] == 'Pendente'])           if not df_micro_dash.empty else 0
         ops_liberadas    = len(df_micro_dash[df_micro_dash['Status_Item'] == 'Liberado para Fabrica']) if not df_micro_dash.empty else 0
@@ -4696,11 +4695,6 @@ if nome_aba == "Dashboard":
             alertas.append(("danger", "🔴", f"{lotes_atrasados} lote(s) atrasado(s)", "Prazo vencido — acesse Relatório Geral"))
         if ops_pendentes > 0:
             alertas.append(("warn", "⚠️", f"{ops_pendentes} OP(s) aguardando liberação", "Acesse Liberar OPs da Semana"))
-        if not df_macro_dash.empty and 'Status_Engenharia' in df_macro_dash.columns:
-            df_macro_eng = df_macro_dash[df_macro_dash['Detalhado'] != False] if 'Detalhado' in df_macro_dash.columns else df_macro_dash
-            criticos_eng = len(df_macro_eng[df_macro_eng['Status_Engenharia'].str.contains('Revisao|Aguardando', na=False)])
-            if criticos_eng > 0:
-                alertas.append(("warn", "📐", f"{criticos_eng} frente(s) em revisão ou aguardando", "Acesse Painel de Engenharia"))
 
         if alertas:
             st.markdown("---")
@@ -4740,30 +4734,42 @@ if nome_aba == "Dashboard":
         with col_esq:
             st.markdown("#### 📋 Status dos Lotes")
             if not df_micro_dash.empty:
-                status_counts = df_micro_dash['Status_Item'].value_counts().reset_index()
-                status_counts.columns = ['Status', 'Quantidade']
                 cores_status = {
-                    'Pendente':                '#D97706',
-                    'Liberado para Fabrica':   '#0EA5E9',
-                    'Parcialmente Concluido':  '#8B5CF6',
-                    'Concluido':               '#059669',
-                    'Cancelado':               '#DC2626',
+                    'Concluido':               ('Concluído',  '#059669'),
+                    'Liberado para Fabrica':   ('Liberado',   '#1A56DB'),
+                    'Parcialmente Concluido':  ('Parcial',    '#D97706'),
+                    'Pendente':                ('Pendente',   '#94A3B8'),
+                    'Cancelado':               ('Cancelado',  '#DC2626'),
                 }
-                fig = px.bar(status_counts, x='Status', y='Quantidade',
-                             color='Status',
-                             color_discrete_map=cores_status,
-                             template='plotly_white')
-                fig.update_layout(
-                    height=280, showlegend=False,
-                    margin=dict(l=0, r=0, t=10, b=0),
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    font=dict(family='Inter', size=12),
-                    xaxis=dict(title='', tickfont=dict(size=11)),
-                    yaxis=dict(title='Qtd', gridcolor='#F1F5F9'),
+                status_counts = df_micro_dash['Status_Item'].value_counts()
+                total_status  = int(status_counts.sum())
+                segmentos = [(s, int(status_counts.get(s, 0))) for s in cores_status if status_counts.get(s, 0) > 0]
+
+                barras_html = "".join(
+                    f'<div style="width:{qtd / total_status * 100:.2f}%;background:{cores_status[s][1]};'
+                    f'display:flex;align-items:center;justify-content:center;min-width:2px;">'
+                    + (f'<span style="font-size:11px;font-weight:700;color:#fff;">{round(qtd / total_status * 100)}%</span>'
+                       if qtd / total_status >= 0.08 else '')
+                    + '</div>'
+                    for s, qtd in segmentos
                 )
-                fig.update_traces(marker_line_width=0)
-                st.plotly_chart(fig, use_container_width=True)
+                legenda_html = "".join(
+                    f'<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);">'
+                    f'<span style="width:8px;height:8px;border-radius:2px;background:{cores_status[s][1]};display:inline-block;"></span>'
+                    f'{cores_status[s][0]} — {qtd}</div>'
+                    for s, qtd in segmentos
+                )
+                st.markdown(f"""
+                <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;">
+                    <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;">{total_status} lotes no total</div>
+                    <div style="display:flex;height:28px;border-radius:6px;overflow:hidden;background:var(--bg);gap:2px;">
+                        {barras_html}
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:16px;">
+                        {legenda_html}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
             else:
                 st.markdown('<div class="empty-state"><div class="empty-icon">📊</div><h4>Sem dados</h4><p>Nenhum lote cadastrado ainda.</p></div>', unsafe_allow_html=True)
 
