@@ -1956,10 +1956,81 @@ def resetar_banco_dados_completo(usuario=None):
     finally:
         liberar_conexao(conn)
 
+def _carimbar_pdf(conteudo: bytes, texto: str) -> bytes:
+    import io
+    from pypdf import PdfReader, PdfWriter
+    from reportlab.pdfgen import canvas
+
+    reader = PdfReader(io.BytesIO(conteudo))
+    writer = PdfWriter()
+    for page in reader.pages:
+        largura = float(page.mediabox.width)
+        altura  = float(page.mediabox.height)
+        buf = io.BytesIO()
+        c = canvas.Canvas(buf, pagesize=(largura, altura))
+        c.setFont("Helvetica-Bold", 9)
+        c.setFillColorRGB(0.82, 0.11, 0.11)
+        c.drawRightString(largura - 14, altura - 18, texto)
+        c.save()
+        buf.seek(0)
+        page.merge_page(PdfReader(buf).pages[0])
+        writer.add_page(page)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+def _carimbar_imagem(conteudo: bytes, texto: str) -> bytes:
+    import io
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.open(io.BytesIO(conteudo))
+    fmt = (img.format or "JPEG").upper()
+    if fmt not in ("PNG", "JPEG"):
+        fmt = "JPEG"
+    img = img.convert("RGB") if fmt == "JPEG" else img.convert("RGBA")
+    draw = ImageDraw.Draw(img)
+    tamanho_fonte = max(14, img.width // 55)
+    font = None
+    for caminho in ("DejaVuSans-Bold.ttf", "arialbd.ttf", "Arial Bold.ttf"):
+        try:
+            font = ImageFont.truetype(caminho, tamanho_fonte)
+            break
+        except Exception:
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+    bbox = draw.textbbox((0, 0), texto, font=font)
+    largura_txt = bbox[2] - bbox[0]
+    margem = 12
+    draw.text((img.width - largura_txt - margem, margem), texto, fill=(210, 30, 30), font=font)
+    out = io.BytesIO()
+    img.save(out, format=fmt)
+    return out.getvalue()
+
+def _carimbar_num_op(nome: str, conteudo: bytes, num_op: str) -> bytes:
+    """Carimba 'OP: <numero>' no canto superior direito do arquivo (PDF ou imagem)
+    na hora do upload, pra producao nao precisar escrever o numero a mao em cada folha."""
+    if not num_op:
+        return conteudo
+    ext = nome.rsplit('.', 1)[-1].lower() if '.' in nome else ''
+    texto = f"OP: {num_op}"
+    try:
+        if ext == 'pdf':
+            return _carimbar_pdf(conteudo, texto)
+        if ext in ('png', 'jpg', 'jpeg'):
+            return _carimbar_imagem(conteudo, texto)
+    except Exception:
+        pass  # se o carimbo falhar por qualquer motivo, guarda o arquivo original em vez de travar o upload
+    return conteudo
+
 def salvar_arquivo_op(item_id: int, nome: str, tipo: str, conteudo: bytes, usuario: str):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
+        cursor.execute("SELECT Num_OP FROM itens_detalhado WHERE id=%s", (item_id,))
+        row_op = cursor.fetchone()
+        num_op = row_op[0] if row_op else None
+        conteudo = _carimbar_num_op(nome, conteudo, num_op)
         cursor.execute(
             "INSERT INTO arquivos_op (item_id, nome_arquivo, tipo_arquivo, conteudo, enviado_por) VALUES (%s,%s,%s,%s,%s)",
             (item_id, nome, tipo, conteudo, usuario)

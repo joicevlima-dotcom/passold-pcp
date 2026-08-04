@@ -4,3 +4,6 @@ plotly
 psycopg2-binary
 bcrypt
 openpyxl
+Pillow
+pypdf
+reportlab
