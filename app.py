@@ -4651,6 +4651,8 @@ if nome_aba == "Dashboard":
         hoje = hoje_projeto().date()
         if not df_micro_dash.empty and 'Data_Limite_Obra' in df_micro_dash.columns:
             df_ativos = df_micro_dash[~df_micro_dash['Status_Item'].isin(['Concluido','Cancelado'])].copy()
+            if 'Em_Parada' in df_ativos.columns:
+                df_ativos = df_ativos[df_ativos['Em_Parada'] != True]  # parado ja explica o atraso -- nao conta como alerta
             df_ativos['Data_Limite_Obra'] = pd.to_datetime(df_ativos['Data_Limite_Obra'], errors='coerce')
             lotes_atrasados = len(df_ativos[df_ativos['Data_Limite_Obra'].dt.date < hoje])
         else:
