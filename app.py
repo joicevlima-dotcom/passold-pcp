@@ -5445,6 +5445,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     op_txt    = row['Num_OP'] if row.get('Num_OP') else 'S/ OP'
                     arqs_tv   = carregar_arquivos_op(int(row['id']))
                     clipe_badge = f"<div style='margin-top:6px;font-size:10px;color:#475569;'>📎 {len(arqs_tv)} arquivo(s)</div>" if arqs_tv else ""
+                    em_parada_tv = bool(row.get('Em_Parada', False))
+                    motivo_tv    = html_escape(str(row.get('Motivo_Parada'))) if em_parada_tv and pd.notna(row.get('Motivo_Parada')) else ''
+                    parada_badge = f"<div style='margin-top:4px;font-size:10px;font-weight:700;color:#DC2626;'>⛔ EM PARADA — {motivo_tv}</div>" if em_parada_tv else ""
                     st.markdown(f"""
                     <div style='border:1.5px solid {cfg["border"]};background:{cfg["bg"]};border-radius:8px;padding:10px 12px;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,0.06);'>
                         <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;'>
@@ -5458,6 +5461,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             <div style='background:white;border-radius:5px;padding:5px 7px;'><div style='font-size:8px;color:#94A3B8;text-transform:uppercase;'>M²</div><div style='font-size:12px;font-weight:700;color:#1E293B;'>{row["M2_Item"]:.2f}</div></div>
                         </div>
                         <div style='margin-top:6px;font-size:10px;font-weight:700;color:{cfg["tag_color"]};'>Prazo: {prazo_fmt}</div>
+                        {parada_badge}
                         {clipe_badge}
                     </div>
                     """, unsafe_allow_html=True)
@@ -6051,6 +6055,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     kg_v      = row.get('Peso_Kg', 0.0) or 0.0
                     arqs_tv   = carregar_arquivos_op(int(row['id']))
                     clipe_badge = f"<div style='margin-top:6px;font-size:10px;color:#475569;'>📎 {len(arqs_tv)} arquivo(s)</div>" if arqs_tv else ""
+                    em_parada_tv = bool(row.get('Em_Parada', False))
+                    motivo_tv    = html_escape(str(row.get('Motivo_Parada'))) if em_parada_tv and pd.notna(row.get('Motivo_Parada')) else ''
+                    parada_badge = f"<div style='margin-top:4px;font-size:10px;font-weight:700;color:#DC2626;'>⛔ EM PARADA — {motivo_tv}</div>" if em_parada_tv else ""
                     st.markdown(f"""
                     <div style='border:1.5px solid {cfg["border"]};background:{cfg["bg"]};border-radius:8px;padding:10px 12px;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,0.06);'>
                         <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;'>
@@ -6064,6 +6071,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             <div style='background:white;border-radius:5px;padding:5px 7px;'><div style='font-size:8px;color:#94A3B8;text-transform:uppercase;'>KG</div><div style='font-size:12px;font-weight:700;color:#1E293B;'>{kg_v:.2f}</div></div>
                         </div>
                         <div style='margin-top:6px;font-size:10px;font-weight:700;color:{cfg["tag_color"]};'>Prazo: {prazo_fmt}</div>
+                        {parada_badge}
                         {clipe_badge}
                     </div>
                     """, unsafe_allow_html=True)
