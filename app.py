@@ -4638,7 +4638,6 @@ if nome_aba == "Dashboard":
                 <h2>Dashboard</h2>
                 <p>Resumo geral da operação em tempo real</p>
             </div>
-            <span class="page-icon">🏠</span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -4662,38 +4661,33 @@ if nome_aba == "Dashboard":
         with c1:
             st.markdown(f"""
             <div class="dash-card">
-                <div class="dash-card-title">OPs Pendentes</div>
                 <div class="dash-card-value orange">{ops_pendentes}</div>
-                <div class="dash-card-sub">aguardando liberação</div>
+                <div class="dash-card-sub">OPs aguardando liberação</div>
             </div>""", unsafe_allow_html=True)
         with c2:
             st.markdown(f"""
             <div class="dash-card">
-                <div class="dash-card-title">Liberadas p/ Fábrica</div>
                 <div class="dash-card-value">{ops_liberadas}</div>
-                <div class="dash-card-sub">em produção</div>
+                <div class="dash-card-sub">liberadas, em produção</div>
             </div>""", unsafe_allow_html=True)
         with c3:
             st.markdown(f"""
             <div class="dash-card">
-                <div class="dash-card-title">Concluídas</div>
                 <div class="dash-card-value green">{ops_concluidas}</div>
-                <div class="dash-card-sub">finalizadas</div>
+                <div class="dash-card-sub">concluídas</div>
             </div>""", unsafe_allow_html=True)
         with c4:
             cor_atr = "red" if lotes_atrasados > 0 else "green"
             st.markdown(f"""
             <div class="dash-card">
-                <div class="dash-card-title">Lotes Atrasados</div>
                 <div class="dash-card-value {cor_atr}">{lotes_atrasados}</div>
-                <div class="dash-card-sub">prazo vencido</div>
+                <div class="dash-card-sub">lotes com prazo vencido</div>
             </div>""", unsafe_allow_html=True)
         with c5:
             st.markdown(f"""
             <div class="dash-card">
-                <div class="dash-card-title">Obras Ativas</div>
                 <div class="dash-card-value">{total_obras}</div>
-                <div class="dash-card-sub">em andamento</div>
+                <div class="dash-card-sub">obras ativas</div>
             </div>""", unsafe_allow_html=True)
 
         # ── Faixa de alertas visível ──────────────────────────────
