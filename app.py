@@ -4774,12 +4774,13 @@ if nome_aba == "Dashboard":
                 st.markdown('<div class="empty-state"><div class="empty-icon">📊</div><h4>Sem dados</h4><p>Nenhum lote cadastrado ainda.</p></div>', unsafe_allow_html=True)
 
         with col_dir:
-            st.markdown("#### 📦 Lotes por Obra")
+            st.markdown("#### 📦 OPs por Obra")
+            st.caption("OPs em aberto ou concluídas nos últimos 90 dias")
             if not df_micro_dash.empty:
-                por_obra = df_micro_dash.groupby('Obra_Vinculada').size().reset_index(name='Lotes')
-                por_obra = por_obra.sort_values('Lotes', ascending=False)
+                por_obra = df_micro_dash.groupby('Obra_Vinculada')['Cod_Lote'].nunique().reset_index(name='OPs')
+                por_obra = por_obra.sort_values('OPs', ascending=False)
                 st.dataframe(por_obra, hide_index=True, use_container_width=True,
-                             column_config={"Obra_Vinculada": "Obra", "Lotes": "Qtd Lotes"})
+                             column_config={"Obra_Vinculada": "Obra", "OPs": "Qtd OPs"})
 
 elif nome_aba not in abas_disponiveis:
     st.warning("Página não encontrada.")
