@@ -1146,12 +1146,19 @@ def prazo_valido(valor) -> bool:
     except Exception:
         return False
 
+def _nn(valor, padrao=''):
+    """Substitui None/NaN por um padrao. Existe porque 'valor or padrao' NAO funciona
+    quando valor vem de uma linha de DataFrame (pandas): campo nulo vira NaN, e
+    bool(NaN) e' True em Python -- entao 'or' nunca cai pro padrao, e o NaN aparece
+    literalmente na tela/documento como o texto "nan"."""
+    return valor if pd.notna(valor) else padrao
+
 def normaliza_escopo(bruto):
     """Reduz um Tipo_Escopo/Escopo bruto (pode vir sujo de dado legado) para um dos
     3 valores canonicos usados em toda a aplicacao. Mesmas palavras-chave do CASE
     SQL de backfill (Tipo_Material ~* 'ESQUADRIA|VIDRO|ALUMINIO|PERFIL') para as
     duas classificacoes nunca divergirem."""
-    b = str(bruto or '').upper()
+    b = str(_nn(bruto)).upper()
     if any(p in b for p in ('ESQUADRIA', 'VIDRO', 'ALUMINIO', 'PERFIL')):
         return 'Esquadria-Vidro'
     if 'TERCEIRIZAD' in b:
@@ -1751,7 +1758,7 @@ def enviar_para_logistica(row, limite_despacho):
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'Aguardando Agendamento')
         """, (
             int(row['id']), row['Obra_Vinculada'], row['EDT_Vinculado'], row['Cod_Lote'],
-            row.get('Num_OP') or '', row['Tipo_Material'], int(row['Qtd_Caixas']), float(row['M2_Item']),
+            _nn(row.get('Num_OP')), row['Tipo_Material'], int(row['Qtd_Caixas']), float(row['M2_Item']),
             row['Romaneio_Chapas'],
             limite_despacho.strftime('%Y-%m-%d') if prazo_valido(limite_despacho) else None
         ))
@@ -2711,9 +2718,9 @@ def gerar_relatorio_enviados_lista_mestra_xlsx(lista_row, itens_df) -> bytes:
     ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
 
     infos = [
-        ("Obra:", str(lista_row.get('obra') or '—')),
-        ("Projeto:", str(lista_row.get('numero_projeto') or '—')),
-        ("Lista / Etapa:", str(lista_row.get('titulo') or '—')),
+        ("Obra:", str(_nn(lista_row.get('obra'), '—'))),
+        ("Projeto:", str(_nn(lista_row.get('numero_projeto'), '—'))),
+        ("Lista / Etapa:", str(_nn(lista_row.get('titulo'), '—'))),
         ("Emitido em:", hoje_projeto().strftime('%d/%m/%Y')),
     ]
     linha = 3
@@ -3100,12 +3107,12 @@ def gerar_romaneio_lista_mestra_xlsx(lista_row, envio_row, itens_envio_df) -> by
     ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
 
     infos = [
-        ("Obra:", str(lista_row.get('obra') or '—')),
-        ("Projeto:", str(lista_row.get('numero_projeto') or '—')),
-        ("Lista / Etapa:", str(lista_row.get('titulo') or '—')),
+        ("Obra:", str(_nn(lista_row.get('obra'), '—'))),
+        ("Projeto:", str(_nn(lista_row.get('numero_projeto'), '—'))),
+        ("Lista / Etapa:", str(_nn(lista_row.get('titulo'), '—'))),
         ("Data de envio:", pd.to_datetime(envio_row.get('data_envio')).strftime('%d/%m/%Y')),
-        ("Destino:", str(envio_row.get('destino') or '—')),
-        ("Enviado por:", str(envio_row.get('enviado_por') or '—')),
+        ("Destino:", str(_nn(envio_row.get('destino'), '—'))),
+        ("Enviado por:", str(_nn(envio_row.get('enviado_por'), '—'))),
     ]
     linha = 3
     for label, valor in infos:
@@ -3862,8 +3869,8 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
     # sem essa prioridade, a OP saia sempre com o modelo da frente, errado pro lote.
     tipo_escopo = normaliza_escopo(lote_row.get('Escopo')) or normaliza_escopo(macro_row.get('Tipo_Escopo')) or 'ACM'
     # OP sem frente (avulsa) nao tem macro_row -- o numero do projeto mora direto no lote nesse caso.
-    num_projeto  = str(macro_row.get('Numero_Projeto') or lote_row.get('Numero_Projeto') or '')
-    tarefa_desc  = str(macro_row.get('Tarefa') or '').strip()
+    num_projeto  = str(_nn(macro_row.get('Numero_Projeto'), _nn(lote_row.get('Numero_Projeto'))))
+    tarefa_desc  = str(_nn(macro_row.get('Tarefa'))).strip()
     if num_projeto and tarefa_desc:
         valor_projeto = f"{num_projeto} — {tarefa_desc}"
     else:
@@ -3871,15 +3878,15 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
 
     # Lotes avulsos guardam "PRJ-<projeto> | <pavimento>" em Romaneio_Chapas (o projeto ja
     # aparece na linha PROJETO acima) -- aqui mostra so o pavimento, ou "-" se nao foi digitado.
-    etapa_pav = str(lote_row.get('Romaneio_Chapas') or '').strip()
+    etapa_pav = str(_nn(lote_row.get('Romaneio_Chapas'))).strip()
     if lote_row.get('EDT_Vinculado') == 'AVULSO':
         partes_etapa = etapa_pav.split('|', 1)
         etapa_pav = partes_etapa[1].strip() if len(partes_etapa) > 1 else ''
-    etapa_pav = str(campos_extras.get('etapa_pav') or '').strip() or etapa_pav or '—'
+    etapa_pav = str(_nn(campos_extras.get('etapa_pav'))).strip() or etapa_pav or '—'
 
     # Cod_Lote de OP avulsa e "OP-<seq> - <projeto> - <obra>" -- projeto e obra ja aparecem
     # nas linhas PROJETO/OBRA acima, entao aqui mostra so a parte "OP-<seq>".
-    lote_label = str(lote_row.get('Cod_Lote') or '—')
+    lote_label = str(_nn(lote_row.get('Cod_Lote'), '—'))
     if lote_row.get('EDT_Vinculado') == 'AVULSO':
         lote_label = lote_label.split(' - ')[0].strip() or lote_label
     lote_label = str(campos_extras.get('lote_label') or '').strip() or lote_label
@@ -3913,22 +3920,22 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
         ws.row_dimensions[linha].height = 22
 
     linha = linha_inicio
-    info_row(ws, linha,   "Nº OP:",          lote_row.get('Num_OP', '—'))
+    info_row(ws, linha,   "Nº OP:",          _nn(lote_row.get('Num_OP'), '—'))
     info_row(ws, linha+1, "DATA:",            datetime.now(FUSO_BR).strftime('%d/%m/%Y'))
-    info_row(ws, linha+2, "OBRA:",            lote_row.get('Obra_Vinculada', '—'))
+    info_row(ws, linha+2, "OBRA:",            _nn(lote_row.get('Obra_Vinculada'), '—'))
     info_row(ws, linha+3, "PROJETO:",         valor_projeto)
     info_row(ws, linha+4, "LOTE:",            lote_label)
     info_row(ws, linha+5, "ETAPA/PAVIMENTOS:",etapa_pav)
-    info_row(ws, linha+6, "MATERIAL:",        campos_extras.get('material', lote_row.get('Tipo_Material', '—')))
-    info_row(ws, linha+7, "POSSUI LISTA DE COMPONENTES:", campos_extras.get('possui_componentes') or lote_row.get('Possui_Lista_Componentes') or '—')
+    info_row(ws, linha+6, "MATERIAL:",        campos_extras.get('material', _nn(lote_row.get('Tipo_Material'), '—')))
+    info_row(ws, linha+7, "POSSUI LISTA DE COMPONENTES:", campos_extras.get('possui_componentes') or _nn(lote_row.get('Possui_Lista_Componentes'), '—'))
 
     linha = linha_inicio + 9
 
     # ── CAMPOS ESPECÍFICOS POR TIPO ────────────────────────
     if tipo_escopo == "ACM":
-        info_row(ws, linha,   "ÁREA TOTAL (m²):", f"{campos_extras.get('area_total', lote_row.get('M2_Item', 0)):.2f} m²")
-        info_row(ws, linha+1, "DIFICULDADE:",     campos_extras.get('dificuldade', lote_row.get('Dificuldade', '—')))
-        info_row(ws, linha+2, "QTD CHAPAS:",      lote_row.get('Qtd_Caixas', '—'))
+        info_row(ws, linha,   "ÁREA TOTAL (m²):", f"{campos_extras.get('area_total', _nn(lote_row.get('M2_Item'), 0)):.2f} m²")
+        info_row(ws, linha+1, "DIFICULDADE:",     campos_extras.get('dificuldade', _nn(lote_row.get('Dificuldade'), '—')))
+        info_row(ws, linha+2, "QTD CHAPAS:",      _nn(lote_row.get('Qtd_Caixas'), '—'))
         info_row(ws, linha+3, "QTD FOLHAS PROJ:", campos_extras.get('qtd_folhas', '—'))
         linha += 4
     elif tipo_escopo == "Esquadria-Vidro":
@@ -4048,10 +4055,10 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
 
     # Informações do lote
     infos = [
-        ("OP:", str(lote_row.get('Num_OP', '—'))),
-        ("Obra:", str(lote_row.get('Obra_Vinculada', '—'))),
-        ("Lote:", str(lote_row.get('Cod_Lote', '—'))),
-        ("Projeto:", str(lote_row.get('Numero_Projeto') or '—')),
+        ("OP:", str(_nn(lote_row.get('Num_OP'), '—'))),
+        ("Obra:", str(_nn(lote_row.get('Obra_Vinculada'), '—'))),
+        ("Lote:", str(_nn(lote_row.get('Cod_Lote'), '—'))),
+        ("Projeto:", str(_nn(lote_row.get('Numero_Projeto'), '—'))),
         ("Etapa:", str(etapa or '—')),
         ("Endereço:", str(endereco_obra)),
         ("Digitado por:", str(digitado_por)),
@@ -4282,7 +4289,7 @@ def gerar_romaneio_insumos_xlsx(saida_row, itens_df) -> bytes:
         ("Destino:", saida_row.get('destino')),
         ("Registrado por:", saida_row.get('registrado_por')),
     ]
-    infos = [(label, str(valor)) for label, valor in infos_brutas if valor not in (None, '')]
+    infos = [(label, str(valor)) for label, valor in infos_brutas if pd.notna(valor) and valor != '']
     linha = 3
     for label, valor in infos:
         ws.cell(linha, 1, label).font = Font(name="Arial", size=11, bold=True)
@@ -4372,9 +4379,13 @@ def gerar_relatorio_indisponiveis_xlsx(df: pd.DataFrame) -> bytes:
 
     for i, (_, item) in enumerate(df.iterrows()):
         dados = [
-            item.get('origem', ''), item.get('obra') or '', item.get('numero_projeto') or '',
-            item.get('referencia') or '', item.get('item', ''), item.get('quantidade', 0),
-            item.get('unidade', ''), item.get('observacao') or '',
+            item.get('origem', ''),
+            item.get('obra') if pd.notna(item.get('obra')) else '',
+            item.get('numero_projeto') if pd.notna(item.get('numero_projeto')) else '',
+            item.get('referencia') if pd.notna(item.get('referencia')) else '',
+            item.get('item', ''), item.get('quantidade', 0),
+            item.get('unidade', ''),
+            item.get('observacao') if pd.notna(item.get('observacao')) else '',
         ]
         for col, val in enumerate(dados, 1):
             cel = ws.cell(linha, col, val)
@@ -5379,7 +5390,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             obra_edit = st.selectbox("Obra:", obras_disp_edit, index=obra_idx_edit, key=f"edit_obra_{row['id']}") if obras_disp_edit else row['Obra_Vinculada']
                                         with ed7:
                                             projetos_disp_edit = sorted(df_projetos[df_projetos['Obra'] == obra_edit]['Numero_Projeto'].dropna().unique().tolist()) if obra_edit else []
-                                            projeto_atual_edit = row.get('Numero_Projeto') or ''
+                                            projeto_atual_edit = _nn(row.get('Numero_Projeto'))
                                             projeto_idx_edit = projetos_disp_edit.index(projeto_atual_edit) if projeto_atual_edit in projetos_disp_edit else 0
                                             novo_projeto_edit = st.selectbox("Projeto:", projetos_disp_edit, index=projeto_idx_edit, key=f"edit_projeto_{row['id']}") if projetos_disp_edit else projeto_atual_edit
 
@@ -5393,12 +5404,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                     int(row['id']), int(caixas_edit), float(m2_edit), float(peso_edit),
                                                     data_producao=data_prod_edit, data_limite=data_lim_edit
                                                 )
-                                                obra_mudou = (not lote_tem_frente) and (obra_edit != row['Obra_Vinculada'] or novo_projeto_edit != (row.get('Numero_Projeto') or ''))
+                                                obra_mudou = (not lote_tem_frente) and (obra_edit != row['Obra_Vinculada'] or novo_projeto_edit != _nn(row.get('Numero_Projeto')))
                                                 if ok_edit_lote and obra_mudou:
                                                     ok_edit_lote, msg_edit_lote = editar_obra_projeto_lote(int(row['id']), obra_edit, novo_projeto_edit)
                                                 if ok_edit_lote:
                                                     detalhe_obra = (
-                                                        f" | Obra: {row['Obra_Vinculada']}→{obra_edit} | Projeto: {row.get('Numero_Projeto') or '—'}→{novo_projeto_edit or '—'} | {msg_edit_lote}"
+                                                        f" | Obra: {row['Obra_Vinculada']}→{obra_edit} | Projeto: {_nn(row.get('Numero_Projeto'), '—')}→{novo_projeto_edit or '—'} | {msg_edit_lote}"
                                                         if obra_mudou else ""
                                                     )
                                                     registrar_auditoria(st.session_state.usuario_nome, "EDITAR_LOTE",
@@ -6029,7 +6040,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             esq_obra_edit = st.selectbox("Obra:", esq_obras_disp_edit, index=esq_obra_idx_edit, key=f"esq_edit_obra_{row['id']}") if esq_obras_disp_edit else row['Obra_Vinculada']
                                         with eed7:
                                             esq_projetos_disp_edit = sorted(df_projetos[df_projetos['Obra'] == esq_obra_edit]['Numero_Projeto'].dropna().unique().tolist()) if esq_obra_edit else []
-                                            esq_projeto_atual_edit = row.get('Numero_Projeto') or ''
+                                            esq_projeto_atual_edit = _nn(row.get('Numero_Projeto'))
                                             esq_projeto_idx_edit = esq_projetos_disp_edit.index(esq_projeto_atual_edit) if esq_projeto_atual_edit in esq_projetos_disp_edit else 0
                                             esq_novo_projeto_edit = st.selectbox("Projeto:", esq_projetos_disp_edit, index=esq_projeto_idx_edit, key=f"esq_edit_projeto_{row['id']}") if esq_projetos_disp_edit else esq_projeto_atual_edit
 
@@ -6043,12 +6054,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                     int(row['id']), int(esq_caixas_edit), float(esq_m2_edit), float(esq_peso_edit),
                                                     data_producao=esq_data_prod_edit, data_limite=esq_data_lim_edit
                                                 )
-                                                esq_obra_mudou = (not esq_lote_tem_frente) and (esq_obra_edit != row['Obra_Vinculada'] or esq_novo_projeto_edit != (row.get('Numero_Projeto') or ''))
+                                                esq_obra_mudou = (not esq_lote_tem_frente) and (esq_obra_edit != row['Obra_Vinculada'] or esq_novo_projeto_edit != _nn(row.get('Numero_Projeto')))
                                                 if ok_esq_edit and esq_obra_mudou:
                                                     ok_esq_edit, msg_esq_edit = editar_obra_projeto_lote(int(row['id']), esq_obra_edit, esq_novo_projeto_edit)
                                                 if ok_esq_edit:
                                                     esq_detalhe_obra = (
-                                                        f" | Obra: {row['Obra_Vinculada']}→{esq_obra_edit} | Projeto: {row.get('Numero_Projeto') or '—'}→{esq_novo_projeto_edit or '—'} | {msg_esq_edit}"
+                                                        f" | Obra: {row['Obra_Vinculada']}→{esq_obra_edit} | Projeto: {_nn(row.get('Numero_Projeto'), '—')}→{esq_novo_projeto_edit or '—'} | {msg_esq_edit}"
                                                         if esq_obra_mudou else ""
                                                     )
                                                     registrar_auditoria(st.session_state.usuario_nome, "EDITAR_LOTE",
@@ -7141,7 +7152,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     cols_card = st.columns(3)
                     for i, (_, row) in enumerate(df_pend.sort_values('Obra_Vinculada').iterrows()):
                         edt_row = row.get('EDT_Vinculado', '')
-                        numero_projeto_row = str(row.get('Numero_Projeto') or '')
+                        numero_projeto_row = str(_nn(row.get('Numero_Projeto')))
                         if edt_row and edt_row != 'AVULSO' and not df_banco_macro.empty:
                             fr_row = df_banco_macro[df_banco_macro['EDT'] == edt_row]
                             tag_frente = (
@@ -8247,7 +8258,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         st.markdown(f"<div class='{css_bar}'>", unsafe_allow_html=True)
                         ci, cp, ca = st.columns([5, 3, 2])
                         with ci:
-                            num_op_ag = row.get('Num_OP') or 'S/OP'
+                            num_op_ag = _nn(row.get('Num_OP'), 'S/OP')
                             st.markdown(
                                 f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;'
                                 f'<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>&nbsp;'
@@ -8480,10 +8491,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         value=float(qtd_env_atual) if pd.notna(qtd_env_atual) else float(comp['quantidade']),
                                         step=1.0, key=f"alm_qtdparcial_{comp['id']}"
                                     )
+                                obs_comp_atual_raw = comp.get('observacao')
+                                obs_comp_atual = obs_comp_atual_raw if pd.notna(obs_comp_atual_raw) else ''
                                 if acao != st_item or (acao == "Parcial" and qtd_parcial_nova != qtd_env_atual):
-                                    atualizar_componente(comp['id'], acao, comp.get('observacao') or '', st.session_state.usuario_nome, qtd_parcial_nova)
+                                    atualizar_componente(comp['id'], acao, obs_comp_atual, st.session_state.usuario_nome, qtd_parcial_nova)
                                     st.rerun()
-                                obs_atual = comp.get('observacao') or ''
+                                obs_atual = obs_comp_atual
                                 obs_nova  = st.text_input(f"Obs — {comp['nome_componente']}:", value=obs_atual,
                                                           key=f"alm_obs_{comp['id']}", placeholder="Ex: em falta, previsão 20/06...")
                                 if obs_nova != obs_atual:
@@ -8513,7 +8526,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 rom_comp_bytes = gerar_romaneio_componentes_xlsx(
                                     op_row['obra_vinculada'], op_row['num_op'], op_row['cod_lote'],
                                     df_disponiveis, st.session_state.usuario_nome,
-                                    numero_projeto=op_row.get('numero_projeto') or ''
+                                    numero_projeto=_nn(op_row.get('numero_projeto'))
                                 )
                                 st.download_button(
                                     "🖨️ Emitir Romaneio" if ja_emitido.empty else "🖨️ Reemitir Romaneio",
@@ -8642,9 +8655,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                         with st.expander(
                             f"{icone_ins} {pd.to_datetime(saida_row['data_saida']).strftime('%d/%m/%Y')} — "
-                            f"{saida_row.get('obra') or 'Sem obra'}"
-                            f"{' (Proj. ' + str(saida_row['numero_projeto']) + ')' if saida_row.get('numero_projeto') else ''}"
-                            f" — {saida_row.get('destino') or '—'} "
+                            f"{_nn(saida_row.get('obra'), 'Sem obra')}"
+                            f"{' (Proj. ' + str(saida_row['numero_projeto']) + ')' if pd.notna(saida_row.get('numero_projeto')) else ''}"
+                            f" — {_nn(saida_row.get('destino'), '—')} "
                             f"({n_conf_ins}/{n_total_ins} conferidos{f' — {n_indisp_ins} FALTANDO' if n_indisp_ins > 0 else ''}) — por {saida_row['registrado_por']}",
                             expanded=(n_indisp_ins > 0 or n_conf_ins < n_total_ins)
                         ):
@@ -8681,10 +8694,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         value=float(qtd_env_atual_ins) if pd.notna(qtd_env_atual_ins) else float(item_ins['quantidade']),
                                         step=1.0, key=f"alm_ins_qtdparcial_{item_ins['id']}"
                                     )
+                                obs_ins_atual_raw = item_ins.get('observacao')
+                                obs_atual_ins = obs_ins_atual_raw if pd.notna(obs_ins_atual_raw) else ''
                                 if acao_ins != st_ins or (acao_ins == "Parcial" and qtd_parcial_nova_ins != qtd_env_atual_ins):
-                                    atualizar_item_insumo(int(item_ins['id']), acao_ins, item_ins.get('observacao') or '', st.session_state.usuario_nome, qtd_parcial_nova_ins)
+                                    atualizar_item_insumo(int(item_ins['id']), acao_ins, obs_atual_ins, st.session_state.usuario_nome, qtd_parcial_nova_ins)
                                     st.rerun()
-                                obs_atual_ins = item_ins.get('observacao') or ''
                                 obs_nova_ins  = st.text_input(f"Obs — {item_ins['descricao']}:", value=obs_atual_ins,
                                                           key=f"alm_ins_obs_{item_ins['id']}", placeholder="Ex: em falta, previsão 20/06...")
                                 if obs_nova_ins != obs_atual_ins:
@@ -8844,16 +8858,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         f"({int(rm_row['qtd_itens'])} item(ns)) — por {rm_row['criado_por']}{tag_terc}"
                     ):
                         df_itens_rom = carregar_itens_romaneio_manual(int(rm_row['id']))
-                        st.caption(f"Projeto {rm_row.get('numero_projeto') or '—'} · {rm_row.get('etapa') or 'Sem etapa'}")
+                        st.caption(f"Projeto {_nn(rm_row.get('numero_projeto'), '—')} · {_nn(rm_row.get('etapa'), 'Sem etapa')}")
                         if rm_terc:
-                            st.caption(f"Empresa recebedora: **{rm_row.get('empresa_terceiro') or '—'}**")
+                            st.caption(f"Empresa recebedora: **{_nn(rm_row.get('empresa_terceiro'), '—')}**")
                         st.dataframe(df_itens_rom[['descricao', 'cod', 'peso_kg', 'unidade', 'quantidade']], hide_index=True, use_container_width=True)
                         rmb1, rmb2 = st.columns(2)
                         with rmb1:
                             rom_bytes = gerar_romaneio_manual_xlsx(
                                 rm_row['obra_vinculada'], rm_row['data_recebimento'], df_itens_rom, rm_row['criado_por'],
-                                numero_projeto=rm_row.get('numero_projeto') or '', etapa=rm_row.get('etapa') or '',
-                                terceirizado=rm_terc, empresa_terceiro=rm_row.get('empresa_terceiro') or '',
+                                numero_projeto=_nn(rm_row.get('numero_projeto')), etapa=_nn(rm_row.get('etapa')),
+                                terceirizado=rm_terc, empresa_terceiro=_nn(rm_row.get('empresa_terceiro')),
                                 numero_sequencial=rm_num if pd.notna(rm_num) else None
                             )
                             st.download_button(
@@ -8995,9 +9009,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                     with st.expander(
                         f"{icone_lm} {lista_row['obra']} — {lista_row['titulo']} "
-                        f"({int(lista_row.get('qtd_itens') or 0)} item(ns)) — por {lista_row.get('criado_por','—')}"
+                        f"({int(_nn(lista_row.get('qtd_itens'), 0))} item(ns)) — por {_nn(lista_row.get('criado_por'), '—')}"
                     ):
-                        st.caption(f"Projeto {lista_row.get('numero_projeto') or '—'} · Criada em {pd.to_datetime(lista_row['criado_em']).strftime('%d/%m/%Y %H:%M')}")
+                        st.caption(f"Projeto {_nn(lista_row.get('numero_projeto'), '—')} · Criada em {pd.to_datetime(lista_row['criado_em']).strftime('%d/%m/%Y %H:%M')}")
 
                         if df_itens_lm.empty:
                             st.info("Nenhum item cadastrado nessa lista.")
@@ -9077,9 +9091,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 with ei1:
                                     qtd_total_edit = st.number_input("Qtd Total:", min_value=0.0, value=float(item_sel_row['qtd_total']), step=1.0, key=f"lm_qtd_edit_{lista_id}_{item_sel_id}")
                                 with ei2:
-                                    uso_edit = st.text_input("Uso:", value=item_sel_row.get('uso') or '', key=f"lm_uso_edit_{lista_id}_{item_sel_id}")
+                                    uso_edit = st.text_input("Uso:", value=_nn(item_sel_row.get('uso')), key=f"lm_uso_edit_{lista_id}_{item_sel_id}")
                                 with ei3:
-                                    obs_edit = st.text_input("Observações:", value=item_sel_row.get('observacoes') or '', key=f"lm_obs_edit_{lista_id}_{item_sel_id}")
+                                    obs_edit = st.text_input("Observações:", value=_nn(item_sel_row.get('observacoes')), key=f"lm_obs_edit_{lista_id}_{item_sel_id}")
                                 eb1, eb2 = st.columns(2)
                                 with eb1:
                                     if st.button("💾 Salvar alterações", key=f"btn_edit_item_lm_{lista_id}_{item_sel_id}"):
@@ -9161,8 +9175,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 with st.container(border=True):
                                     cenv1, cenv2 = st.columns([4, 1])
                                     with cenv1:
-                                        st.markdown(f"**{pd.to_datetime(envio_row['data_envio']).strftime('%d/%m/%Y')}** — {envio_row.get('destino') or '—'}")
-                                        st.caption(f"{int(envio_row.get('qtd_itens') or 0)} item(ns) · por {envio_row.get('enviado_por','—')}")
+                                        st.markdown(f"**{pd.to_datetime(envio_row['data_envio']).strftime('%d/%m/%Y')}** — {_nn(envio_row.get('destino'), '—')}")
+                                        st.caption(f"{int(_nn(envio_row.get('qtd_itens'), 0))} item(ns) · por {_nn(envio_row.get('enviado_por'), '—')}")
                                     with cenv2:
                                         # So monta o xlsx quando a pessoa pede -- antes era gerado pra
                                         # TODO envio de TODA lista so' pra deixar o botao pronto, mesmo
@@ -9872,12 +9886,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
             def _saldo_pendente_rel(row, col_original, col_real):
                 base = row.get(col_real)
-                base = float(base) if pd.notna(base) and base and base > 0 else float(row.get(col_original) or 0)
+                base = float(base) if pd.notna(base) and base and base > 0 else float(_nn(row.get(col_original), 0))
                 if row['Status_Item'] == 'Concluido':
                     return base if filtro_apenas_concluidos_rel else 0.0
                 qtd_total_p = row.get('qtd_total')
                 if pd.notna(qtd_total_p) and qtd_total_p > 0:
-                    frac_pendente = float(row.get('saldo') or 0) / float(qtd_total_p)
+                    frac_pendente = float(_nn(row.get('saldo'), 0)) / float(qtd_total_p)
                     return base * frac_pendente
                 return base
 
