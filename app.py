@@ -7,6 +7,8 @@ import os
 import secrets
 import time
 import base64
+import io
+import zipfile
 import bcrypt
 import psycopg2
 import psycopg2.extras
@@ -2076,6 +2078,25 @@ def carregar_conteudo_arquivo(arquivo_id: int):
         return None
     finally:
         liberar_conexao(conn)
+
+def _montar_zip_arquivos_op(arquivos: list) -> bytes:
+    """Empacota o conteudo de varios arquivos (id, nome, ...) num .zip em memoria."""
+    buffer = io.BytesIO()
+    nomes_usados: dict[str, int] = {}
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for arq in arquivos:
+            arq_id, arq_nome = arq[0], arq[1]
+            conteudo_arq = carregar_conteudo_arquivo(arq_id)
+            if not conteudo_arq:
+                continue
+            _, _, bytes_arq = conteudo_arq
+            n = nomes_usados.get(arq_nome, 0)
+            nomes_usados[arq_nome] = n + 1
+            if n:
+                base, ext = os.path.splitext(arq_nome)
+                arq_nome = f"{base} ({n}){ext}"
+            zf.writestr(arq_nome, bytes(bytes_arq))
+    return buffer.getvalue()
 
 def _link_abrir_arquivo(nome: str, tipo: str, conteudo: bytes) -> str | None:
     """Link 'abrir em nova aba' (via data URI) pra tipos que o navegador consegue exibir
@@ -5902,6 +5923,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             time.sleep(0.3)
                                             st.rerun()
                                 if arqs_esq:
+                                    zip_key_esq = f"zip_op_esq_{row['id']}"
+                                    if st.button(f"📦 Gerar ZIP ({len(arqs_esq)})", key=f"btn_{zip_key_esq}"):
+                                        st.session_state[zip_key_esq] = _montar_zip_arquivos_op(arqs_esq)
+                                    if zip_key_esq in st.session_state:
+                                        st.download_button(
+                                            "⬇️ Baixar todos (.zip)",
+                                            data=st.session_state[zip_key_esq],
+                                            file_name=f"OP_{row['Num_OP'] if row.get('Num_OP') else row['id']}_arquivos.zip",
+                                            mime="application/zip",
+                                            key=f"dl_{zip_key_esq}"
+                                        )
                                     for arq in arqs_esq:
                                         arq_id, arq_nome, arq_tipo, arq_enviado_por, _ = arq
                                         ca1, ca2, ca3, ca4 = st.columns([4, 1, 1, 1])
@@ -6757,7 +6789,20 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         st.rerun()
 
                             if arqs_existentes:
-                                st.markdown("**Arquivos anexados:**")
+                                col_tit_arq, col_zip_arq = st.columns([3, 2])
+                                col_tit_arq.markdown("**Arquivos anexados:**")
+                                with col_zip_arq:
+                                    zip_key = f"zip_op_{lote_id}"
+                                    if st.button(f"📦 Gerar ZIP ({len(arqs_existentes)})", key=f"btn_{zip_key}"):
+                                        st.session_state[zip_key] = _montar_zip_arquivos_op(arqs_existentes)
+                                    if zip_key in st.session_state:
+                                        st.download_button(
+                                            "⬇️ Baixar todos (.zip)",
+                                            data=st.session_state[zip_key],
+                                            file_name=f"OP_{row_lote['Num_OP']}_arquivos.zip",
+                                            mime="application/zip",
+                                            key=f"dl_{zip_key}"
+                                        )
                                 for arq in arqs_existentes:
                                     arq_id, arq_nome, arq_tipo, arq_enviado_por, arq_enviado_em = arq
                                     col_a, col_b, col_link, col_c = st.columns([4, 2, 1, 1])
