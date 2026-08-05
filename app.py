@@ -2164,6 +2164,38 @@ def _link_abrir_arquivo(nome: str, tipo: str, conteudo: bytes) -> str | None:
     b64 = base64.b64encode(conteudo).decode('ascii')
     return f'<a href="data:{mime};base64,{b64}" target="_blank" rel="noopener noreferrer" title="Abrir em nova aba">🔗</a>'
 
+def _bloco_baixar_arquivo(arq_id: int, arq_nome: str, arq_tipo: str, key_prefix: str,
+                           col_link=None, col_download=None, rotulo: str = "⬇️"):
+    """Botao de abrir/baixar 1 anexo SEM puxar o conteudo do banco ate o clique.
+
+    Antes, toda vez que a tela renderizava (Painel TV, telas de producao), o app
+    carregava os bytes completos de TODO anexo de TODO lote visivel pra montar o link
+    de abrir e o botao de baixar -- mesmo com o expander fechado, porque o corpo dele
+    roda de qualquer jeito. Com lotes cheios de PDF/imagem grande isso pesava bastante
+    na renderizacao. Agora so busca o conteudo quando a pessoa clica pra ver aquele
+    arquivo especifico; o primeiro clique carrega (via carregar_conteudo_arquivo, que
+    ja e' cacheado) e revela o link/botao de download de verdade na mesma passada."""
+    alvo = col_download if col_download is not None else st
+    flag_key = f"ver_arq_{key_prefix}_{arq_id}"
+    if not st.session_state.get(flag_key):
+        if alvo.button(rotulo, key=f"prep_{key_prefix}_{arq_id}", help="Carregar arquivo"):
+            st.session_state[flag_key] = True
+        else:
+            return
+    conteudo_arq = carregar_conteudo_arquivo(arq_id)
+    if not conteudo_arq:
+        alvo.caption("Erro ao carregar.")
+        return
+    _, _, bytes_arq = conteudo_arq
+    if col_link is not None:
+        link_abrir = _link_abrir_arquivo(arq_nome, arq_tipo, bytes(bytes_arq))
+        if link_abrir:
+            col_link.markdown(link_abrir, unsafe_allow_html=True)
+    alvo.download_button(
+        rotulo, data=bytes(bytes_arq), file_name=arq_nome,
+        mime=arq_tipo or "application/octet-stream", key=f"dl_{key_prefix}_{arq_id}"
+    )
+
 def deletar_arquivo_op(arquivo_id: int):
     conn = conectar_banco()
     try:
@@ -5391,17 +5423,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         arq_id, arq_nome, arq_tipo, arq_enviado_por, _ = arq
                                         ca1, ca2, ca3, ca4 = st.columns([4, 1, 1, 1])
                                         ca1.markdown(f"📄 **{html_escape(arq_nome)}**  \n<small style='color:#94A3B8'>{html_escape(arq_enviado_por)}</small>", unsafe_allow_html=True)
-                                        conteudo_arq = carregar_conteudo_arquivo(arq_id)
-                                        if conteudo_arq:
-                                            _, _, bytes_arq = conteudo_arq
-                                            link_abrir = _link_abrir_arquivo(arq_nome, arq_tipo, bytes(bytes_arq))
-                                            if link_abrir:
-                                                ca2.markdown(link_abrir, unsafe_allow_html=True)
-                                            ca3.download_button(
-                                                "⬇️", data=bytes(bytes_arq),
-                                                file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
-                                                key=f"acm_dl_{arq_id}"
-                                            )
+                                        _bloco_baixar_arquivo(arq_id, arq_nome, arq_tipo, "acm", col_link=ca2, col_download=ca3)
                                         if setor in ["Master", "PCP"]:
                                             with ca4:
                                                 if st.button("🗑️", key=f"acm_del_arq_{arq_id}"):
@@ -5741,14 +5763,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         with st.expander("📂 Ver arquivos", expanded=False):
                             for arq in arqs_tv:
                                 arq_id, arq_nome, arq_tipo, _, _ = arq
-                                conteudo_arq = carregar_conteudo_arquivo(arq_id)
-                                if conteudo_arq:
-                                    _, _, bytes_arq = conteudo_arq
-                                    st.download_button(
-                                        f"⬇️ {arq_nome}", data=bytes(bytes_arq),
-                                        file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
-                                        key=f"tv_{key_prefix}_dl_{arq_id}"
-                                    )
+                                _bloco_baixar_arquivo(arq_id, arq_nome, arq_tipo, f"tv_{key_prefix}",
+                                                      rotulo=f"⬇️ {arq_nome}")
 
                 col_prod, col_pend, col_conc = st.columns(3)
                 colunas_tv = [
@@ -6082,17 +6098,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         arq_id, arq_nome, arq_tipo, arq_enviado_por, _ = arq
                                         ca1, ca2, ca3, ca4 = st.columns([4, 1, 1, 1])
                                         ca1.markdown(f"📄 **{html_escape(arq_nome)}**  \n<small style='color:#94A3B8'>{html_escape(arq_enviado_por)}</small>", unsafe_allow_html=True)
-                                        conteudo_arq = carregar_conteudo_arquivo(arq_id)
-                                        if conteudo_arq:
-                                            _, _, bytes_arq = conteudo_arq
-                                            link_abrir = _link_abrir_arquivo(arq_nome, arq_tipo, bytes(bytes_arq))
-                                            if link_abrir:
-                                                ca2.markdown(link_abrir, unsafe_allow_html=True)
-                                            ca3.download_button(
-                                                "⬇️", data=bytes(bytes_arq),
-                                                file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
-                                                key=f"esq_dl_{arq_id}"
-                                            )
+                                        _bloco_baixar_arquivo(arq_id, arq_nome, arq_tipo, "esq", col_link=ca2, col_download=ca3)
                                         if setor in ["Master", "PCP"]:
                                             with ca4:
                                                 if st.button("🗑️", key=f"esq_del_arq_{arq_id}"):
@@ -6378,14 +6384,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         with st.expander("📂 Ver arquivos", expanded=False):
                             for arq in arqs_tv:
                                 arq_id, arq_nome, arq_tipo, _, _ = arq
-                                conteudo_arq = carregar_conteudo_arquivo(arq_id)
-                                if conteudo_arq:
-                                    _, _, bytes_arq = conteudo_arq
-                                    st.download_button(
-                                        f"⬇️ {arq_nome}", data=bytes(bytes_arq),
-                                        file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
-                                        key=f"tvesq_{key_prefix}_dl_{arq_id}"
-                                    )
+                                _bloco_baixar_arquivo(arq_id, arq_nome, arq_tipo, f"tvesq_{key_prefix}",
+                                                      rotulo=f"⬇️ {arq_nome}")
 
                 col_prod_e, col_pend_e, col_conc_e = st.columns(3)
                 colunas_tv_esq = [
@@ -6953,18 +6953,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     col_a, col_b, col_link, col_c = st.columns([4, 2, 1, 1])
                                     col_a.markdown(f"📄 **{html_escape(arq_nome)}**")
                                     col_b.caption(f"{arq_enviado_por} — {pd.to_datetime(arq_enviado_em).strftime('%d/%m/%Y %H:%M')}")
-                                    conteudo_arq = carregar_conteudo_arquivo(arq_id)
-                                    if conteudo_arq:
-                                        _, _, bytes_arq = conteudo_arq
-                                        link_abrir = _link_abrir_arquivo(arq_nome, arq_tipo, bytes(bytes_arq))
-                                        if link_abrir:
-                                            col_link.markdown(link_abrir, unsafe_allow_html=True)
-                                        with col_c:
-                                            st.download_button(
-                                                "⬇️", data=bytes(bytes_arq),
-                                                file_name=arq_nome, mime=arq_tipo or "application/octet-stream",
-                                                key=f"dl_arq_{arq_id}"
-                                            )
+                                    _bloco_baixar_arquivo(arq_id, arq_nome, arq_tipo, "op", col_link=col_link, col_download=col_c)
                                     if setor in ["Master", "PCP"]:
                                         if st.button("🗑️ Remover", key=f"del_arq_{arq_id}"):
                                             deletar_arquivo_op(arq_id)
@@ -9164,14 +9153,22 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         st.markdown(f"**{pd.to_datetime(envio_row['data_envio']).strftime('%d/%m/%Y')}** — {envio_row.get('destino') or '—'}")
                                         st.caption(f"{int(envio_row.get('qtd_itens') or 0)} item(ns) · por {envio_row.get('enviado_por','—')}")
                                     with cenv2:
-                                        df_itens_envio_lm = carregar_itens_envio_lista_mestra(envio_id)
-                                        rom_lm_bytes = gerar_romaneio_lista_mestra_xlsx(lista_row, envio_row, df_itens_envio_lm)
-                                        st.download_button(
-                                            "🖨️ Romaneio", data=rom_lm_bytes,
-                                            file_name=f"Romaneio_ListaMestra_{lista_id}_{pd.to_datetime(envio_row['data_envio']).strftime('%Y%m%d')}_{envio_id}.xlsx",
-                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                            key=f"dl_envio_lm_{envio_id}"
-                                        )
+                                        # So monta o xlsx quando a pessoa pede -- antes era gerado pra
+                                        # TODO envio de TODA lista so' pra deixar o botao pronto, mesmo
+                                        # que ninguem clicasse (pesado com muitos envios na tela).
+                                        rom_lm_key = f"rom_lm_{envio_id}"
+                                        if not st.session_state.get(rom_lm_key):
+                                            if st.button("🖨️ Romaneio", key=f"prep_rom_lm_{envio_id}"):
+                                                df_itens_envio_lm = carregar_itens_envio_lista_mestra(envio_id)
+                                                st.session_state[rom_lm_key] = gerar_romaneio_lista_mestra_xlsx(
+                                                    lista_row, envio_row, df_itens_envio_lm)
+                                        if st.session_state.get(rom_lm_key):
+                                            st.download_button(
+                                                "⬇️ Baixar Romaneio", data=st.session_state[rom_lm_key],
+                                                file_name=f"Romaneio_ListaMestra_{lista_id}_{pd.to_datetime(envio_row['data_envio']).strftime('%Y%m%d')}_{envio_id}.xlsx",
+                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                                key=f"dl_envio_lm_{envio_id}"
+                                            )
                                         if setor in ["Master", "Almoxarifado"]:
                                             confirm_key_lm = f"confirm_estorno_lm_{envio_id}"
                                             if not st.session_state.get(confirm_key_lm):
