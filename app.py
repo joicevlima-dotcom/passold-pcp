@@ -2035,26 +2035,40 @@ def _carimbar_num_op(nome: str, conteudo: bytes, num_op: str) -> bytes:
         pass  # se o carimbo falhar por qualquer motivo, guarda o arquivo original em vez de travar o upload
     return conteudo
 
-def salvar_arquivo_op(item_id: int, nome: str, tipo: str, conteudo: bytes, usuario: str):
+def _buscar_num_op_item(item_id: int) -> str | None:
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT Num_OP FROM itens_detalhado WHERE id=%s", (item_id,))
-        row_op = cursor.fetchone()
-        num_op = row_op[0] if row_op else None
-        conteudo = _carimbar_num_op(nome, conteudo, num_op)
-        cursor.execute(
+        row = cursor.fetchone()
+        return row[0] if row else None
+    finally:
+        liberar_conexao(conn)
+
+def salvar_arquivos_op_lote(item_id: int, arquivos_carimbados: list, usuario: str) -> int:
+    """Versao em lote de salvar_arquivo_op: recebe os arquivos JA carimbados
+    (lista de (nome, tipo, conteudo)) e faz 1 INSERT + 1 commit + 1 clear de cache pro
+    lote inteiro, em vez de repetir tudo isso arquivo por arquivo. Enviar 100+ arquivos
+    de uma vez travava a tela justamente por causa disso -- cada arquivo, sozinho, ja
+    fazia sua propria ida-e-volta ao banco pra buscar o Num_OP, seu proprio INSERT e seu
+    proprio commit."""
+    if not arquivos_carimbados:
+        return 0
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.executemany(
             "INSERT INTO arquivos_op (item_id, nome_arquivo, tipo_arquivo, conteudo, enviado_por) VALUES (%s,%s,%s,%s,%s)",
-            (item_id, nome, tipo, conteudo, usuario)
+            [(item_id, nome, tipo, conteudo, usuario) for nome, tipo, conteudo in arquivos_carimbados]
         )
         conn.commit()
         carregar_arquivos_op.clear()
         carregar_arquivos_op_varios.clear()
-        return True
+        return len(arquivos_carimbados)
     except Exception as e:
         conn.rollback()
-        st.error(f"Erro ao salvar arquivo: {e}")
-        return False
+        st.error(f"Erro ao salvar arquivos: {e}")
+        return 0
     finally:
         liberar_conexao(conn)
 
@@ -5360,10 +5374,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     )
                                     if uploaded_list_acm:
                                         if st.button(f"💾 Salvar {len(uploaded_list_acm)} arquivo(s)", key=f"btn_salvar_acm_{row['id']}", type="primary"):
-                                            n_salvos_acm = 0
-                                            for uploaded in uploaded_list_acm:
-                                                if salvar_arquivo_op(int(row['id']), uploaded.name, uploaded.type or "", uploaded.read(), st.session_state.usuario_nome):
-                                                    n_salvos_acm += 1
+                                            num_op_acm = _buscar_num_op_item(int(row['id']))
+                                            progress_acm = st.progress(0.0)
+                                            prontos_acm = []
+                                            for i_acm, uploaded in enumerate(uploaded_list_acm, start=1):
+                                                conteudo_acm = _carimbar_num_op(uploaded.name, uploaded.read(), num_op_acm)
+                                                prontos_acm.append((uploaded.name, uploaded.type or "", conteudo_acm))
+                                                progress_acm.progress(i_acm / len(uploaded_list_acm), text=f"Processando {i_acm}/{len(uploaded_list_acm)}...")
+                                            n_salvos_acm = salvar_arquivos_op_lote(int(row['id']), prontos_acm, st.session_state.usuario_nome)
+                                            progress_acm.empty()
                                             st.toast(f"✅ {n_salvos_acm} arquivo(s) salvo(s)!")
                                             time.sleep(0.3)
                                             st.rerun()
@@ -6035,10 +6054,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     )
                                     if uploaded_list_esq:
                                         if st.button(f"💾 Salvar {len(uploaded_list_esq)} arquivo(s)", key=f"btn_salvar_esq_{row['id']}", type="primary"):
-                                            n_salvos_esq = 0
-                                            for uploaded in uploaded_list_esq:
-                                                if salvar_arquivo_op(int(row['id']), uploaded.name, uploaded.type or "", uploaded.read(), st.session_state.usuario_nome):
-                                                    n_salvos_esq += 1
+                                            num_op_esq = _buscar_num_op_item(int(row['id']))
+                                            progress_esq = st.progress(0.0)
+                                            prontos_esq = []
+                                            for i_esq, uploaded in enumerate(uploaded_list_esq, start=1):
+                                                conteudo_esq = _carimbar_num_op(uploaded.name, uploaded.read(), num_op_esq)
+                                                prontos_esq.append((uploaded.name, uploaded.type or "", conteudo_esq))
+                                                progress_esq.progress(i_esq / len(uploaded_list_esq), text=f"Processando {i_esq}/{len(uploaded_list_esq)}...")
+                                            n_salvos_esq = salvar_arquivos_op_lote(int(row['id']), prontos_esq, st.session_state.usuario_nome)
+                                            progress_esq.empty()
                                             st.toast(f"✅ {n_salvos_esq} arquivo(s) salvo(s)!")
                                             time.sleep(0.3)
                                             st.rerun()
@@ -6897,17 +6921,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 )
                                 if uploaded_list:
                                     if st.button(f"💾 Salvar {len(uploaded_list)} arquivo(s)", key=f"btn_salvar_arq_{lote_id}", type="primary"):
-                                        n_salvos = 0
-                                        for uploaded in uploaded_list:
-                                            ok = salvar_arquivo_op(
-                                                lote_id,
-                                                uploaded.name,
-                                                uploaded.type or "",
-                                                uploaded.read(),
-                                                st.session_state.usuario_nome
-                                            )
-                                            if ok:
-                                                n_salvos += 1
+                                        progress_op = st.progress(0.0)
+                                        prontos_op = []
+                                        for i_op, uploaded in enumerate(uploaded_list, start=1):
+                                            conteudo_op = _carimbar_num_op(uploaded.name, uploaded.read(), row_lote['Num_OP'])
+                                            prontos_op.append((uploaded.name, uploaded.type or "", conteudo_op))
+                                            progress_op.progress(i_op / len(uploaded_list), text=f"Processando {i_op}/{len(uploaded_list)}...")
+                                        n_salvos = salvar_arquivos_op_lote(lote_id, prontos_op, st.session_state.usuario_nome)
+                                        progress_op.empty()
                                         st.toast(f"✅ {n_salvos} arquivo(s) salvo(s)!")
                                         time.sleep(0.3)
                                         st.rerun()
