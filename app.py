@@ -384,10 +384,20 @@ def conectar_banco():
     # preenchidas com NOW() (Concluido_Em, criado_em, emitido_em, enviado_em etc) gravam
     # o "agora" convertido pra esse fuso da sessao -- sem isso, ficam 3h na frente do
     # horario de Sao Paulo. Fixa aqui, no unico ponto por onde toda conexao passa.
+    #
+    # PERFORMANCE: "SET TIME ZONE" e' configuracao DE SESSAO -- vale pra conexao inteira,
+    # nao so pra proxima query. Como o pool reaproveita as mesmas conexoes fisicas, rodar
+    # o SET + COMMIT a cada checkout custava 2 idas e voltas de rede ao Supabase em TODA
+    # chamada ao banco (com dezenas de chamadas por rerun, isso e' segundos de espera).
+    # "TimeZone" e' um parametro GUC_REPORT: o Postgres avisa o cliente sempre que ele
+    # muda, e o psycopg2 guarda o valor localmente em conn.info.parameter_status(). Ler
+    # dai nao gera trafego de rede, entao so mandamos o SET quando a conexao realmente
+    # ainda nao esta no fuso certo (conexao nova, ou recriada pelo pool apos erro).
     try:
-        cursor = conn.cursor()
-        cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
-        conn.commit()
+        if conn.info.parameter_status('TimeZone') != 'America/Sao_Paulo':
+            cursor = conn.cursor()
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            conn.commit()
     except Exception:
         pass
     return conn
@@ -2039,6 +2049,7 @@ def salvar_arquivo_op(item_id: int, nome: str, tipo: str, conteudo: bytes, usuar
         )
         conn.commit()
         carregar_arquivos_op.clear()
+        carregar_arquivos_op_varios.clear()
         return True
     except Exception as e:
         conn.rollback()
@@ -2060,6 +2071,36 @@ def carregar_arquivos_op(item_id: int):
         return rows  # lista de (id, nome, tipo, enviado_por, enviado_em)
     except Exception:
         return []
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=20)
+def carregar_arquivos_op_varios(item_ids: tuple):
+    """Versao em lote de carregar_arquivos_op: traz os anexos de VARIAS OPs numa query so.
+
+    As telas de producao/painel listam dezenas de lotes e pediam os anexos de um em um
+    (N+1) -- com o banco remoto, cada uma dessas chamadas custa uma ida e volta de rede,
+    entao 60 lotes viravam 60 consultas sequenciais. Aqui e' uma unica consulta.
+    Retorna dict {item_id: [(id, nome, tipo, enviado_por, enviado_em), ...]}; item sem
+    anexo nenhum vem como lista vazia, pra chamada ficar igual a da versao individual.
+    """
+    ids = tuple(int(i) for i in item_ids)
+    resultado: dict[int, list] = {i: [] for i in ids}
+    if not ids:
+        return resultado
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT item_id, id, nome_arquivo, tipo_arquivo, enviado_por, enviado_em "
+            "FROM arquivos_op WHERE item_id = ANY(%s) ORDER BY enviado_em DESC",
+            (list(ids),)
+        )
+        for item_id, arq_id, nome, tipo, enviado_por, enviado_em in cursor.fetchall():
+            resultado.setdefault(int(item_id), []).append((arq_id, nome, tipo, enviado_por, enviado_em))
+        return resultado
+    except Exception:
+        return resultado
     finally:
         liberar_conexao(conn)
 
@@ -2116,6 +2157,7 @@ def deletar_arquivo_op(arquivo_id: int):
         cursor.execute("DELETE FROM arquivos_op WHERE id=%s", (arquivo_id,))
         conn.commit()
         carregar_arquivos_op.clear()
+        carregar_arquivos_op_varios.clear()
         return True
     except Exception as e:
         conn.rollback()
@@ -2137,6 +2179,34 @@ def carregar_comentarios(entidade_tipo: str, entidade_id: int):
     finally:
         liberar_conexao(conn)
 
+@st.cache_data(ttl=10)
+def carregar_comentarios_varios(entidade_tipo: str, entidade_ids: tuple):
+    """Versao em lote de carregar_comentarios: comentarios de VARIAS entidades numa query.
+
+    Mesmo motivo da carregar_arquivos_op_varios: as telas de producao chamavam o bloco de
+    comentarios lote a lote, e cada chamada era uma ida e volta de rede ao banco.
+    Retorna dict {entidade_id: DataFrame} no mesmo formato de carregar_comentarios.
+    """
+    ids = tuple(int(i) for i in entidade_ids)
+    vazio = pd.DataFrame(columns=['autor', 'texto', 'criado_em'])
+    resultado: dict[int, pd.DataFrame] = {i: vazio for i in ids}
+    if not ids:
+        return resultado
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            "SELECT entidade_id, autor, texto, criado_em FROM comentarios "
+            "WHERE entidade_tipo=%s AND entidade_id = ANY(%s) ORDER BY criado_em ASC",
+            conn, params=(entidade_tipo, list(ids))
+        )
+        for ent_id, grupo in df.groupby('entidade_id', sort=False):
+            resultado[int(ent_id)] = grupo.drop(columns=['entidade_id']).reset_index(drop=True)
+        return resultado
+    except Exception:
+        return resultado
+    finally:
+        liberar_conexao(conn)
+
 def adicionar_comentario(entidade_tipo: str, entidade_id: int, autor: str, texto: str):
     conn = conectar_banco()
     try:
@@ -2147,16 +2217,23 @@ def adicionar_comentario(entidade_tipo: str, entidade_id: int, autor: str, texto
         )
         conn.commit()
         carregar_comentarios.clear()
+        carregar_comentarios_varios.clear()
     except Exception as e:
         conn.rollback()
         st.error(f"Erro ao adicionar comentário: {e}")
     finally:
         liberar_conexao(conn)
 
-def bloco_comentarios(entidade_tipo: str, entidade_id: int, key_prefix: str):
+def bloco_comentarios(entidade_tipo: str, entidade_id: int, key_prefix: str, df_com=None):
     """Historico de comentarios acumulado (nunca sobrescreve, so adiciona) — com
-    autor e data de cada registro, tipo o historico de um card de Trello/Pipefy."""
-    df_com = carregar_comentarios(entidade_tipo, entidade_id)
+    autor e data de cada registro, tipo o historico de um card de Trello/Pipefy.
+
+    df_com opcional: quem chama dentro de um laco pode pre-carregar os comentarios de
+    todos os itens de uma vez (carregar_comentarios_varios) e passar o DataFrame ja
+    pronto, evitando uma consulta por item. Sem esse argumento o comportamento e' o
+    de sempre — busca o item individualmente."""
+    if df_com is None:
+        df_com = carregar_comentarios(entidade_tipo, entidade_id)
     with st.expander(f"💬 Comentários ({len(df_com)})", expanded=False):
         if df_com.empty:
             st.caption("Nenhum comentário ainda.")
@@ -3423,6 +3500,37 @@ def carregar_pecas_lote(lote_id: int):
     finally:
         liberar_conexao(conn)
     return df
+
+def carregar_pecas_varios_lotes(lote_ids) -> dict:
+    """Pecas de VARIOS lotes numa consulta so — versao em lote de carregar_pecas_lote.
+
+    De proposito NAO e' cacheada: a fila de romaneios da Logistica chamava
+    carregar_pecas_lote uma vez por OP da lista (N idas e voltas ao banco no primeiro
+    carregamento da tela). Uma consulta unica e direta sai mais barato que N consultas
+    cacheadas e ainda mostra quantidade enviada/saldo sempre atualizada, que e' o que
+    importa numa tela que emite romaneio. Sem cache novo, tambem nao ha risco de ficar
+    desatualizada em relacao aos .clear() ja espalhados pelo arquivo.
+
+    Retorna {lote_id: DataFrame} no mesmo formato de carregar_pecas_lote.
+    """
+    ids = tuple(sorted(int(i) for i in lote_ids))
+    if not ids:
+        return {}
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            "SELECT * FROM op_pecas WHERE lote_id = ANY(%s) ORDER BY lote_id, id",
+            conn, params=(list(ids),)
+        )
+    except Exception:
+        return {}
+    finally:
+        liberar_conexao(conn)
+    if df.empty:
+        return {i: df for i in ids}
+    por_lote = {int(k): v.reset_index(drop=True) for k, v in df.groupby('lote_id', sort=False)}
+    vazio = df.iloc[0:0]
+    return {i: por_lote.get(i, vazio) for i in ids}
 
 @st.cache_data(ttl=30)
 def carregar_todas_pecas_obra(obra: str):
@@ -5097,6 +5205,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         kc2.metric("Total caixas", int(lotes_sel['Qtd_Caixas'].sum()))
                         kc3.metric("Total m²", f"{lotes_sel['M2_Item'].sum():.2f}")
                         st.markdown("---")
+                        # Anexos de todos os lotes do dia numa consulta so (antes era 1 por lote)
+                        _ids_lotes_acm = tuple(sorted(int(i) for i in lotes_sel['id']))
+                        _arqs_por_lote_acm = carregar_arquivos_op_varios(_ids_lotes_acm)
+                        _coms_por_lote_acm = carregar_comentarios_varios('lote_producao', _ids_lotes_acm)
                         for _, row in lotes_sel.iterrows():
                             # Parcialmente Concluido sempre pode concluir o restante
                             eh_parcial    = row.get('Status_Item', '') == 'Parcialmente Concluido'
@@ -5236,7 +5348,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             st.rerun()
 
                             # ── ARQUIVOS DA OP ────────────────────────────────
-                            arqs_op = carregar_arquivos_op(int(row['id']))
+                            arqs_op = _arqs_por_lote_acm.get(int(row['id']), [])
                             label_arq_acm = f"📎 {len(arqs_op)} arquivo(s) anexado(s)" if arqs_op else "📎 Anexar arquivo"
                             with st.expander(label_arq_acm, expanded=False):
                                 if setor in ["Master", "PCP", "Engenharia", "Producao"]:
@@ -5282,7 +5394,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     st.caption("Nenhum arquivo anexado ainda.")
 
                             # ── COMENTÁRIOS ────────────────────────────────────
-                            bloco_comentarios('lote_producao', int(row['id']), f"acm_{row['id']}")
+                            bloco_comentarios('lote_producao', int(row['id']), f"acm_{row['id']}",
+                                              df_com=_coms_por_lote_acm.get(int(row['id'])))
 
                             # ── MODAL EM LARGURA TOTAL ─────────────────────────
                             if st.session_state.get(f"modal_pronto_{row['id']}", False):
@@ -5568,6 +5681,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 pendentes = df_tv[df_tv['Status_Item'] == 'Pendente'].sort_values('_dias_restantes')
                 concluidos = df_tv[df_tv['Status_Item'] == 'Concluido'].sort_values('Data_Limite_Obra', ascending=False)
 
+                # Anexos de todos os lotes da tela numa consulta so (antes era 1 por card)
+                _arqs_por_lote_tv = carregar_arquivos_op_varios(tuple(sorted(int(i) for i in df_tv['id'])))
+
                 def _card_lote(row, key_prefix):
                     urg  = row['_urgencia']
                     cfg  = URG_CONFIG[urg]
@@ -5580,7 +5696,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     obra_txt  = html_escape(str(row["Obra_Vinculada"]))
                     material_txt = html_escape(str(row["Tipo_Material"]))
                     romaneio_txt = html_escape(str(row["Romaneio_Chapas"])) if row["Romaneio_Chapas"] else "—"
-                    arqs_tv   = carregar_arquivos_op(int(row['id']))
+                    arqs_tv   = _arqs_por_lote_tv.get(int(row['id']), [])
                     clipe_badge = f"<div style='margin-top:6px;font-size:10px;color:#475569;'>📎 {len(arqs_tv)} arquivo(s)</div>" if arqs_tv else ""
                     em_parada_tv = bool(row.get('Em_Parada', False))
                     motivo_tv    = html_escape(str(row.get('Motivo_Parada'))) if em_parada_tv and pd.notna(row.get('Motivo_Parada')) else ''
@@ -5766,6 +5882,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         ke3.metric("Total kg", f"{lotes_sel_esq['Peso_Kg'].sum():.2f}" if 'Peso_Kg' in lotes_sel_esq.columns else "—")
                         st.markdown("---")
 
+                        # Anexos de todos os lotes do dia numa consulta so (antes era 1 por lote)
+                        _ids_lotes_esq = tuple(sorted(int(i) for i in lotes_sel_esq['id']))
+                        _arqs_por_lote_esq = carregar_arquivos_op_varios(_ids_lotes_esq)
+                        _coms_por_lote_esq = carregar_comentarios_varios('lote_producao', _ids_lotes_esq)
                         for _, row in lotes_sel_esq.iterrows():
                             eh_parcial = row.get('Status_Item', '') == 'Parcialmente Concluido'
                             pode_concluir = bool(row.get('_pode_concluir', False)) or eh_parcial
@@ -5903,7 +6023,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             st.rerun()
 
                             # ── ARQUIVOS DA OP ────────────────────────────────
-                            arqs_esq = carregar_arquivos_op(int(row['id']))
+                            arqs_esq = _arqs_por_lote_esq.get(int(row['id']), [])
                             label_arq_esq = f"📎 {len(arqs_esq)} arquivo(s) anexado(s)" if arqs_esq else "📎 Anexar arquivo"
                             with st.expander(label_arq_esq, expanded=False):
                                 if setor in ["Master", "PCP", "Engenharia", "Producao"]:
@@ -5960,7 +6080,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     st.caption("Nenhum arquivo anexado ainda.")
 
                             # ── COMENTÁRIOS ────────────────────────────────────
-                            bloco_comentarios('lote_producao', int(row['id']), f"esq_{row['id']}")
+                            bloco_comentarios('lote_producao', int(row['id']), f"esq_{row['id']}",
+                                              df_com=_coms_por_lote_esq.get(int(row['id'])))
 
                             if st.session_state.get(f"esq_modal_{row['id']}", False):
                                 with st.container(border=True):
@@ -6192,6 +6313,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 pendentes_esq  = df_tv_esq[df_tv_esq['Status_Item'] == 'Pendente'].sort_values('_dias_restantes')
                 concluidos_esq = df_tv_esq[df_tv_esq['Status_Item'] == 'Concluido'].sort_values('Data_Limite_Obra', ascending=False)
 
+                # Anexos de todos os lotes da tela numa consulta so (antes era 1 por card)
+                _arqs_por_lote_tv_esq = carregar_arquivos_op_varios(tuple(sorted(int(i) for i in df_tv_esq['id'])))
+
                 def _card_lote_esq(row, key_prefix):
                     urg  = row['_urgencia']
                     cfg  = URG_CONFIG_ESQ[urg]
@@ -6204,7 +6328,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     obra_txt  = html_escape(str(row["Obra_Vinculada"]))
                     lote_txt  = html_escape(str(row["Cod_Lote"]))
                     material_txt = html_escape(str(row["Tipo_Material"]))
-                    arqs_tv   = carregar_arquivos_op(int(row['id']))
+                    arqs_tv   = _arqs_por_lote_tv_esq.get(int(row['id']), [])
                     clipe_badge = f"<div style='margin-top:6px;font-size:10px;color:#475569;'>📎 {len(arqs_tv)} arquivo(s)</div>" if arqs_tv else ""
                     em_parada_tv = bool(row.get('Em_Parada', False))
                     motivo_tv    = html_escape(str(row.get('Motivo_Parada'))) if em_parada_tv and pd.notna(row.get('Motivo_Parada')) else ''
@@ -7955,8 +8079,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 if df_conc_log.empty:
                     st.info("Nenhuma OP finalizada ou com envio parcial aguardando romaneio.")
                 else:
+                    # Pecas de todas as OPs da fila numa consulta so (antes era 1 por OP)
+                    _pecas_por_lote_log = carregar_pecas_varios_lotes(df_conc_log['id'])
                     for _, row_c in df_conc_log.iterrows():
-                        df_pecas_c = carregar_pecas_lote(int(row_c['id']))
+                        df_pecas_c = _pecas_por_lote_log.get(int(row_c['id']))
+                        if df_pecas_c is None:
+                            df_pecas_c = carregar_pecas_lote(int(row_c['id']))
                         eh_parcial_c = row_c.get('Status_Item') == 'Parcialmente Concluido'
                         with st.container(border=True):
                             cc1, cc2, cc3 = st.columns([4, 2, 2])
@@ -8272,8 +8400,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                     df_rom_emitidos = carregar_romaneios_componentes_emitidos()
 
+                    # todos_comps (acima) ja traz a tabela componentes_op inteira; filtrar em
+                    # memoria evita uma consulta por OP (N+1) buscando exatamente os mesmos dados.
+                    _comps_por_item = {
+                        int(k): v.reset_index(drop=True)
+                        for k, v in todos_comps.groupby('item_id', sort=False)
+                    } if not todos_comps.empty else {}
+
                     for _, op_row in df_ops_comp.iterrows():
-                        df_comp = carregar_componentes_op(int(op_row['item_id']))
+                        df_comp = _comps_por_item.get(int(op_row['item_id']), todos_comps.iloc[0:0])
                         if df_comp.empty:
                             continue
                         n_total   = len(df_comp)
@@ -8462,8 +8597,19 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 if df_saidas.empty:
                     st.caption("Nenhuma saída registrada ainda.")
                 else:
+                    # df_todos_ins (topo da aba) ja tem a tabela saidas_insumos_itens inteira e e'
+                    # invalidada nas mesmas mutacoes que a versao por saida — filtrar em memoria
+                    # evita uma consulta por saida (N+1) buscando exatamente as mesmas linhas.
+                    _cols_ins = ['id', 'descricao', 'quantidade', 'unidade',
+                                 'status_item', 'observacao', 'quantidade_enviada']
+                    _itens_por_saida = {
+                        int(k): v.sort_values('id')[_cols_ins].reset_index(drop=True)
+                        for k, v in df_todos_ins.groupby('saida_id', sort=False)
+                    } if not df_todos_ins.empty else {}
+                    _itens_ins_vazio = pd.DataFrame(columns=_cols_ins)
+
                     for _, saida_row in df_saidas.iterrows():
-                        df_itens_saida = carregar_itens_saida_insumos(int(saida_row['id']))
+                        df_itens_saida = _itens_por_saida.get(int(saida_row['id']), _itens_ins_vazio)
                         n_total_ins = len(df_itens_saida)
                         n_conf_ins  = len(df_itens_saida[df_itens_saida['status_item'] != 'Aguardando Conferencia']) if n_total_ins else 0
                         n_indisp_ins = len(df_itens_saida[df_itens_saida['status_item'] == 'Indisponivel']) if n_total_ins else 0
@@ -8809,6 +8955,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 filtro_obra_lm = st.selectbox("Filtrar por obra:", obras_filtro_lm, key="lm_filtro_obra")
                 df_listas_lm_f = df_listas_lm if filtro_obra_lm == "Todas" else df_listas_lm[df_listas_lm['obra'] == filtro_obra_lm]
 
+                # Envios de todas as listas numa consulta so (antes era 1 por lista). O
+                # _todos traz as mesmas colunas do por-lista (mais obra/projeto/titulo) na
+                # mesma ordem, e os dois caches sao invalidados sempre juntos.
+                _envios_lm_todos = carregar_envios_lista_mestra_todos()
+
                 for _, lista_row in df_listas_lm_f.iterrows():
                     lista_id = int(lista_row['id'])
                     df_itens_lm = carregar_itens_lista_mestra(lista_id)
@@ -8978,7 +9129,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     else:
                                         st.error(msg_env)
 
-                        df_envios_lm = carregar_envios_lista_mestra(lista_id)
+                        df_envios_lm = (
+                            _envios_lm_todos[_envios_lm_todos['lista_id'] == lista_id].reset_index(drop=True)
+                            if not _envios_lm_todos.empty else carregar_envios_lista_mestra(lista_id)
+                        )
                         if not df_envios_lm.empty:
                             st.markdown("**Histórico de Envios:**")
                             for _, envio_row in df_envios_lm.iterrows():
