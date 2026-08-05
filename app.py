@@ -1319,6 +1319,49 @@ def carregar_micro():
     }
     return df.rename(columns=rename)
 
+@st.cache_data(ttl=30)
+def _montar_calendario_producao(escopo: str, obra_filtro: str) -> pd.DataFrame:
+    """Expande cada lote liberado num registro por dia util entre inicio e prazo --
+    e' o que alimenta o Calendario de Producao (ACM/Esquadrias).
+
+    Esse laco roda em Python puro (nao vetorizado) e faz row.to_dict() por dia util de
+    CADA lote, entao com 100+ lotes ele sozinho ja e' um trabalho perceptivel. Antes
+    rodava direto na pagina, sem cache -- ou seja, TODO clique na tela (marcar lote
+    como pronto, abrir um anexo, editar) refazia essa conta inteira do zero antes de
+    conseguir mostrar qualquer coisa, mesmo sem nenhuma relacao com o calendario. Com
+    cache, so recalcula quando os dados de carregar_micro() mudam de verdade (ate 30s)
+    ou quando o filtro de obra muda."""
+    df_m = carregar_micro()
+    if df_m.empty:
+        return pd.DataFrame()
+    df_base = df_m[
+        df_m['Status_Item'].isin(["Liberado para Fabrica", "Parcialmente Concluido"]) &
+        (df_m['Escopo'] == escopo)
+    ].copy()
+    if obra_filtro != "Todas as obras":
+        df_base = df_base[df_base['Obra_Vinculada'] == obra_filtro]
+    if df_base.empty:
+        return pd.DataFrame()
+    registros_exp = []
+    for _, row in df_base.iterrows():
+        if not prazo_valido(row['Data_Producao_Programada']) or not prazo_valido(row['Data_Limite_Obra']):
+            continue  # data faltando -- pula em vez de quebrar a pagina inteira
+        dt_ini = pd.to_datetime(row['Data_Producao_Programada']).date()
+        dt_fim = pd.to_datetime(row['Data_Limite_Obra']).date()
+        if dt_ini > dt_fim:
+            continue  # datas invertidas (erro de cadastro) -- nao aparece no calendario
+        ini_ultima_semana = max((pd.to_datetime(dt_fim) - timedelta(days=6)).date(), dt_ini)
+        dt_fim_loop = max(dt_fim, hoje_projeto().date())  # atrasado continua aparecendo ate ser concluido
+        dia = dt_ini
+        while dia <= dt_fim_loop:
+            if dia.weekday() < 5:  # sem producao aos finais de semana
+                r = row.to_dict()
+                r['_dia'] = dia
+                r['_pode_concluir'] = (dia >= ini_ultima_semana)
+                registros_exp.append(r)
+            dia += timedelta(days=1)
+    return pd.DataFrame(registros_exp) if registros_exp else pd.DataFrame()
+
 @st.cache_data(ttl=60)
 def carregar_micro_completo():
     """Histórico completo — usado no Relatório Geral. Limitado a 5000 registros mais recentes."""
@@ -3208,6 +3251,7 @@ def salvar_parada_op(item_id, em_parada: bool, motivo: str, usuario: str):
         )
         conn.commit()
         carregar_micro.clear()
+        _montar_calendario_producao.clear()
         return True
     except Exception as e:
         conn.rollback()
@@ -5151,26 +5195,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 if obra_tv != "Todas as obras":
                     df_base = df_base[df_base['Obra_Vinculada'] == obra_tv]
                 if not df_base.empty:
-                    registros_exp = []
-                    for _, row in df_base.iterrows():
-                        if not prazo_valido(row['Data_Producao_Programada']) or not prazo_valido(row['Data_Limite_Obra']):
-                            continue  # data faltando -- pula em vez de quebrar a pagina inteira
-                        dt_ini = pd.to_datetime(row['Data_Producao_Programada']).date()
-                        dt_fim = pd.to_datetime(row['Data_Limite_Obra']).date()
-                        if dt_ini > dt_fim:
-                            continue  # datas invertidas (erro de cadastro) -- nao aparece no calendario
-                        ini_ultima_semana = (pd.to_datetime(dt_fim) - timedelta(days=6)).date()
-                        ini_ultima_semana = max(ini_ultima_semana, dt_ini)
-                        dt_fim_loop = max(dt_fim, hoje_projeto().date())  # atrasado continua aparecendo ate ser concluido
-                        dia = dt_ini
-                        while dia <= dt_fim_loop:
-                            if dia.weekday() < 5:  # sem producao aos finais de semana
-                                r = row.to_dict()
-                                r['_dia'] = dia
-                                r['_pode_concluir'] = (dia >= ini_ultima_semana)
-                                registros_exp.append(r)
-                            dia += timedelta(days=1)
-                    df_exp = pd.DataFrame(registros_exp) if registros_exp else pd.DataFrame()
+                    df_exp = _montar_calendario_producao('ACM', obra_tv)
 
                     if "prog_mes" not in st.session_state:
                         st.session_state.prog_mes = hoje_projeto().month
@@ -5491,6 +5516,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 carregar_pecas_lote.clear()
                                                 carregar_todas_pecas_obra.clear()
                                                 carregar_micro_completo.clear()
+                                                _montar_calendario_producao.clear()
                                                 enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
                                                 st.session_state[f"modal_pronto_{row['id']}"] = False
                                                 st.toast(f"✅ {row['Cod_Lote']} concluido!")
@@ -5601,6 +5627,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         carregar_todas_pecas_obra.clear()
                                                         carregar_fila_logistica.clear()
                                                         carregar_micro_completo.clear()
+                                                        _montar_calendario_producao.clear()
                                                         enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
                                                         st.session_state[f"modal_pronto_{row['id']}"] = False
                                                         emoji_t = "✅" if todas_zeradas else "🟠"
@@ -5826,23 +5853,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 if obra_esq != "Todas as obras":
                     df_base_esq = df_base_esq[df_base_esq['Obra_Vinculada'] == obra_esq]
                 if not df_base_esq.empty:
-                    registros_exp_esq = []
-                    for _, row in df_base_esq.iterrows():
-                        if not prazo_valido(row['Data_Producao_Programada']) or not prazo_valido(row['Data_Limite_Obra']):
-                            continue  # data faltando -- pula em vez de quebrar a pagina inteira
-                        dt_ini = pd.to_datetime(row['Data_Producao_Programada']).date()
-                        dt_fim = pd.to_datetime(row['Data_Limite_Obra']).date()
-                        if dt_ini > dt_fim:
-                            continue  # datas invertidas (erro de cadastro) -- nao aparece no calendario
-                        ini_ult = max((pd.to_datetime(dt_fim) - timedelta(days=6)).date(), dt_ini)
-                        dt_fim_loop = max(dt_fim, hoje_projeto().date())  # atrasado continua aparecendo ate ser concluido
-                        dia = dt_ini
-                        while dia <= dt_fim_loop:
-                            if dia.weekday() < 5:  # sem producao aos finais de semana
-                                r = row.to_dict(); r['_dia'] = dia; r['_pode_concluir'] = (dia >= ini_ult)
-                                registros_exp_esq.append(r)
-                            dia += timedelta(days=1)
-                    df_exp_esq = pd.DataFrame(registros_exp_esq)
+                    df_exp_esq = _montar_calendario_producao('Esquadria-Vidro', obra_esq)
 
                     if "esq_mes" not in st.session_state:
                         st.session_state.esq_mes = hoje_projeto().month
@@ -6154,7 +6165,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                     liberar_conexao(conn)
                                                 carregar_micro.clear(); carregar_macro.clear(); carregar_fila_logistica.clear()
                                                 carregar_pecas_lote.clear(); carregar_todas_pecas_obra.clear()
-                                                carregar_micro_completo.clear()
+                                                carregar_micro_completo.clear(); _montar_calendario_producao.clear()
                                                 enviar_para_logistica(row, limite_desp_esq if prazo_valido(limite_desp_esq) else pd.NaT)
                                                 st.session_state[f"esq_modal_{row['id']}"] = False
                                                 st.toast(f"✅ {row['Cod_Lote']} concluido!")
@@ -6231,7 +6242,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         liberar_conexao(conn)
                                                     carregar_micro.clear(); carregar_macro.clear(); carregar_fila_logistica.clear()
                                                     carregar_pecas_lote.clear(); carregar_todas_pecas_obra.clear()
-                                                    carregar_micro_completo.clear()
+                                                    carregar_micro_completo.clear(); _montar_calendario_producao.clear()
                                                     enviar_para_logistica(row, limite_desp_esq if prazo_valido(limite_desp_esq) else pd.NaT)
                                                     st.session_state[f"esq_modal_{row['id']}"] = False
                                                     st.toast(f"Envio parcial de {row['Cod_Lote']} registrado!"); time.sleep(0.5); st.rerun()
