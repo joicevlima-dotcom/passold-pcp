@@ -9857,7 +9857,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             with rel_f6:
                 rel_dt_fim = st.date_input("Até:", value=None, format="DD/MM/YYYY", key="rel_dt_fim")
 
-            mostrar_concluidos = st.toggle("Ver concluídos", value=False, key="rel_concl")
+            rel_tg1, rel_tg2 = st.columns([1, 2])
+            with rel_tg1:
+                mostrar_concluidos = st.toggle("Ver concluídos", value=False, key="rel_concl")
+            with rel_tg2:
+                incluir_paradas_rel = st.toggle(
+                    "⛔ Incluir OPs em parada (mesmo fora do período)", value=False, key="rel_incluir_paradas",
+                    help="Traz também as OPs marcadas como 'Em Parada', ignorando o filtro de data De/Até acima "
+                         "(mas ainda respeitando os filtros de Obra, Status e Escopo)."
+                )
 
             # ── Montar dataframe filtrado ────────────────────────
             df_rel = df_banco_micro_rel.copy() if not df_banco_micro_rel.empty else pd.DataFrame()
@@ -9889,6 +9897,22 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         df_rel = df_rel[df_rel[col_dt_filtro] < pd.Timestamp(rel_dt_fim) + timedelta(days=1)]
                     else:
                         df_rel = df_rel[df_rel[col_dt_filtro] <= pd.Timestamp(rel_dt_fim)]
+
+            # OPs em parada ficam escondidas quando estão fora do período De/Até — mas o
+            # motivo de estarem "paradas" muitas vezes é justamente ter saído do prazo
+            # planejado. Com o toggle ligado, busca de novo (sem filtro de data) e junta.
+            if incluir_paradas_rel and not df_banco_micro_rel.empty and 'Em_Parada' in df_banco_micro_rel.columns:
+                df_paradas_extra = df_banco_micro_rel[df_banco_micro_rel['Em_Parada'] == True].copy()
+                if filtro_obra_rel != "Todas":
+                    df_paradas_extra = df_paradas_extra[df_paradas_extra['Obra_Vinculada'] == filtro_obra_rel]
+                if filtro_status_rel != "Todos":
+                    df_paradas_extra = df_paradas_extra[df_paradas_extra['Status_Item'] == filtro_status_rel]
+                if filtro_escopo_rel != "Todos":
+                    df_paradas_extra = df_paradas_extra[df_paradas_extra['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
+                if not mostrar_concluidos and filtro_status_rel != "Concluido":
+                    df_paradas_extra = df_paradas_extra[df_paradas_extra['Status_Item'] != 'Concluido']
+                if not df_paradas_extra.empty:
+                    df_rel = pd.concat([df_rel, df_paradas_extra], ignore_index=True).drop_duplicates(subset='id', keep='first')
 
             # OPs Parcialmente Concluidas ja tiveram parte do material enviada — sem descontar isso,
             # o relatorio contaria o tamanho cheio da OP como se nada tivesse saido ainda. Troca
