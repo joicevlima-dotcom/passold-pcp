@@ -1907,6 +1907,28 @@ def carregar_produtividade_semanal(escopo: str = None):
         df['dificuldade'] = df['dificuldade'].fillna(1).astype(int)
     return df
 
+def calcular_dificuldade_media_periodo(escopo: str, data_ini, data_fim):
+    """Dificuldade média dos itens concluídos no período, ponderada por m² produzido.
+
+    Usada para sugerir a Dificuldade média ao lançar uma semana de produtividade,
+    em vez de depender só da estimativa manual do usuário.
+    """
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT SUM(Dificuldade * GREATEST(M2_Item, 0.01)) / NULLIF(SUM(GREATEST(M2_Item, 0.01)), 0)
+            FROM itens_detalhado
+            WHERE Escopo = %s AND Status_Item = 'Concluido'
+              AND Concluido_Em::date BETWEEN %s AND %s
+        """, (escopo, data_ini, data_fim))
+        resultado = cursor.fetchone()[0]
+    finally:
+        liberar_conexao(conn)
+    if resultado is None:
+        return None
+    return max(1, min(5, int(round(float(resultado)))))
+
 def salvar_produtividade_semanal(escopo, semana_inicio, semana_fim, colaboradores, executado, usuario, dificuldade=1):
     conn = conectar_banco()
     try:
@@ -10202,12 +10224,33 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     prod_colaboradores = st.number_input("Colaboradores:", min_value=0.0, step=0.5, format="%.1f", key="prod_colaboradores")
                 with lp4:
                     prod_executado = st.number_input(f"Executado ({label_medida_prod}):", min_value=0.0, step=1.0, format="%.2f", key="prod_executado")
+
+                # Sugere a dificuldade média (ACM) com base nos itens realmente concluídos no
+                # período, ponderados por m², em vez de depender só de uma estimativa manual.
+                st.session_state.setdefault("prod_dificuldade", 1)
+                sugestao_dif_prod = None
+                if escopo_prod == "ACM" and prod_semana_fim >= prod_semana_ini:
+                    periodo_dif_prod = (prod_semana_ini, prod_semana_fim)
+                    if st.session_state.get("_prod_dif_periodo") != periodo_dif_prod:
+                        st.session_state["_prod_dif_periodo"] = periodo_dif_prod
+                        sugestao_dif_prod = calcular_dificuldade_media_periodo("ACM", prod_semana_ini, prod_semana_fim)
+                        st.session_state["_prod_dif_sugestao"] = sugestao_dif_prod
+                        if sugestao_dif_prod is not None:
+                            st.session_state["prod_dificuldade"] = sugestao_dif_prod
+                    else:
+                        sugestao_dif_prod = st.session_state.get("_prod_dif_sugestao")
+
                 with lp5:
                     prod_dificuldade = st.selectbox(
-                        "Dificuldade média:", [1, 2, 3, 4, 5], index=0, key="prod_dificuldade",
+                        "Dificuldade média:", [1, 2, 3, 4, 5], key="prod_dificuldade",
                         help="Dificuldade predominante do material produzido na semana. Reduz a meta proporcionalmente "
                              f"({', '.join(f'{k}={v:.0%}' for k, v in FATOR_PRODUTIVIDADE_DIFICULDADE.items())})."
                     )
+                if escopo_prod == "ACM":
+                    if sugestao_dif_prod is not None:
+                        st.caption(f"💡 Sugestão automática com base nos itens ACM concluídos no período (média ponderada por m²): **{sugestao_dif_prod}**. Ajuste acima se necessário.")
+                    else:
+                        st.caption("Nenhum item ACM concluído nesse período para sugerir a dificuldade automaticamente — informe manualmente.")
                 if st.button("💾 Salvar", key="prod_salvar", type="primary"):
                     if prod_semana_fim < prod_semana_ini:
                         st.error("A data 'Até' não pode ser anterior à data 'De'.")
