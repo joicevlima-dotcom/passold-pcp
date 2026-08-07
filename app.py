@@ -3606,6 +3606,25 @@ def adicionar_item_saida_insumo(saida_id: int, descricao: str, quantidade: float
     finally:
         liberar_conexao(conn)
 
+def excluir_saida_insumo(saida_id: int):
+    """Remove uma saida de insumos lancada errada -- os itens vao junto (ON DELETE CASCADE)."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM saidas_insumos WHERE id=%s", (saida_id,))
+        conn.commit()
+        carregar_saidas_insumos.clear()
+        carregar_itens_saida_insumos.clear()
+        carregar_todos_itens_insumos.clear()
+        carregar_itens_indisponiveis_almoxarifado.clear()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao excluir saída de insumos: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
 # ========================================================
 # FUNÇÕES DE OP_PECAS
 # ========================================================
@@ -8771,6 +8790,31 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     key=f"dl_saida_insumo_{saida_row['id']}"
                                 )
+
+                            # ── Excluir saída lançada errada ──
+                            if setor in ["Master", "Almoxarifado"]:
+                                st.markdown("<br>", unsafe_allow_html=True)
+                                confirm_key_del_ins = f"confirm_del_saida_ins_{saida_row['id']}"
+                                if not st.session_state.get(confirm_key_del_ins):
+                                    if st.button("🗑️ Excluir esta saída (lançamento errado)", key=f"btn_del_saida_ins_{saida_row['id']}"):
+                                        st.session_state[confirm_key_del_ins] = True
+                                        st.rerun()
+                                else:
+                                    st.warning("⚠️ Isso vai apagar essa saída e todos os itens dela. Confirma?")
+                                    dsi1, dsi2 = st.columns(2)
+                                    with dsi1:
+                                        if st.button("✅ Sim, excluir", key=f"btn_confirma_del_saida_ins_{saida_row['id']}", type="primary"):
+                                            if excluir_saida_insumo(int(saida_row['id'])):
+                                                registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_SAIDA_INSUMO",
+                                                    f"Saída #{int(saida_row['id'])} — {_nn(saida_row.get('obra'), 'Sem obra')} — {_nn(saida_row.get('destino'), '—')}")
+                                                st.session_state.pop(confirm_key_del_ins, None)
+                                                st.toast("Saída excluída.")
+                                                time.sleep(0.3)
+                                                st.rerun()
+                                    with dsi2:
+                                        if st.button("Cancelar", key=f"btn_cancela_del_saida_ins_{saida_row['id']}"):
+                                            st.session_state.pop(confirm_key_del_ins, None)
+                                            st.rerun()
 
     # ==================================================
     # ROMANEIO MANUAL (sem OP vinculada)
