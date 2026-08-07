@@ -9265,20 +9265,25 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             def _bloco_anexo_rd(tipo_origem: str, origem_id: int, key_prefix: str):
                 arqs_rd = carregar_arquivos_romaneio_devolvido(tipo_origem, origem_id)
                 with st.expander(f"📎 Anexos ({len(arqs_rd)})", expanded=False):
-                    up_rd = st.file_uploader(
-                        "Anexar romaneio assinado (foto ou PDF):",
-                        type=["pdf", "png", "jpg", "jpeg"], key=f"rd_up_{key_prefix}"
+                    up_rd_list = st.file_uploader(
+                        "Anexar romaneio(s) assinado(s) (foto ou PDF):",
+                        type=["pdf", "png", "jpg", "jpeg"], key=f"rd_up_{key_prefix}",
+                        accept_multiple_files=True
                     )
-                    if up_rd is not None:
-                        if st.button("💾 Salvar", key=f"rd_btn_{key_prefix}", type="primary"):
-                            ok_rd = salvar_arquivo_romaneio_devolvido(
-                                tipo_origem, origem_id, up_rd.name, up_rd.type or "",
-                                up_rd.read(), st.session_state.usuario_nome
-                            )
-                            if ok_rd:
-                                registrar_auditoria(st.session_state.usuario_nome, "ROMANEIO_DEVOLVIDO",
-                                    f"Tipo: {tipo_origem} | ID: {origem_id} | Arquivo: {up_rd.name}")
-                                st.toast("✅ Romaneio devolvido anexado!")
+                    if up_rd_list:
+                        if st.button(f"💾 Salvar {len(up_rd_list)} arquivo(s)", key=f"rd_btn_{key_prefix}", type="primary"):
+                            n_ok_rd = 0
+                            for up_rd in up_rd_list:
+                                ok_rd = salvar_arquivo_romaneio_devolvido(
+                                    tipo_origem, origem_id, up_rd.name, up_rd.type or "",
+                                    up_rd.read(), st.session_state.usuario_nome
+                                )
+                                if ok_rd:
+                                    n_ok_rd += 1
+                                    registrar_auditoria(st.session_state.usuario_nome, "ROMANEIO_DEVOLVIDO",
+                                        f"Tipo: {tipo_origem} | ID: {origem_id} | Arquivo: {up_rd.name}")
+                            if n_ok_rd:
+                                st.toast(f"✅ {n_ok_rd} romaneio(s) devolvido(s) anexado(s)!")
                                 time.sleep(0.3)
                                 st.rerun()
                     if arqs_rd:
