@@ -2371,7 +2371,6 @@ def bloco_comentarios(entidade_tipo: str, entidade_id: int, key_prefix: str, df_
             if novo_com.strip():
                 adicionar_comentario(entidade_tipo, entidade_id, st.session_state.usuario_nome, novo_com.strip())
                 st.toast("Comentário adicionado!")
-                time.sleep(0.3)
                 st.rerun()
             else:
                 st.warning("Escreva algo antes de comentar.")
@@ -2490,6 +2489,7 @@ def salvar_romaneio_manual(obra: str, data_recebimento, itens: list, usuario: st
             )
         conn.commit()
         carregar_romaneios_manuais.clear()
+        carregar_itens_romaneio_manual_todos.clear()
         return romaneio_id
     except Exception as e:
         conn.rollback()
@@ -2527,6 +2527,20 @@ def carregar_itens_romaneio_manual(romaneio_id: int):
     finally:
         liberar_conexao(conn)
 
+@st.cache_data(ttl=20)
+def carregar_itens_romaneio_manual_todos():
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            "SELECT id, romaneio_id, descricao, quantidade, cod, peso_kg, unidade "
+            "FROM romaneios_manuais_itens ORDER BY romaneio_id, id",
+            conn
+        )
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
 def excluir_romaneio_manual(romaneio_id: int):
     conn = conectar_banco()
     try:
@@ -2535,6 +2549,7 @@ def excluir_romaneio_manual(romaneio_id: int):
         conn.commit()
         carregar_romaneios_manuais.clear()
         carregar_itens_romaneio_manual.clear()
+        carregar_itens_romaneio_manual_todos.clear()
         return True
     except Exception as e:
         conn.rollback()
@@ -2863,6 +2878,23 @@ def carregar_itens_lista_mestra(lista_id: int):
     return df
 
 @st.cache_data(ttl=15)
+def carregar_itens_lista_mestra_todos():
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            "SELECT id, lista_id, item, uso, observacoes, unidade, qtd_total, qtd_enviada "
+            "FROM listas_mestras_itens ORDER BY lista_id, id",
+            conn
+        )
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+    if not df.empty:
+        df['saldo'] = df['qtd_total'] - df['qtd_enviada']
+    return df
+
+@st.cache_data(ttl=15)
 def carregar_envios_lista_mestra(lista_id: int):
     conn = conectar_banco()
     try:
@@ -2931,6 +2963,7 @@ def salvar_lista_mestra(obra: str, numero_projeto: str, titulo: str, itens: list
         conn.commit()
         carregar_listas_mestras.clear()
         carregar_itens_lista_mestra.clear()
+        carregar_itens_lista_mestra_todos.clear()
         return True, f"Lista mestra criada com {len(itens)} item(ns)!", lista_id
     except Exception as e:
         conn.rollback()
@@ -2951,6 +2984,7 @@ def adicionar_itens_lista_mestra(lista_id: int, itens: list):
             )
         conn.commit()
         carregar_itens_lista_mestra.clear()
+        carregar_itens_lista_mestra_todos.clear()
         carregar_listas_mestras.clear()
         return True, f"{len(itens)} item(ns) adicionado(s)!"
     except Exception as e:
@@ -2976,6 +3010,7 @@ def editar_item_lista_mestra(item_id: int, qtd_total_novo: float, uso_novo: str,
         )
         conn.commit()
         carregar_itens_lista_mestra.clear()
+        carregar_itens_lista_mestra_todos.clear()
         return True, "Item atualizado!"
     except Exception as e:
         conn.rollback()
@@ -2996,6 +3031,7 @@ def excluir_item_lista_mestra(item_id: int):
         cursor.execute("DELETE FROM listas_mestras_itens WHERE id=%s", (item_id,))
         conn.commit()
         carregar_itens_lista_mestra.clear()
+        carregar_itens_lista_mestra_todos.clear()
         carregar_listas_mestras.clear()
         return True, "Item excluído."
     except Exception as e:
@@ -3012,6 +3048,7 @@ def excluir_lista_mestra(lista_id: int):
         conn.commit()
         carregar_listas_mestras.clear()
         carregar_itens_lista_mestra.clear()
+        carregar_itens_lista_mestra_todos.clear()
         return True
     except Exception as e:
         conn.rollback()
@@ -3057,6 +3094,7 @@ def registrar_envio_lista_mestra(lista_id: int, data_envio, destino: str, usuari
             )
         conn.commit()
         carregar_itens_lista_mestra.clear()
+        carregar_itens_lista_mestra_todos.clear()
         carregar_envios_lista_mestra.clear()
         carregar_envios_lista_mestra_todos.clear()
         carregar_itens_envio_lista_mestra.clear()
@@ -3085,6 +3123,7 @@ def excluir_envio_lista_mestra(envio_id: int):
         cursor.execute("DELETE FROM listas_mestras_envios WHERE id=%s", (envio_id,))
         conn.commit()
         carregar_itens_lista_mestra.clear()
+        carregar_itens_lista_mestra_todos.clear()
         carregar_envios_lista_mestra.clear()
         carregar_envios_lista_mestra_todos.clear()
         carregar_itens_envio_lista_mestra.clear()
@@ -5461,7 +5500,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         f"Limite: {data_lim_atual.strftime('%d/%m/%Y')}→{data_lim_edit.strftime('%d/%m/%Y')}{detalhe_obra}")
                                                     st.session_state[f"modal_editar_{row['id']}"] = False
                                                     st.toast(msg_edit_lote if obra_mudou else "Dados corrigidos!")
-                                                    time.sleep(0.4)
                                                     st.rerun()
                                                 else:
                                                     st.error(msg_edit_lote)
@@ -5493,7 +5531,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             n_salvos_acm = salvar_arquivos_op_lote(int(row['id']), prontos_acm, st.session_state.usuario_nome)
                                             progress_acm.empty()
                                             st.toast(f"✅ {n_salvos_acm} arquivo(s) salvo(s)!")
-                                            time.sleep(0.3)
                                             st.rerun()
                                 if arqs_op:
                                     for arq in arqs_op:
@@ -5506,7 +5543,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 if st.button("🗑️", key=f"acm_del_arq_{arq_id}"):
                                                     deletar_arquivo_op(arq_id)
                                                     st.toast("Arquivo removido.")
-                                                    time.sleep(0.3)
                                                     st.rerun()
                                 else:
                                     st.caption("Nenhum arquivo anexado ainda.")
@@ -5572,7 +5608,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
                                                 st.session_state[f"modal_pronto_{row['id']}"] = False
                                                 st.toast(f"✅ {row['Cod_Lote']} concluido!")
-                                                time.sleep(0.5)
                                                 st.rerun()
                                         with bt2:
                                             if st.button("Cancelar", key=f"cancel_total_{row['id']}", use_container_width=True):
@@ -5684,7 +5719,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         st.session_state[f"modal_pronto_{row['id']}"] = False
                                                         emoji_t = "✅" if todas_zeradas else "🟠"
                                                         st.toast(f"{emoji_t} {row['Cod_Lote']} — {'Concluido!' if todas_zeradas else 'Envio parcial registrado!'}")
-                                                        time.sleep(0.5)
                                                         st.rerun()
                                             with bp2:
                                                 if st.button("Cancelar", key=f"cancel_parc2_{row['id']}", use_container_width=True):
@@ -5709,7 +5743,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 salvar_parada_op(row['id'], True, motivo_inp.strip(), st.session_state.usuario_nome)
                                                 st.session_state[f"modal_parada_{row['id']}"] = False
                                                 st.toast(f"⛔ Parada registrada em {row['Cod_Lote']}!")
-                                                time.sleep(0.5)
                                                 st.rerun()
                                     with pb2:
                                         if st.button("Cancelar", key=f"cancel_parada_{row['id']}", use_container_width=True):
@@ -6111,7 +6144,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         f"Limite: {esq_data_lim_atual.strftime('%d/%m/%Y')}→{esq_data_lim_edit.strftime('%d/%m/%Y')}{esq_detalhe_obra}")
                                                     st.session_state[f"esq_modal_editar_{row['id']}"] = False
                                                     st.toast(msg_esq_edit if esq_obra_mudou else "Dados corrigidos!")
-                                                    time.sleep(0.4)
                                                     st.rerun()
                                                 else:
                                                     st.error(msg_esq_edit)
@@ -6143,7 +6175,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             n_salvos_esq = salvar_arquivos_op_lote(int(row['id']), prontos_esq, st.session_state.usuario_nome)
                                             progress_esq.empty()
                                             st.toast(f"✅ {n_salvos_esq} arquivo(s) salvo(s)!")
-                                            time.sleep(0.3)
                                             st.rerun()
                                 if arqs_esq:
                                     zip_key_esq = f"zip_op_esq_{row['id']}"
@@ -6167,7 +6198,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 if st.button("🗑️", key=f"esq_del_arq_{arq_id}"):
                                                     deletar_arquivo_op(arq_id)
                                                     st.toast("Arquivo removido.")
-                                                    time.sleep(0.3)
                                                     st.rerun()
                                 else:
                                     st.caption("Nenhum arquivo anexado ainda.")
@@ -6221,7 +6251,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 enviar_para_logistica(row, limite_desp_esq if prazo_valido(limite_desp_esq) else pd.NaT)
                                                 st.session_state[f"esq_modal_{row['id']}"] = False
                                                 st.toast(f"✅ {row['Cod_Lote']} concluido!")
-                                                time.sleep(0.5); st.rerun()
+                                                st.rerun()
                                         with bt2:
                                             if st.button("Cancelar", key=f"esq_cancel_total_{row['id']}", use_container_width=True):
                                                 st.session_state[f"esq_modal_{row['id']}"] = False; st.rerun()
@@ -6297,7 +6327,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                     carregar_micro_completo.clear(); _montar_calendario_producao.clear()
                                                     enviar_para_logistica(row, limite_desp_esq if prazo_valido(limite_desp_esq) else pd.NaT)
                                                     st.session_state[f"esq_modal_{row['id']}"] = False
-                                                    st.toast(f"Envio parcial de {row['Cod_Lote']} registrado!"); time.sleep(0.5); st.rerun()
+                                                    st.toast(f"Envio parcial de {row['Cod_Lote']} registrado!"); st.rerun()
                                             with b2:
                                                 if st.button("Cancelar", key=f"esq_cancel_parc2_{row['id']}", use_container_width=True):
                                                     st.session_state[f"esq_modal_{row['id']}"] = False; st.rerun()
@@ -6320,7 +6350,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 salvar_parada_op(row['id'], True, motivo_esq_inp.strip(), st.session_state.usuario_nome)
                                                 st.session_state[f"esq_modal_parada_{row['id']}"] = False
                                                 st.toast(f"⛔ Parada registrada em {row['Cod_Lote']}!")
-                                                time.sleep(0.5)
                                                 st.rerun()
                                     with epb2:
                                         if st.button("Cancelar", key=f"esq_cancel_parada_{row['id']}", use_container_width=True):
@@ -6644,7 +6673,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             f"Projeto {av_projeto} — {len(st.session_state.av_itens)} itens — {av_obra} — {av_destino} — Pendente")
                         st.toast(f"Lote cadastrado como Pendente — {len(st.session_state.av_itens)} item(ns). Libere em 'Liberar OPs da Semana'.")
                         st.session_state.av_itens = []
-                        time.sleep(0.5)
                         st.rerun()
 
             st.markdown("<br>", unsafe_allow_html=True)
@@ -6710,7 +6738,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                     f"OP {num_op_sel} — {row_lote['Cod_Lote']} — Obra: {row_lote['Obra_Vinculada']}")
                                                 st.session_state.pop(confirm_key_rev, None)
                                                 st.toast(msg_rev)
-                                                time.sleep(0.5)
                                                 st.rerun()
                                             else:
                                                 st.error(msg_rev)
@@ -6920,7 +6947,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         registrar_auditoria(st.session_state.usuario_nome, "LANCAMENTO_PECAS",
                                             f"OP {row_lote['Num_OP']} — {len(pecas_rom)} peça(s) via romaneio — Obra: {obra_selecionada}")
                                         st.toast(f"{len(pecas_rom)} peça(s) salvas!")
-                                        time.sleep(0.3)
                                         st.rerun()
 
                                 with tab_manual:
@@ -6967,7 +6993,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             registrar_auditoria(st.session_state.usuario_nome, "LANCAMENTO_PECAS",
                                                 f"OP {row_lote['Num_OP']} — {len(pecas_list)} peça(s) — Obra: {obra_selecionada}")
                                             st.toast(f"{len(pecas_list)} peça(s) salvas!")
-                                            time.sleep(0.3)
                                             st.rerun()
 
                         # ── SEÇÃO: ARQUIVOS DA OP ─────────────────────────────
@@ -6993,7 +7018,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         n_salvos = salvar_arquivos_op_lote(lote_id, prontos_op, st.session_state.usuario_nome)
                                         progress_op.empty()
                                         st.toast(f"✅ {n_salvos} arquivo(s) salvo(s)!")
-                                        time.sleep(0.3)
                                         st.rerun()
 
                             if arqs_existentes:
@@ -7021,7 +7045,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         if st.button("🗑️ Remover", key=f"del_arq_{arq_id}"):
                                             deletar_arquivo_op(arq_id)
                                             st.toast("Arquivo removido.")
-                                            time.sleep(0.3)
                                             st.rerun()
                             else:
                                 st.caption("Nenhum arquivo anexado ainda.")
@@ -7071,7 +7094,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         if st.button("🗑️", key=f"del_comp_{comp_ex['id']}"):
                                             excluir_componente(int(comp_ex['id']))
                                             st.toast("Componente excluído.")
-                                            time.sleep(0.3)
                                             st.rerun()
 
                                 item_id_comp = int(row_op['id'])
@@ -7085,7 +7107,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             excluir_todos_componentes(item_id_comp)
                                             del st.session_state[f"confirm_clear_comp_{item_id_comp}"]
                                             st.toast("Lista de componentes limpa!")
-                                            time.sleep(0.3)
                                             st.rerun()
                                     with cc2:
                                         if st.button("Cancelar", key=f"confirm_clear_comp_no_{item_id_comp}"):
@@ -7123,7 +7144,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     if st.button("💾 Salvar romaneio", key="btn_salvar_romaneio", disabled=not parsed):
                                         salvar_componentes(int(row_op['id']), row_op['Obra_Vinculada'], row_op['Cod_Lote'], row_op['Num_OP'], parsed)
                                         st.toast(f"Romaneio salvo para {row_op['Num_OP']} ({len(parsed)} itens)!")
-                                        time.sleep(0.3)
                                         st.rerun()
 
                                 with aba_manual:
@@ -7145,7 +7165,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         else:
                                             salvar_componentes(int(row_op['id']), row_op['Obra_Vinculada'], row_op['Cod_Lote'], row_op['Num_OP'], componentes_input)
                                             st.toast(f"Lista salva para {row_op['Num_OP']}!")
-                                            time.sleep(0.3)
                                             st.rerun()
                     else:
                         st.info("Nenhuma OP com número gerado ainda.")
@@ -7176,7 +7195,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     st.error(f"Erro: {e}")
                 finally:
                     liberar_conexao(conn)
-                time.sleep(0.5)
                 st.rerun()
 
             with st.expander(f"📋 Lotes Pendentes  ·  {len(df_pend_base)} aguardando liberação  (acompanhamento)", expanded=False):
@@ -7450,17 +7468,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         finally:
                             liberar_conexao(conn)
                         st.toast("Salvo!")
-                        time.sleep(0.3)
                         st.rerun()
 
                     st.markdown("#### Remover Lote")
-                    lote_del = st.selectbox("Lote para excluir:", df_obra['Cod_Lote'].unique().tolist())
-                    if st.button(f"Excluir {lote_del}"):
+                    lote_del = st.selectbox("Lote para excluir:", df_obra['Cod_Lote'].unique().tolist(), key="sel_lote_del")
+                    if st.button(f"Excluir {lote_del}", key="btn_excluir_lote_del"):
                         deletar_lotes_por_edt_lote(obra_selecionada, None, lote_del)
                         registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_LOTE",
                             f"Lote {lote_del} excluído — Obra: {obra_selecionada}")
                         st.toast(f"Lote {lote_del} removido!")
-                        time.sleep(0.5)
                         st.rerun()
                 else:
                     st.info("Nenhum lote fatiado ainda.")
@@ -7511,7 +7527,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_PROJETO",
                                 f"Obra: {nome_obra_final} | Projeto: {numero_projeto_novo.strip()}")
                             st.toast("Projeto adicionado!" if criado else "Esse projeto já estava cadastrado — tudo certo.")
-                            time.sleep(0.4)
                             st.rerun()
                         except Exception as e:
                             conn.rollback()
@@ -7539,7 +7554,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     registrar_auditoria(st.session_state.usuario_nome, "EDITAR_PROJETO",
                                         f"Obra: {obra_edit_proj} | {proj_atual_edit} → {proj_novo_edit.strip()}")
                                     st.toast(f"✅ {msg_edit_proj}")
-                                    time.sleep(0.4)
                                     st.rerun()
                                 else:
                                     st.error(msg_edit_proj)
@@ -7560,7 +7574,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     registrar_auditoria(st.session_state.usuario_nome, "EDITAR_OBRA",
                                         f"{obra_atual_edit} → {obra_nova_edit.strip().upper()}")
                                     st.toast(f"✅ {msg_edit_obra}")
-                                    time.sleep(0.4)
                                     st.rerun()
                                 else:
                                     st.error(msg_edit_obra)
@@ -7655,7 +7668,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_OBRA",
                                         f"Obra: {obra_frente} | Projeto: {projeto_frente} | Escopo: {escopo} | sem detalhamento")
                                     st.toast("Projeto/Escopo pronto para lançar OPs!" if criado else "Projeto/Escopo já estava cadastrado — tudo certo.")
-                                time.sleep(0.4)
                                 st.rerun()
                             except Exception as e:
                                 conn.rollback()
@@ -7794,7 +7806,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             "(as datas deles NÃO foram alteradas automaticamente): " + ", ".join(fora)
                                         )
                                 st.toast("Frente atualizada!")
-                                time.sleep(0.5)
                                 st.rerun()
                             except Exception as e:
                                 conn.rollback()
@@ -7828,7 +7839,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         f"EDT {edt_del} excluída — Obra: {obra_selecionada}")
                                     st.toast(f"Frente {edt_del} removida!")
                                     del st.session_state["confirm_del_frente"]
-                                    time.sleep(0.5)
                                     st.rerun()
                                 except Exception as e:
                                     conn.rollback()
@@ -7865,7 +7875,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         f"Obra '{obra_del}' removida — {n_frentes} frente(s)")
                                     st.toast(f"Obra '{obra_del}' removida com sucesso!")
                                     del st.session_state["confirm_del_obra"]
-                                    time.sleep(0.5)
                                     st.rerun()
                                 except Exception as e:
                                     conn.rollback()
@@ -7973,7 +7982,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if st.button("Salvar", key=f"cb_{fr['id']}", use_container_width=True):
                                     atualizar_status_engenharia(fr['id'], ns)
                                     st.toast("Atualizado!")
-                                    time.sleep(0.3)
                                     st.rerun()
 
             with st.expander(f"Todas as Frentes — {len(frentes)} · Obra: {obra_selecionada or 'Nenhuma'}", expanded=False):
@@ -8028,7 +8036,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if st.button("Salvar", key=f"ab_{fr['id']}", use_container_width=True):
                                     atualizar_status_engenharia(fr['id'], ns)
                                     st.toast("Atualizado!")
-                                    time.sleep(0.3)
                                     st.rerun()
 
             df_sols = carregar_solicitacoes()
@@ -8207,7 +8214,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         registrar_auditoria(st.session_state.usuario_nome, "BAIXA_ROMANEIO_MANUAL",
                                             f"OP {num_op_c} — Lote {row_c['Cod_Lote']}")
                                         st.toast(f"OP {num_op_c} baixada!")
-                                        time.sleep(0.3)
                                         st.rerun()
                                 else:
                                     etapa_c = ''
@@ -8249,7 +8255,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         registrar_auditoria(st.session_state.usuario_nome, "EMITIR_ROMANEIO",
                                             f"OP {num_op_c} — Lote {row_c['Cod_Lote']}")
                                         st.toast(f"Romaneio emitido — OP {num_op_c} baixada!")
-                                        time.sleep(0.3)
                                         st.rerun()
 
                 with st.expander("Romaneios já baixados (histórico recente)", expanded=False):
@@ -8278,7 +8283,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     registrar_auditoria(st.session_state.usuario_nome, "REVERTER_BAIXA_ROMANEIO",
                                         f"OP {num_op_b} — Lote {row_b['Cod_Lote']}")
                                     st.toast(f"Baixa revertida — OP {num_op_b} voltou pra fila.")
-                                    time.sleep(0.3)
                                     st.rerun()
 
             with st.expander("Fila Prioritaria — Aguardando Agendamento", expanded=True):
@@ -8337,7 +8341,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             f"Lote {row['Cod_Lote']} — {transp} — {dt_env}")
                                         st.session_state[f"ag_open_{row['id']}"] = False
                                         st.toast(f"Agendado para {dt_env.strftime('%d/%m/%Y')}!")
-                                        time.sleep(0.3)
                                         st.rerun()
                                 with cb2:
                                     if st.button("Cancelar", key=f"can_{row['id']}", use_container_width=True):
@@ -8378,7 +8381,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 registrar_auditoria(st.session_state.usuario_nome, "CONFIRMAR_DESPACHO",
                                     f"Lote {row['Cod_Lote']} — Obra {row.get('Obra_Vinculada','—')}")
                                 st.toast("Despachado!")
-                                time.sleep(0.3)
                                 st.rerun()
                             if st.button("Reagendar", key=f"rag_{row['id']}", use_container_width=True):
                                 conn = conectar_banco()
@@ -8660,7 +8662,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     f"Saída #{saida_id} — {len(st.session_state.insumo_itens)} item(ns) — Destino: {insumo_destino.strip()}")
                                 st.session_state.insumo_itens = []
                                 st.toast("Saída registrada!")
-                                time.sleep(0.3)
                                 st.rerun()
                     else:
                         st.caption("Nenhum item adicionado ainda.")
@@ -8766,7 +8767,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 registrar_auditoria(st.session_state.usuario_nome, "ADICIONAR_ITEM_INSUMO",
                                                     f"Saída #{int(saida_row['id'])} — item adicionado: {novo_item_desc.strip()} ({novo_item_qtd:g} {novo_item_und})")
                                                 st.toast("Item adicionado!")
-                                                time.sleep(0.3)
                                                 st.rerun()
 
                             if n_indisp_ins > 0:
@@ -8809,7 +8809,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                     f"Saída #{int(saida_row['id'])} — {_nn(saida_row.get('obra'), 'Sem obra')} — {_nn(saida_row.get('destino'), '—')}")
                                                 st.session_state.pop(confirm_key_del_ins, None)
                                                 st.toast("Saída excluída.")
-                                                time.sleep(0.3)
                                                 st.rerun()
                                     with dsi2:
                                         if st.button("Cancelar", key=f"btn_cancela_del_saida_ins_{saida_row['id']}"):
@@ -8897,7 +8896,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 f"Romaneio manual #{romaneio_id} — Obra: {rom_obra} — {len(st.session_state.rom_itens)} item(ns)")
                             st.session_state.rom_itens = []
                             st.toast("Romaneio salvo!")
-                            time.sleep(0.3)
                             st.rerun()
                 else:
                     st.caption("Nenhum item adicionado ainda.")
@@ -8915,6 +8913,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                 if df_rom_manual.empty:
                     st.caption("Nenhum romaneio para essa obra ainda.")
+                _itens_rom_todos = carregar_itens_romaneio_manual_todos()
                 for _, rm_row in df_rom_manual.iterrows():
                     rm_terc = bool(rm_row.get('terceirizado', False))
                     rm_num  = rm_row.get('numero_sequencial')
@@ -8923,7 +8922,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         f"{rm_row['obra_vinculada']} — {pd.to_datetime(rm_row['data_recebimento']).strftime('%d/%m/%Y')} "
                         f"({int(rm_row['qtd_itens'])} item(ns)) — por {rm_row['criado_por']}{tag_terc}"
                     ):
-                        df_itens_rom = carregar_itens_romaneio_manual(int(rm_row['id']))
+                        rom_id_atual = int(rm_row['id'])
+                        df_itens_rom = (
+                            _itens_rom_todos[_itens_rom_todos['romaneio_id'] == rom_id_atual].reset_index(drop=True)
+                            if not _itens_rom_todos.empty else carregar_itens_romaneio_manual(rom_id_atual)
+                        )
                         st.caption(f"Projeto {_nn(rm_row.get('numero_projeto'), '—')} · {_nn(rm_row.get('etapa'), 'Sem etapa')}")
                         if rm_terc:
                             st.caption(f"Empresa recebedora: **{_nn(rm_row.get('empresa_terceiro'), '—')}**")
@@ -8947,7 +8950,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if st.button("🗑️ Excluir", key=f"del_rom_manual_{rm_row['id']}"):
                                     excluir_romaneio_manual(int(rm_row['id']))
                                     st.toast("Romaneio removido.")
-                                    time.sleep(0.3)
                                     st.rerun()
 
     # ==================================================
@@ -9041,7 +9043,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             registrar_auditoria(st.session_state.usuario_nome, "CADASTRAR_LISTA_MESTRA",
                                 f"Obra: {lm_obra} | {lm_titulo.strip()} | {len(itens_preview)} item(ns)")
                             st.toast(f"✅ {msg_lm}")
-                            time.sleep(0.4)
                             st.rerun()
                         else:
                             st.error(msg_lm)
@@ -9060,10 +9061,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 # _todos traz as mesmas colunas do por-lista (mais obra/projeto/titulo) na
                 # mesma ordem, e os dois caches sao invalidados sempre juntos.
                 _envios_lm_todos = carregar_envios_lista_mestra_todos()
+                _itens_lm_todos = carregar_itens_lista_mestra_todos()
 
                 for _, lista_row in df_listas_lm_f.iterrows():
                     lista_id = int(lista_row['id'])
-                    df_itens_lm = carregar_itens_lista_mestra(lista_id)
+                    df_itens_lm = (
+                        _itens_lm_todos[_itens_lm_todos['lista_id'] == lista_id].reset_index(drop=True)
+                        if not _itens_lm_todos.empty else carregar_itens_lista_mestra(lista_id)
+                    )
                     icone_lm = "⏳"
                     if not df_itens_lm.empty:
                         n_concluido = int((df_itens_lm['saldo'] <= 0).sum())
@@ -9126,7 +9131,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 registrar_auditoria(st.session_state.usuario_nome, "ADICIONAR_ITEM_LISTA_MESTRA",
                                                     f"Lista {lista_id} | {item_novo.strip()}")
                                                 st.toast("Item adicionado!")
-                                                time.sleep(0.3)
                                                 st.rerun()
                                             else:
                                                 st.error(msg_add)
@@ -9142,7 +9146,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         registrar_auditoria(st.session_state.usuario_nome, "ADICIONAR_ITEM_LISTA_MESTRA",
                                             f"Lista {lista_id} | +{len(itens_extra_preview)} item(ns) colado(s)")
                                         st.toast(msg_extra)
-                                        time.sleep(0.3)
                                         st.rerun()
                                     else:
                                         st.error(msg_extra)
@@ -9167,7 +9170,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         if ok_edit:
                                             registrar_auditoria(st.session_state.usuario_nome, "EDITAR_ITEM_LISTA_MESTRA", f"Item {item_sel_id}")
                                             st.toast("Item atualizado!")
-                                            time.sleep(0.3)
                                             st.rerun()
                                         else:
                                             st.error(msg_edit)
@@ -9178,7 +9180,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             if ok_del:
                                                 registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_ITEM_LISTA_MESTRA", f"Item {item_sel_id}")
                                                 st.toast(msg_del)
-                                                time.sleep(0.3)
                                                 st.rerun()
                                             else:
                                                 st.error(msg_del)
@@ -9225,7 +9226,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         for k in [f"lm_itens_sel_{lista_id}"] + [f"lm_qtd_envio_{lista_id}_{iid}" for iid in itens_selecionados_lm]:
                                             st.session_state.pop(k, None)
                                         st.toast(f"✅ {msg_env}")
-                                        time.sleep(0.4)
                                         st.rerun()
                                     else:
                                         st.error(msg_env)
@@ -9276,7 +9276,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                             f"Lista {lista_id} | Envio {envio_id}")
                                                         st.session_state.pop(confirm_key_lm, None)
                                                         st.toast(msg_est)
-                                                        time.sleep(0.3)
                                                         st.rerun()
                                                     else:
                                                         st.error(msg_est)
@@ -9290,7 +9289,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if excluir_lista_mestra(lista_id):
                                     registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_LISTA_MESTRA", f"Lista {lista_id} — {lista_row['titulo']}")
                                     st.toast("Lista mestra excluída.")
-                                    time.sleep(0.3)
                                     st.rerun()
 
     # ==================================================
@@ -9328,7 +9326,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         f"Tipo: {tipo_origem} | ID: {origem_id} | Arquivo: {up_rd.name}")
                             if n_ok_rd:
                                 st.toast(f"✅ {n_ok_rd} romaneio(s) devolvido(s) anexado(s)!")
-                                time.sleep(0.3)
                                 st.rerun()
                     if arqs_rd:
                         for arq_rd in arqs_rd:
@@ -9350,7 +9347,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             if st.button("🗑️ Remover", key=f"rd_del_{key_prefix}_{arq_id}"):
                                 deletar_arquivo_romaneio_devolvido(arq_id)
                                 st.toast("Anexo removido.")
-                                time.sleep(0.3)
                                 st.rerun()
                     else:
                         st.caption("Nenhum anexo ainda.")
@@ -9531,7 +9527,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if st.button("Excluir", key=f"del_med_obra_{obra_row['id']}", type="primary"):
                                     excluir_medicao_obra(int(obra_row['id']))
                                     st.toast("Obra removida!")
-                                    time.sleep(0.3)
                                     st.rerun()
 
             # ── ABA 2: SERVIÇOS & ETAPAS ──────────────────────────
@@ -9607,7 +9602,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                     col_add, col_save = st.columns([1, 2])
                     with col_add:
-                        if st.button("+ Serviço"):
+                        if st.button("+ Serviço", key="btn_add_servico_medicao"):
                             st.session_state.med_num_servicos += 1
                             st.rerun()
                     with col_save:
@@ -9774,7 +9769,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 registrar_auditoria(st.session_state.usuario_nome, "CRIAR_USUARIO",
                                     f"Novo usuário: {nu} — Setor: {ns}")
                                 st.success(f"{nn} criado!")
-                                time.sleep(0.5)
                                 st.rerun()
                             except Exception as e:
                                 conn.rollback()
@@ -9790,11 +9784,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.dataframe(df_u, hide_index=True, use_container_width=True)
 
             if len(df_u) > 1:
-                del_u = st.selectbox("Remover usuario:", df_u['usuario'].tolist())
+                del_u = st.selectbox("Remover usuario:", df_u['usuario'].tolist(), key="sel_usuario_del")
                 if del_u == 'master':
                     st.caption("Conta master nao pode ser removida.")
                 else:
-                    if st.button(f"Excluir {del_u}"):
+                    if st.button(f"Excluir {del_u}", key="btn_excluir_usuario_del"):
                         conn = conectar_banco()
                         try:
                             cursor = conn.cursor()
@@ -9803,7 +9797,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             registrar_auditoria(st.session_state.usuario_nome, "REMOVER_USUARIO",
                                 f"Usuário removido: {del_u}")
                             st.toast("Removido!")
-                            time.sleep(0.5)
                             st.rerun()
                         except Exception as e:
                             conn.rollback()
@@ -9868,7 +9861,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     sucesso = resetar_banco_dados_completo(st.session_state.usuario_nome)
                     if sucesso:
                         st.toast("Sistema resetado!")
-                        time.sleep(1)
                         st.rerun()
             else:
                 st.caption("Digite CONFIRMAR no campo acima para liberar o botão de reset.")
@@ -10346,7 +10338,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         registrar_auditoria(st.session_state.usuario_nome, "LANCAR_PRODUTIVIDADE_SEMANAL",
                             f"{escopo_prod} — {prod_semana_ini.strftime('%d/%m/%Y')} a {prod_semana_fim.strftime('%d/%m/%Y')}")
                         st.toast("Semana lançada!")
-                        time.sleep(0.3)
                         st.rerun()
 
             df_prod = carregar_produtividade_semanal(escopo_prod)
@@ -10419,6 +10410,5 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_PRODUTIVIDADE_SEMANAL",
                                     f"{escopo_prod} — {row_p['semana_label']}")
                                 st.toast("Lançamento excluído.")
-                                time.sleep(0.3)
                                 st.rerun()
 
