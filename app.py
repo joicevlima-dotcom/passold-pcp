@@ -6258,7 +6258,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     else:
                                         df_pecas_esq = carregar_pecas_lote(int(row['id']))
                                         if df_pecas_esq.empty:
-                                            st.warning("Nenhuma peça lançada para este lote.")
+                                            st.warning("⚠️ Nenhuma peça lançada para este lote. Lance as peças na aba 'Liberar OPs da Semana' primeiro.")
                                             if st.button("Fechar", key=f"esq_cancel_parc_{row['id']}"):
                                                 st.session_state[f"esq_modal_{row['id']}"] = False; st.rerun()
                                         else:
