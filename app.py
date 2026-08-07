@@ -9392,11 +9392,19 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     for _, row_rm in df_rd_man.iterrows():
                         romaneio_id_rd = int(row_rm['id'])
                         badge_rm = "🟢 Devolvido assinado" if row_rm['_devolvido'] else "🔴 Pendente"
+                        rm_terc_rd = bool(row_rm.get('terceirizado', False))
+                        rm_num_rd = row_rm.get('numero_sequencial')
+                        tag_terc_rd = (f"🏭 Terceirizado #{int(rm_num_rd)}" if rm_terc_rd and pd.notna(rm_num_rd) else ("🏭 Terceirizado" if rm_terc_rd else ""))
                         with st.container(border=True):
                             cman1, cman2 = st.columns([4, 1])
                             with cman1:
-                                st.markdown(f"**{row_rm['obra_vinculada']}** — {pd.to_datetime(row_rm['data_recebimento']).strftime('%d/%m/%Y')}")
+                                titulo_rm = f"**{row_rm['obra_vinculada']}** — {pd.to_datetime(row_rm['data_recebimento']).strftime('%d/%m/%Y')}"
+                                if tag_terc_rd:
+                                    titulo_rm += f"  {tag_terc_rd}"
+                                st.markdown(titulo_rm)
                                 st.caption(f"Projeto {row_rm.get('numero_projeto') or '—'} · {row_rm.get('etapa') or 'Sem etapa'} · {int(row_rm.get('qtd_itens') or 0)} item(ns) · {row_rm.get('criado_por','—')}")
+                                if rm_terc_rd:
+                                    st.caption(f"Empresa recebedora: **{row_rm.get('empresa_terceiro') or '—'}**")
                             with cman2:
                                 st.markdown(badge_rm)
                             _bloco_anexo_rd('MANUAL', romaneio_id_rd, f"man_{romaneio_id_rd}")
