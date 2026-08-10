@@ -8121,6 +8121,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Logística</h2><p>Gestão de despachos, transportes e envios</p></div><span class="page-icon">🚚</span></div>', unsafe_allow_html=True)
             st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')}")
             df_log = carregar_fila_logistica()
+            if obra_selecionada and not df_log.empty:
+                df_log = df_log[df_log['Obra_Vinculada'] == obra_selecionada]
 
             if not df_log.empty:
                 n_aguard   = len(df_log[df_log['Status_Logistica'] == 'Aguardando Agendamento'])
@@ -8285,134 +8287,180 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     st.toast(f"Baixa revertida — OP {num_op_b} voltou pra fila.")
                                     st.rerun()
 
-            with st.expander("Fila Prioritaria — Aguardando Agendamento", expanded=True):
-                if df_log.empty or df_log[df_log['Status_Logistica'] == 'Aguardando Agendamento'].empty:
-                    st.success("Todos os lotes ja agendados!")
+            def _dias_restantes_logistica(x):
+                return (pd.to_datetime(x) - hoje_projeto()).days if prazo_valido(x) else 9999
+
+            def _render_por_obra(df_secao, render_item, col_sort):
+                resumo = (df_secao.groupby('Obra_Vinculada')
+                          .agg(qtd=('id', 'count'), atrasados=('_atrasado', 'sum'))
+                          .reset_index()
+                          .sort_values(['atrasados', 'qtd'], ascending=[False, False]))
+                for i, ob_row in enumerate(resumo.itertuples()):
+                    titulo_obra = f"🏗️ {ob_row.Obra_Vinculada} — {int(ob_row.qtd)} lote(s)"
+                    if ob_row.atrasados > 0:
+                        titulo_obra += f"  🔴 {int(ob_row.atrasados)} atrasado(s)"
+                    with st.expander(titulo_obra, expanded=(i == 0)):
+                        df_obra = df_secao[df_secao['Obra_Vinculada'] == ob_row.Obra_Vinculada].sort_values(col_sort, na_position='last')
+                        for _, row in df_obra.iterrows():
+                            render_item(row)
+
+            def _render_fila_item(row):
+                prazo_d = row['Data_Limite_Despacho']
+                if prazo_valido(prazo_d):
+                    dias_r = (pd.to_datetime(prazo_d) - hoje_projeto()).days
+                    if dias_r < 0:    css_bar = "bar-danger"; tag = f"ATRASADO {abs(dias_r)}d"
+                    elif dias_r <= 3: css_bar = "bar-warn";   tag = f"URGENTE — {dias_r}d restantes"
+                    else:             css_bar = "bar-ok";     tag = f"{dias_r} dias restantes"
                 else:
-                    df_ag = df_log[df_log['Status_Logistica'] == 'Aguardando Agendamento'].copy().sort_values('Data_Limite_Despacho', na_position='last')
-                    for _, row in df_ag.iterrows():
-                        prazo_d = row['Data_Limite_Despacho']
-                        if prazo_valido(prazo_d):
-                            dias_r = (pd.to_datetime(prazo_d) - hoje_projeto()).days
-                            if dias_r < 0:    css_bar = "bar-danger"; tag = f"ATRASADO {abs(dias_r)}d"
-                            elif dias_r <= 3: css_bar = "bar-warn";   tag = f"URGENTE — {dias_r}d restantes"
-                            else:             css_bar = "bar-ok";     tag = f"{dias_r} dias restantes"
-                        else:
-                            css_bar = "bar-neutral"; tag = "Sem prazo definido"
+                    css_bar = "bar-neutral"; tag = "Sem prazo definido"
 
-                        st.markdown(f"<div class='{css_bar}'>", unsafe_allow_html=True)
-                        ci, cp, ca = st.columns([5, 3, 2])
-                        with ci:
-                            num_op_ag = _nn(row.get('Num_OP'), 'S/OP')
-                            st.markdown(
-                                f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;'
-                                f'<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>&nbsp;'
-                                f'<span class="badge-edt">OP: {num_op_ag}</span>',
-                                unsafe_allow_html=True
-                            )
-                            st.markdown(f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} cx` — {row['M2_Item']:.2f} m²")
-                            st.caption(f"Pavimentos: {row['Romaneio_Chapas']}")
-                        with cp:
-                            ptxt = pd.to_datetime(prazo_d).strftime('%d/%m/%Y') if prazo_valido(prazo_d) else "—"
-                            st.caption("Prazo maximo despacho")
-                            st.markdown(f"**{ptxt}**")
-                            st.markdown(f"`{tag}`")
-                        with ca:
-                            if st.button("Agendar", key=f"ag_btn_{row['id']}", use_container_width=True):
-                                st.session_state[f"ag_open_{row['id']}"] = True
-                        st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='{css_bar}'>", unsafe_allow_html=True)
+                ci, cp, ca = st.columns([5, 3, 2])
+                with ci:
+                    num_op_ag = _nn(row.get('Num_OP'), 'S/OP')
+                    st.markdown(
+                        f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;'
+                        f'<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>&nbsp;'
+                        f'<span class="badge-edt">OP: {num_op_ag}</span>',
+                        unsafe_allow_html=True
+                    )
+                    st.markdown(f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} cx` — {row['M2_Item']:.2f} m²")
+                    st.caption(f"Pavimentos: {row['Romaneio_Chapas']}")
+                with cp:
+                    ptxt = pd.to_datetime(prazo_d).strftime('%d/%m/%Y') if prazo_valido(prazo_d) else "—"
+                    st.caption("Prazo maximo despacho")
+                    st.markdown(f"**{ptxt}**")
+                    st.markdown(f"`{tag}`")
+                with ca:
+                    if st.button("Agendar", key=f"ag_btn_{row['id']}", use_container_width=True):
+                        st.session_state[f"ag_open_{row['id']}"] = True
+                st.markdown("</div>", unsafe_allow_html=True)
 
-                        if st.session_state.get(f"ag_open_{row['id']}", False):
-                            with st.container(border=True):
-                                st.markdown(f"#### Agendar — `{num_op_ag}` | Lote `{row['Cod_Lote']}` | {row['Obra_Vinculada']}")
-                                fa1, fa2 = st.columns(2)
-                                with fa1:
-                                    dt_env = st.date_input("Data envio:", format="DD/MM/YYYY", key=f"dt_env_{row['id']}",
-                                                           value=(pd.to_datetime(prazo_d).date() if prazo_valido(prazo_d) else hoje_projeto().date()))
-                                    transp = st.selectbox("Transporte:", ["Frota Propria (Passold)", "Transportadora Terceira", "Retirada pelo Cliente"], key=f"tr_{row['id']}")
-                                with fa2:
-                                    veic = st.text_input("Veiculo / Placa:", key=f"ve_{row['id']}")
-                                    obs  = st.text_area("Observacoes:", key=f"ob_{row['id']}", height=80)
-                                cb1, cb2 = st.columns(2)
-                                with cb1:
-                                    if st.button("Confirmar agendamento", key=f"conf_{row['id']}", use_container_width=True, type="primary"):
-                                        agendar_envio(row['id'], dt_env, transp, veic, obs, st.session_state.usuario_nome)
-                                        registrar_auditoria(st.session_state.usuario_nome, "AGENDAR_ENVIO",
-                                            f"Lote {row['Cod_Lote']} — {transp} — {dt_env}")
-                                        st.session_state[f"ag_open_{row['id']}"] = False
-                                        st.toast(f"Agendado para {dt_env.strftime('%d/%m/%Y')}!")
-                                        st.rerun()
-                                with cb2:
-                                    if st.button("Cancelar", key=f"can_{row['id']}", use_container_width=True):
-                                        st.session_state[f"ag_open_{row['id']}"] = False
-                                        st.rerun()
-
-            with st.expander("Envios Agendados — Confirmar Saida", expanded=True):
-                if df_log.empty or df_log[df_log['Status_Logistica'] == 'Envio Agendado'].empty:
-                    st.info("Nenhum envio agendado.")
-                else:
-                    df_agend = df_log[df_log['Status_Logistica'] == 'Envio Agendado'].copy().sort_values('Data_Envio_Agendado', na_position='last')
-                    for _, row in df_agend.iterrows():
-                        pd_d = row['Data_Limite_Despacho']
-                        de_d = row['Data_Envio_Agendado']
-                        no_prazo = (pd.to_datetime(de_d) <= pd.to_datetime(pd_d)) if prazo_valido(pd_d) and prazo_valido(de_d) else True
-                        css_bar  = "bar-ok" if no_prazo else "bar-danger"
-                        st.markdown(f"<div class='{css_bar}'>", unsafe_allow_html=True)
-                        ci2, cp2, ca2 = st.columns([5, 3, 2])
-                        with ci2:
-                            st.markdown(f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>', unsafe_allow_html=True)
-                            st.markdown(f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} cx` — {row['M2_Item']:.2f} m²")
-                            st.caption(f"{row.get('Transportadora', '—')} | {row.get('Veiculo', '—')}")
-                            if row.get('Observacoes'):
-                                st.caption(f"Obs: {row['Observacoes']}")
-                        with cp2:
-                            et = pd.to_datetime(de_d).strftime('%d/%m/%Y') if prazo_valido(de_d) else "—"
-                            pt = pd.to_datetime(pd_d).strftime('%d/%m/%Y') if prazo_valido(pd_d) else "—"
-                            st.caption("Data envio agendada")
-                            st.markdown(f"**{et}**")
-                            st.caption("Prazo maximo")
-                            st.write(pt)
-                            if not no_prazo:
-                                st.error("Fora do prazo!")
-                        with ca2:
-                            st.write("")
-                            if st.button("Confirmar Despacho", key=f"des_{row['id']}", use_container_width=True, type="primary"):
-                                confirmar_despacho(row['id'], st.session_state.usuario_nome)
-                                registrar_auditoria(st.session_state.usuario_nome, "CONFIRMAR_DESPACHO",
-                                    f"Lote {row['Cod_Lote']} — Obra {row.get('Obra_Vinculada','—')}")
-                                st.toast("Despachado!")
+                if st.session_state.get(f"ag_open_{row['id']}", False):
+                    with st.container(border=True):
+                        st.markdown(f"#### Agendar — `{num_op_ag}` | Lote `{row['Cod_Lote']}` | {row['Obra_Vinculada']}")
+                        fa1, fa2 = st.columns(2)
+                        with fa1:
+                            dt_env = st.date_input("Data envio:", format="DD/MM/YYYY", key=f"dt_env_{row['id']}",
+                                                   value=(pd.to_datetime(prazo_d).date() if prazo_valido(prazo_d) else hoje_projeto().date()))
+                            transp = st.selectbox("Transporte:", ["Frota Propria (Passold)", "Transportadora Terceira", "Retirada pelo Cliente"], key=f"tr_{row['id']}")
+                        with fa2:
+                            veic = st.text_input("Veiculo / Placa:", key=f"ve_{row['id']}")
+                            obs  = st.text_area("Observacoes:", key=f"ob_{row['id']}", height=80)
+                        cb1, cb2 = st.columns(2)
+                        with cb1:
+                            if st.button("Confirmar agendamento", key=f"conf_{row['id']}", use_container_width=True, type="primary"):
+                                agendar_envio(row['id'], dt_env, transp, veic, obs, st.session_state.usuario_nome)
+                                registrar_auditoria(st.session_state.usuario_nome, "AGENDAR_ENVIO",
+                                    f"Lote {row['Cod_Lote']} — {transp} — {dt_env}")
+                                st.session_state[f"ag_open_{row['id']}"] = False
+                                st.toast(f"Agendado para {dt_env.strftime('%d/%m/%Y')}!")
                                 st.rerun()
-                            if st.button("Reagendar", key=f"rag_{row['id']}", use_container_width=True):
-                                conn = conectar_banco()
-                                try:
-                                    cursor = conn.cursor()
-                                    cursor.execute("UPDATE logistica_envios SET Status_Logistica='Aguardando Agendamento' WHERE id=%s", (row['id'],))
-                                    conn.commit()
-                                    carregar_fila_logistica.clear()
-                                except Exception as e:
-                                    conn.rollback()
-                                    st.error(f"Erro: {e}")
-                                finally:
-                                    liberar_conexao(conn)
+                        with cb2:
+                            if st.button("Cancelar", key=f"can_{row['id']}", use_container_width=True):
+                                st.session_state[f"ag_open_{row['id']}"] = False
                                 st.rerun()
-                        st.markdown("</div>", unsafe_allow_html=True)
 
-            with st.expander("Historico de Despachos", expanded=False):
-                if df_log.empty or df_log[df_log['Status_Logistica'] == 'Despachado'].empty:
-                    st.info("Nenhum despacho realizado ainda.")
+            st.markdown("#### 📋 Fila Prioritaria — Aguardando Agendamento")
+            if df_log.empty or df_log[df_log['Status_Logistica'] == 'Aguardando Agendamento'].empty:
+                st.success("Todos os lotes ja agendados!")
+            else:
+                df_ag = df_log[df_log['Status_Logistica'] == 'Aguardando Agendamento'].copy()
+                df_ag['_atrasado'] = df_ag['Data_Limite_Despacho'].apply(
+                    lambda x: prazo_valido(x) and pd.to_datetime(x) < hoje_projeto()
+                )
+                if obra_selecionada:
+                    for _, row in df_ag.sort_values('Data_Limite_Despacho', na_position='last').iterrows():
+                        _render_fila_item(row)
                 else:
-                    df_hist = df_log[df_log['Status_Logistica'] == 'Despachado'].copy()
-                    for col in ['Data_Limite_Despacho', 'Data_Envio_Agendado']:
-                        df_hist[col] = df_hist[col].apply(lambda x: pd.to_datetime(x).strftime('%d/%m/%Y') if prazo_valido(x) else "—")
-                    cols_h = [c for c in ['Obra_Vinculada', 'Cod_Lote', 'Tipo_Material', 'Qtd_Caixas', 'M2_Item',
-                                          'Transportadora', 'Veiculo', 'Data_Envio_Agendado', 'Data_Limite_Despacho',
-                                          'Confirmado_Por', 'Confirmado_Em'] if c in df_hist.columns]
+                    _render_por_obra(df_ag, _render_fila_item, 'Data_Limite_Despacho')
+
+            def _render_envio_item(row):
+                pd_d = row['Data_Limite_Despacho']
+                de_d = row['Data_Envio_Agendado']
+                no_prazo = (pd.to_datetime(de_d) <= pd.to_datetime(pd_d)) if prazo_valido(pd_d) and prazo_valido(de_d) else True
+                css_bar  = "bar-ok" if no_prazo else "bar-danger"
+                st.markdown(f"<div class='{css_bar}'>", unsafe_allow_html=True)
+                ci2, cp2, ca2 = st.columns([5, 3, 2])
+                with ci2:
+                    st.markdown(f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>', unsafe_allow_html=True)
+                    st.markdown(f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} cx` — {row['M2_Item']:.2f} m²")
+                    st.caption(f"{row.get('Transportadora', '—')} | {row.get('Veiculo', '—')}")
+                    if row.get('Observacoes'):
+                        st.caption(f"Obs: {row['Observacoes']}")
+                with cp2:
+                    et = pd.to_datetime(de_d).strftime('%d/%m/%Y') if prazo_valido(de_d) else "—"
+                    pt = pd.to_datetime(pd_d).strftime('%d/%m/%Y') if prazo_valido(pd_d) else "—"
+                    st.caption("Data envio agendada")
+                    st.markdown(f"**{et}**")
+                    st.caption("Prazo maximo")
+                    st.write(pt)
+                    if not no_prazo:
+                        st.error("Fora do prazo!")
+                with ca2:
+                    st.write("")
+                    if st.button("Confirmar Despacho", key=f"des_{row['id']}", use_container_width=True, type="primary"):
+                        confirmar_despacho(row['id'], st.session_state.usuario_nome)
+                        registrar_auditoria(st.session_state.usuario_nome, "CONFIRMAR_DESPACHO",
+                            f"Lote {row['Cod_Lote']} — Obra {row.get('Obra_Vinculada','—')}")
+                        st.toast("Despachado!")
+                        st.rerun()
+                    if st.button("Reagendar", key=f"rag_{row['id']}", use_container_width=True):
+                        conn = conectar_banco()
+                        try:
+                            cursor = conn.cursor()
+                            cursor.execute("UPDATE logistica_envios SET Status_Logistica='Aguardando Agendamento' WHERE id=%s", (row['id'],))
+                            conn.commit()
+                            carregar_fila_logistica.clear()
+                        except Exception as e:
+                            conn.rollback()
+                            st.error(f"Erro: {e}")
+                        finally:
+                            liberar_conexao(conn)
+                        st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown("#### 🚛 Envios Agendados — Confirmar Saida")
+            if df_log.empty or df_log[df_log['Status_Logistica'] == 'Envio Agendado'].empty:
+                st.info("Nenhum envio agendado.")
+            else:
+                df_agend = df_log[df_log['Status_Logistica'] == 'Envio Agendado'].copy()
+                df_agend['_atrasado'] = df_agend.apply(
+                    lambda r: prazo_valido(r['Data_Limite_Despacho']) and prazo_valido(r['Data_Envio_Agendado'])
+                              and pd.to_datetime(r['Data_Envio_Agendado']) > pd.to_datetime(r['Data_Limite_Despacho']),
+                    axis=1
+                )
+                if obra_selecionada:
+                    for _, row in df_agend.sort_values('Data_Envio_Agendado', na_position='last').iterrows():
+                        _render_envio_item(row)
+                else:
+                    _render_por_obra(df_agend, _render_envio_item, 'Data_Envio_Agendado')
+
+            st.markdown("#### 🗂️ Historico de Despachos")
+            if df_log.empty or df_log[df_log['Status_Logistica'] == 'Despachado'].empty:
+                st.info("Nenhum despacho realizado ainda.")
+            else:
+                df_pont = df_log[df_log['Status_Logistica'] == 'Despachado'].copy()
+                df_pont = df_pont[df_pont['Data_Limite_Despacho'].apply(prazo_valido) & df_pont['Data_Envio_Agendado'].apply(prazo_valido)]
+                if not df_pont.empty:
+                    ok = (pd.to_datetime(df_pont['Data_Envio_Agendado']) <= pd.to_datetime(df_pont['Data_Limite_Despacho'])).sum()
+                    st.metric("Pontualidade nos despachos", f"{ok / len(df_pont) * 100:.0f}%")
+
+                df_hist = df_log[df_log['Status_Logistica'] == 'Despachado'].copy()
+                for col in ['Data_Limite_Despacho', 'Data_Envio_Agendado']:
+                    df_hist[col] = df_hist[col].apply(lambda x: pd.to_datetime(x).strftime('%d/%m/%Y') if prazo_valido(x) else "—")
+                cols_h = [c for c in ['Obra_Vinculada', 'Cod_Lote', 'Tipo_Material', 'Qtd_Caixas', 'M2_Item',
+                                      'Transportadora', 'Veiculo', 'Data_Envio_Agendado', 'Data_Limite_Despacho',
+                                      'Confirmado_Por', 'Confirmado_Em'] if c in df_hist.columns]
+
+                if obra_selecionada:
                     st.dataframe(df_hist[cols_h], hide_index=True, use_container_width=True)
-                    df_pont = df_log[df_log['Status_Logistica'] == 'Despachado'].copy()
-                    df_pont = df_pont[df_pont['Data_Limite_Despacho'].apply(prazo_valido) & df_pont['Data_Envio_Agendado'].apply(prazo_valido)]
-                    if not df_pont.empty:
-                        ok = (pd.to_datetime(df_pont['Data_Envio_Agendado']) <= pd.to_datetime(df_pont['Data_Limite_Despacho'])).sum()
-                        st.metric("Pontualidade nos despachos", f"{ok / len(df_pont) * 100:.0f}%")
+                else:
+                    with st.expander("Ver historico agrupado por obra", expanded=False):
+                        for obra_h in sorted(df_hist['Obra_Vinculada'].dropna().unique()):
+                            df_h_obra = df_hist[df_hist['Obra_Vinculada'] == obra_h]
+                            st.markdown(f"**🏗️ {obra_h}** — {len(df_h_obra)} despacho(s)")
+                            st.dataframe(df_h_obra[cols_h], hide_index=True, use_container_width=True)
 
     # ==================================================
     # ALMOXARIFADO
