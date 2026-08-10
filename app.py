@@ -8271,11 +8271,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                      .agg(qtd=('id', 'count'), parciais=('_parcial', 'sum'))
                                      .reset_index()
                                      .sort_values(['parciais', 'qtd'], ascending=[False, False]))
-                        for i, ob_row in enumerate(resumo_op.itertuples()):
+                        for ob_row in resumo_op.itertuples():
                             titulo_op = f"🏗️ {ob_row.Obra_Vinculada} — {int(ob_row.qtd)} OP(s) pronta(s)"
                             if ob_row.parciais > 0:
                                 titulo_op += f"  🟠 {int(ob_row.parciais)} parcial(is)"
-                            with st.expander(titulo_op, expanded=(i == 0)):
+                            with st.expander(titulo_op, expanded=False):
                                 df_obra_op = df_conc_log[df_conc_log['Obra_Vinculada'] == ob_row.Obra_Vinculada]
                                 for _, row_c in df_obra_op.iterrows():
                                     _render_op_pronta(row_c)
@@ -8316,11 +8316,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                           .agg(qtd=('id', 'count'), atrasados=('_atrasado', 'sum'))
                           .reset_index()
                           .sort_values(['atrasados', 'qtd'], ascending=[False, False]))
-                for i, ob_row in enumerate(resumo.itertuples()):
+                for ob_row in resumo.itertuples():
                     titulo_obra = f"🏗️ {ob_row.Obra_Vinculada} — {int(ob_row.qtd)} lote(s)"
                     if ob_row.atrasados > 0:
                         titulo_obra += f"  🔴 {int(ob_row.atrasados)} atrasado(s)"
-                    with st.expander(titulo_obra, expanded=(i == 0)):
+                    with st.expander(titulo_obra, expanded=False):
                         df_obra = df_secao[df_secao['Obra_Vinculada'] == ob_row.Obra_Vinculada].sort_values(col_sort, na_position='last')
                         for _, row in df_obra.iterrows():
                             render_item(row)
