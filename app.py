@@ -8148,7 +8148,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown("---")
 
             # ── OPs FINALIZADAS / PARCIAIS — EMITIR ROMANEIO ─────────────────
-            with st.expander("✅ OPs Prontas — Emitir Romaneio", expanded=True):
+            st.markdown("#### ✅ OPs Prontas — Emitir Romaneio")
+            with st.container():
                 df_micro_completo_log = carregar_micro_completo()
                 df_conc_log = df_micro_completo_log[
                     (df_micro_completo_log['Status_Item'].isin(['Concluido', 'Parcialmente Concluido'])) &
@@ -8163,7 +8164,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 else:
                     # Pecas de todas as OPs da fila numa consulta so (antes era 1 por OP)
                     _pecas_por_lote_log = carregar_pecas_varios_lotes(df_conc_log['id'])
-                    for _, row_c in df_conc_log.iterrows():
+
+                    def _render_op_pronta(row_c):
                         df_pecas_c = _pecas_por_lote_log.get(int(row_c['id']))
                         if df_pecas_c is None:
                             df_pecas_c = carregar_pecas_lote(int(row_c['id']))
@@ -8258,6 +8260,25 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             f"OP {num_op_c} — Lote {row_c['Cod_Lote']}")
                                         st.toast(f"Romaneio emitido — OP {num_op_c} baixada!")
                                         st.rerun()
+
+                    if obra_selecionada:
+                        for _, row_c in df_conc_log.iterrows():
+                            _render_op_pronta(row_c)
+                    else:
+                        df_conc_log = df_conc_log.copy()
+                        df_conc_log['_parcial'] = df_conc_log['Status_Item'] == 'Parcialmente Concluido'
+                        resumo_op = (df_conc_log.groupby('Obra_Vinculada')
+                                     .agg(qtd=('id', 'count'), parciais=('_parcial', 'sum'))
+                                     .reset_index()
+                                     .sort_values(['parciais', 'qtd'], ascending=[False, False]))
+                        for i, ob_row in enumerate(resumo_op.itertuples()):
+                            titulo_op = f"🏗️ {ob_row.Obra_Vinculada} — {int(ob_row.qtd)} OP(s) pronta(s)"
+                            if ob_row.parciais > 0:
+                                titulo_op += f"  🟠 {int(ob_row.parciais)} parcial(is)"
+                            with st.expander(titulo_op, expanded=(i == 0)):
+                                df_obra_op = df_conc_log[df_conc_log['Obra_Vinculada'] == ob_row.Obra_Vinculada]
+                                for _, row_c in df_obra_op.iterrows():
+                                    _render_op_pronta(row_c)
 
                 with st.expander("Romaneios já baixados (histórico recente)", expanded=False):
                     df_baixados_log = df_micro_completo_log[
