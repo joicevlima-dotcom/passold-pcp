@@ -8552,7 +8552,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             f"{icone} OP: {op_row['num_op']} — {op_row['cod_lote']} | {op_row['obra_vinculada']}"
                             f"{' (Proj. ' + str(op_row['numero_projeto']) + ')' if op_row.get('numero_projeto') else ''}  "
                             f"({n_conf}/{n_total} conferidos{f' — {n_indisp} FALTANDO' if n_indisp > 0 else ''})",
-                            expanded=(n_indisp > 0 or n_conf < n_total)
+                            expanded=False
                         ):
                             hc = st.columns([4, 2, 2, 3, 2])
                             for col_h, label in zip(hc, ["COMPONENTE", "QTD", "UN", "STATUS", "AÇÃO"]):
@@ -8758,7 +8758,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             f"{' (Proj. ' + str(saida_row['numero_projeto']) + ')' if pd.notna(saida_row.get('numero_projeto')) else ''}"
                             f" — {_nn(saida_row.get('destino'), '—')} "
                             f"({n_conf_ins}/{n_total_ins} conferidos{f' — {n_indisp_ins} FALTANDO' if n_indisp_ins > 0 else ''}) — por {saida_row['registrado_por']}",
-                            expanded=(n_indisp_ins > 0 or n_conf_ins < n_total_ins)
+                            expanded=False
                         ):
                             hci = st.columns([4, 2, 2, 3, 2])
                             for col_h, label in zip(hci, ["INSUMO", "QTD", "UN", "STATUS", "AÇÃO"]):
