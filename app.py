@@ -9192,16 +9192,61 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             else:
                                                 st.error(msg_add)
                         with cadd2:
-                            with st.expander("📋 Colar mais itens"):
-                                texto_extra_lm = st.text_area("Colar itens:", key=f"lm_texto_extra_{lista_id}", height=120)
-                                itens_extra_preview = parse_lista_mestra(texto_extra_lm) if texto_extra_lm.strip() else []
-                                if itens_extra_preview:
-                                    st.caption(f"{len(itens_extra_preview)} item(ns) reconhecido(s).")
-                                if st.button("Adicionar itens colados", key=f"btn_add_extra_lm_{lista_id}", disabled=not itens_extra_preview):
+                            with st.expander("📋 Adicionar mais itens"):
+                                tab_colar_extra_lm, tab_manual_extra_lm = st.tabs(["📋 Colar", "✍️ Manual"])
+
+                                with tab_colar_extra_lm:
+                                    texto_extra_lm = st.text_area("Colar itens:", key=f"lm_texto_extra_{lista_id}", height=120)
+                                    itens_extra_preview_colar = parse_lista_mestra(texto_extra_lm) if texto_extra_lm.strip() else []
+                                    if itens_extra_preview_colar:
+                                        st.caption(f"{len(itens_extra_preview_colar)} item(ns) reconhecido(s).")
+
+                                with tab_manual_extra_lm:
+                                    st.caption("Digite os campos abaixo, um item por linha (as linhas se combinam pela posição — "
+                                               "a 1ª linha de cada campo forma o 1º item, e assim por diante).")
+                                    mce1, mce2, mce3, mce4 = st.columns(4)
+                                    with mce1:
+                                        lm_itens_extra_txt = st.text_area("Itens:", height=180, key=f"lm_itens_extra_manual_{lista_id}", placeholder="ANC4\nPRIS08")
+                                    with mce2:
+                                        lm_qtds_extra_txt = st.text_area("Quantidades:", height=180, key=f"lm_qtds_extra_manual_{lista_id}", placeholder="82\n40")
+                                    with mce3:
+                                        lm_usos_extra_txt = st.text_area("Uso (opcional):", height=180, key=f"lm_usos_extra_manual_{lista_id}")
+                                    with mce4:
+                                        lm_obs_extra_txt = st.text_area("Observações (opcional):", height=180, key=f"lm_obs_extra_manual_{lista_id}")
+
+                                    itens_extra_preview_manual = []
+                                    itens_extra_erro_manual = []
+                                    linhas_itens_extra = [l.strip() for l in lm_itens_extra_txt.strip().split('\n') if l.strip()] if lm_itens_extra_txt.strip() else []
+                                    linhas_qtds_extra  = [l.strip().replace(',', '.') for l in lm_qtds_extra_txt.strip().split('\n')] if lm_qtds_extra_txt.strip() else []
+                                    linhas_usos_extra  = [l.strip() for l in lm_usos_extra_txt.strip().split('\n')] if lm_usos_extra_txt.strip() else []
+                                    linhas_obs_extra   = [l.strip() for l in lm_obs_extra_txt.strip().split('\n')] if lm_obs_extra_txt.strip() else []
+                                    for i_e, item_nome_e in enumerate(linhas_itens_extra):
+                                        qtd_str_e = linhas_qtds_extra[i_e] if i_e < len(linhas_qtds_extra) else ''
+                                        try:
+                                            qtd_val_e = float(qtd_str_e)
+                                        except ValueError:
+                                            itens_extra_erro_manual.append(item_nome_e)
+                                            continue
+                                        itens_extra_preview_manual.append({
+                                            'item': item_nome_e,
+                                            'qtd_total': qtd_val_e,
+                                            'uso': linhas_usos_extra[i_e] if i_e < len(linhas_usos_extra) else '',
+                                            'observacoes': linhas_obs_extra[i_e] if i_e < len(linhas_obs_extra) else '',
+                                        })
+                                    if lm_itens_extra_txt.strip():
+                                        if itens_extra_preview_manual:
+                                            st.caption(f"{len(itens_extra_preview_manual)} item(ns) reconhecido(s):")
+                                            st.dataframe(pd.DataFrame(itens_extra_preview_manual), hide_index=True, use_container_width=True)
+                                        if itens_extra_erro_manual:
+                                            st.warning("Sem quantidade válida na mesma linha, não foram reconhecidos: " + ", ".join(itens_extra_erro_manual))
+
+                                itens_extra_preview = itens_extra_preview_colar + itens_extra_preview_manual
+
+                                if st.button("Adicionar itens", key=f"btn_add_extra_lm_{lista_id}", disabled=not itens_extra_preview):
                                     ok_extra, msg_extra = adicionar_itens_lista_mestra(lista_id, itens_extra_preview)
                                     if ok_extra:
                                         registrar_auditoria(st.session_state.usuario_nome, "ADICIONAR_ITEM_LISTA_MESTRA",
-                                            f"Lista {lista_id} | +{len(itens_extra_preview)} item(ns) colado(s)")
+                                            f"Lista {lista_id} | +{len(itens_extra_preview)} item(ns)")
                                         st.toast(msg_extra)
                                         st.rerun()
                                     else:
