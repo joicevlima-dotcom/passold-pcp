@@ -10370,164 +10370,182 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 st.stop()
 
             obras_disponiveis = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
-            cores_coluna = ['#3B82F6', '#8B5CF6', '#F59E0B', '#10B981', '#EF4444', '#06B6D4', '#EC4899', '#84CC16']
+            mapa_coluna_nome = dict(zip(df_colunas['id'].tolist(), df_colunas['nome'].tolist()))
 
-            colunas_st = st.columns(len(df_colunas))
-            for i, (_, coluna) in enumerate(df_colunas.iterrows()):
-                cor = cores_coluna[i % len(cores_coluna)]
-                coluna_id = int(coluna['id'])
-                cards_da_coluna = df_cards[df_cards['coluna_id'] == coluna_id] if not df_cards.empty else df_cards
+            # ── Visão geral (igual ao Almoxarifado: metricas + lista unica, sem colunas lado a lado) ──
+            st.markdown("#### Visão geral")
+            NUM_STAT_POR_LINHA = 6
+            for inicio in range(0, len(df_colunas), NUM_STAT_POR_LINHA):
+                bloco_stat = df_colunas.iloc[inicio:inicio + NUM_STAT_POR_LINHA]
+                cols_stat = st.columns(len(bloco_stat))
+                for j, (_, coluna_stat) in enumerate(bloco_stat.iterrows()):
+                    n_stat = len(df_cards[df_cards['coluna_id'] == coluna_stat['id']]) if not df_cards.empty else 0
+                    cols_stat[j].metric(coluna_stat['nome'], n_stat)
 
-                with colunas_st[i]:
-                    st.markdown(f"""<div style='background:{cor}22;border-top:3px solid {cor};border-radius:6px;padding:6px 12px;margin-bottom:10px;text-align:center;'>
-                        <span style='color:{cor};font-weight:800;font-size:13px;'>{html_escape(coluna['nome'])}</span><br>
-                        <span style='color:{cor};font-size:19px;font-weight:800;'>{len(cards_da_coluna)}</span>
-                    </div>""", unsafe_allow_html=True)
+            st.markdown("---")
+            with st.expander("➕ Novo cartão"):
+                with st.form(f"kanban_form_novo_card_{quadro_atual_id}"):
+                    nc_coluna_nome = st.selectbox("Coluna:", df_colunas['nome'].tolist(), key=f"kanban_card_coluna_{quadro_atual_id}")
+                    nc_titulo = st.text_input("Título:", key=f"kanban_card_titulo_{quadro_atual_id}")
+                    nc_desc = st.text_area("Descrição:", key=f"kanban_card_desc_{quadro_atual_id}", height=68)
+                    nc_obra = st.selectbox("Obra (opcional):", ["—"] + obras_disponiveis, key=f"kanban_card_obra_{quadro_atual_id}")
+                    projetos_obra = sorted(df_projetos[df_projetos['Obra'] == nc_obra]['Numero_Projeto'].unique().tolist()) if nc_obra != "—" and not df_projetos.empty else []
+                    nc_projeto = st.selectbox("Projeto (opcional):", ["—"] + projetos_obra, key=f"kanban_card_projeto_{quadro_atual_id}")
+                    nc_prazo = st.date_input("Prazo (opcional):", value=None, key=f"kanban_card_prazo_{quadro_atual_id}")
+                    nc_resp = st.text_input("Solicitante (opcional):", key=f"kanban_card_resp_{quadro_atual_id}")
+                    if st.form_submit_button("Adicionar"):
+                        if not nc_titulo.strip():
+                            st.error("Informe o título.")
+                        else:
+                            nc_coluna_id = int(df_colunas[df_colunas['nome'] == nc_coluna_nome]['id'].iloc[0])
+                            ok_c, msg_c = criar_card(
+                                quadro_atual_id, nc_coluna_id, nc_titulo, nc_desc,
+                                nc_obra if nc_obra != "—" else None,
+                                nc_projeto if nc_projeto != "—" else None,
+                                nc_resp, nc_prazo, st.session_state.usuario_nome
+                            )
+                            if ok_c:
+                                _limpar_cache_kanban()
+                                registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_CARTAO",
+                                    f"Quadro: {quadro_row['nome']} | Coluna: {nc_coluna_nome} | {nc_titulo.strip()}")
+                                st.toast("Cartão criado!")
+                                st.rerun()
+                            else:
+                                st.error(msg_c)
 
-                    with st.expander("➕ Cartão"):
-                        with st.form(f"kanban_form_novo_card_{coluna_id}"):
-                            nc_titulo = st.text_input("Título:", key=f"kanban_card_titulo_{coluna_id}")
-                            nc_desc = st.text_area("Descrição:", key=f"kanban_card_desc_{coluna_id}", height=68)
-                            nc_obra = st.selectbox("Obra (opcional):", ["—"] + obras_disponiveis, key=f"kanban_card_obra_{coluna_id}")
-                            projetos_obra = sorted(df_projetos[df_projetos['Obra'] == nc_obra]['Numero_Projeto'].unique().tolist()) if nc_obra != "—" and not df_projetos.empty else []
-                            nc_projeto = st.selectbox("Projeto (opcional):", ["—"] + projetos_obra, key=f"kanban_card_projeto_{coluna_id}")
-                            nc_prazo = st.date_input("Prazo (opcional):", value=None, key=f"kanban_card_prazo_{coluna_id}")
-                            nc_resp = st.text_input("Solicitante (opcional):", key=f"kanban_card_resp_{coluna_id}")
-                            if st.form_submit_button("Adicionar"):
-                                if not nc_titulo.strip():
-                                    st.error("Informe o título.")
-                                else:
-                                    ok_c, msg_c = criar_card(
-                                        quadro_atual_id, coluna_id, nc_titulo, nc_desc,
-                                        nc_obra if nc_obra != "—" else None,
-                                        nc_projeto if nc_projeto != "—" else None,
-                                        nc_resp, nc_prazo, st.session_state.usuario_nome
-                                    )
-                                    if ok_c:
+            filtro_coluna = st.radio(
+                "Mostrar cartões de:", ["Todos"] + df_colunas['nome'].tolist(),
+                horizontal=True, key=f"kanban_filtro_coluna_{quadro_atual_id}"
+            )
+            if filtro_coluna == "Todos" or df_cards.empty:
+                df_cards_filtrado = df_cards
+            else:
+                ids_coluna_filtro = df_colunas[df_colunas['nome'] == filtro_coluna]['id'].tolist()
+                df_cards_filtrado = df_cards[df_cards['coluna_id'].isin(ids_coluna_filtro)]
+
+            if df_cards_filtrado.empty:
+                st.caption("Nenhum cartão aqui.")
+            else:
+                for _, card in df_cards_filtrado.sort_values('criado_em').iterrows():
+                    card_id = int(card['id'])
+                    coluna_id = int(card['coluna_id'])
+                    coluna_nome_card = mapa_coluna_nome.get(coluna_id, "—")
+                    tags_label = []
+                    if card.get('obra'):
+                        tags_label.append(str(card['obra']))
+                    if pd.notna(card.get('prazo')):
+                        tags_label.append(f"prazo {pd.Timestamp(card['prazo']).strftime('%d/%m')}")
+                    label_extra = f" — {' · '.join(tags_label)}" if tags_label else ""
+
+                    with st.expander(f"🗂️ {card['titulo']}  ·  {coluna_nome_card}{label_extra}", expanded=False):
+                        if card.get('obra'):
+                            st.caption(f"🏗️ Obra: {card['obra']}")
+                        if card.get('numero_projeto'):
+                            st.caption(f"📋 Projeto: {card['numero_projeto']}")
+                        if pd.notna(card.get('prazo')):
+                            st.caption(f"📅 Prazo: {pd.Timestamp(card['prazo']).strftime('%d/%m/%Y')}")
+                        if card.get('responsavel'):
+                            st.caption(f"🙋 Solicitante: {card['responsavel']}")
+                        dias_parado = (hoje_projeto() - card['criado_em']).days
+                        st.caption(f"🕐 há {dias_parado}d" if dias_parado != 1 else "🕐 há 1d")
+                        if card.get('descricao'):
+                            st.write(card['descricao'])
+
+                        st.markdown("---")
+                        df_anexos_card = df_anexos[df_anexos['card_id'] == card_id] if not df_anexos.empty else df_anexos
+                        st.caption(f"📎 Anexos ({len(df_anexos_card)})" if not df_anexos_card.empty else "📎 Anexos")
+                        uploaded_kanban = st.file_uploader(
+                            "Anexar arquivo(s) — RC física, solicitação etc.:",
+                            type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "doc", "docx"],
+                            key=f"kanban_upload_{card_id}", accept_multiple_files=True
+                        )
+                        if uploaded_kanban:
+                            if st.button(f"💾 Salvar {len(uploaded_kanban)} arquivo(s)", key=f"kanban_btn_salvar_anexo_{card_id}"):
+                                prontos_kanban = [(f.name, f.type or "", f.read()) for f in uploaded_kanban]
+                                n_salvos_kanban = salvar_anexos_kanban_lote(card_id, prontos_kanban, st.session_state.usuario_nome)
+                                _limpar_cache_kanban()
+                                registrar_auditoria(st.session_state.usuario_nome, "KANBAN_ANEXAR_ARQUIVO",
+                                    f"Quadro: {quadro_row['nome']} | {card['titulo']} | {n_salvos_kanban} arquivo(s)")
+                                st.toast(f"✅ {n_salvos_kanban} arquivo(s) salvo(s)!")
+                                st.rerun()
+                        if not df_anexos_card.empty:
+                            for _, anexo in df_anexos_card.iterrows():
+                                anexo_id = int(anexo['id'])
+                                col_an1, col_an2, col_an3 = st.columns([4, 3, 1])
+                                col_an1.markdown(f"📄 {html_escape(anexo['nome_arquivo'])}")
+                                col_an2.caption(f"{anexo['enviado_por']} — {anexo['enviado_em'].strftime('%d/%m/%Y')}")
+                                _kanban_bloco_baixar_anexo(anexo_id, col_an3)
+                                if st.button("🗑️ Remover anexo", key=f"kanban_del_anexo_{anexo_id}"):
+                                    if excluir_anexo_kanban(anexo_id):
                                         _limpar_cache_kanban()
-                                        registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_CARTAO",
-                                            f"Quadro: {quadro_row['nome']} | Coluna: {coluna['nome']} | {nc_titulo.strip()}")
-                                        st.toast("Cartão criado!")
+                                        st.toast("Anexo removido.")
+                                        st.rerun()
+
+                        df_hist_card = df_historico[df_historico['card_id'] == card_id] if not df_historico.empty else df_historico
+                        if not df_hist_card.empty:
+                            st.caption("Histórico:")
+                            for _, h in df_hist_card.iterrows():
+                                st.caption(f"• {h['coluna_anterior']} → {h['coluna_nova']} — {h['usuario']} ({h['criado_em'].strftime('%d/%m %H:%M')})")
+
+                        outras_colunas = df_colunas[df_colunas['id'] != coluna_id]
+                        if not outras_colunas.empty:
+                            destino_nome = st.selectbox("Mover para:", outras_colunas['nome'].tolist(), key=f"kanban_mover_sel_{card_id}")
+                            if st.button("➡️ Mover", key=f"kanban_mover_btn_{card_id}"):
+                                destino_row = outras_colunas[outras_colunas['nome'] == destino_nome].iloc[0]
+                                ok_m, msg_m = mover_card(card_id, coluna_nome_card, int(destino_row['id']), destino_row['nome'], st.session_state.usuario_nome)
+                                if ok_m:
+                                    _limpar_cache_kanban()
+                                    registrar_auditoria(st.session_state.usuario_nome, "KANBAN_MOVER_CARTAO",
+                                        f"Quadro: {quadro_row['nome']} | {card['titulo']}: {coluna_nome_card} → {destino_row['nome']}")
+                                    st.toast("Cartão movido!")
+                                    st.rerun()
+                                else:
+                                    st.error(msg_m)
+
+                        del_key = f"kanban_confirm_del_card_{card_id}"
+                        if not st.session_state.get(del_key):
+                            if st.button("🗑️ Excluir cartão", key=f"btn_{del_key}"):
+                                st.session_state[del_key] = True
+                                st.rerun()
+                        else:
+                            st.warning("Excluir este cartão?")
+                            dc1, dc2 = st.columns(2)
+                            with dc1:
+                                if st.button("✅ Confirmar", key=f"confirmar_{del_key}"):
+                                    ok_d, msg_d = excluir_card(card_id)
+                                    if ok_d:
+                                        _limpar_cache_kanban()
+                                        registrar_auditoria(st.session_state.usuario_nome, "KANBAN_EXCLUIR_CARTAO", f"Quadro: {quadro_row['nome']} | {card['titulo']}")
+                                        st.session_state[del_key] = False
+                                        st.toast("Cartão excluído.")
                                         st.rerun()
                                     else:
-                                        st.error(msg_c)
+                                        st.error(msg_d)
+                            with dc2:
+                                if st.button("Cancelar", key=f"cancelar_{del_key}"):
+                                    st.session_state[del_key] = False
+                                    st.rerun()
 
-                    if cards_da_coluna.empty:
-                        st.markdown("<div style='text-align:center;color:#94A3B8;padding:12px;font-size:12px;'>Nenhum cartão</div>", unsafe_allow_html=True)
-                    else:
-                        for _, card in cards_da_coluna.iterrows():
-                            card_id = int(card['id'])
-                            with st.container(border=True):
-                                st.markdown(f"**{html_escape(card['titulo'])}**")
-                                if card.get('obra'):
-                                    st.caption(f"🏗️ Obra: {card['obra']}")
-                                if card.get('numero_projeto'):
-                                    st.caption(f"📋 Projeto: {card['numero_projeto']}")
-                                if pd.notna(card.get('prazo')):
-                                    st.caption(f"📅 Prazo: {pd.Timestamp(card['prazo']).strftime('%d/%m/%Y')}")
-                                if card.get('responsavel'):
-                                    st.caption(f"🙋 Solicitante: {card['responsavel']}")
-                                dias_parado = (hoje_projeto() - card['criado_em']).days
-                                st.caption(f"🕐 há {dias_parado}d" if dias_parado != 1 else "🕐 há 1d")
-
-                                with st.expander("Detalhes"):
-                                    if card.get('descricao'):
-                                        st.write(card['descricao'])
-
-                                    df_anexos_card = df_anexos[df_anexos['card_id'] == card_id] if not df_anexos.empty else df_anexos
-                                    st.caption(f"📎 Anexos ({len(df_anexos_card)})" if not df_anexos_card.empty else "📎 Anexos")
-                                    uploaded_kanban = st.file_uploader(
-                                        "Anexar arquivo(s) — RC física, solicitação etc.:",
-                                        type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "doc", "docx"],
-                                        key=f"kanban_upload_{card_id}", accept_multiple_files=True
-                                    )
-                                    if uploaded_kanban:
-                                        if st.button(f"💾 Salvar {len(uploaded_kanban)} arquivo(s)", key=f"kanban_btn_salvar_anexo_{card_id}"):
-                                            prontos_kanban = [(f.name, f.type or "", f.read()) for f in uploaded_kanban]
-                                            n_salvos_kanban = salvar_anexos_kanban_lote(card_id, prontos_kanban, st.session_state.usuario_nome)
-                                            _limpar_cache_kanban()
-                                            registrar_auditoria(st.session_state.usuario_nome, "KANBAN_ANEXAR_ARQUIVO",
-                                                f"Quadro: {quadro_row['nome']} | {card['titulo']} | {n_salvos_kanban} arquivo(s)")
-                                            st.toast(f"✅ {n_salvos_kanban} arquivo(s) salvo(s)!")
-                                            st.rerun()
-                                    if not df_anexos_card.empty:
-                                        for _, anexo in df_anexos_card.iterrows():
-                                            anexo_id = int(anexo['id'])
-                                            col_an1, col_an2, col_an3 = st.columns([4, 3, 1])
-                                            col_an1.markdown(f"📄 {html_escape(anexo['nome_arquivo'])}")
-                                            col_an2.caption(f"{anexo['enviado_por']} — {anexo['enviado_em'].strftime('%d/%m/%Y')}")
-                                            _kanban_bloco_baixar_anexo(anexo_id, col_an3)
-                                            if st.button("🗑️ Remover anexo", key=f"kanban_del_anexo_{anexo_id}"):
-                                                if excluir_anexo_kanban(anexo_id):
-                                                    _limpar_cache_kanban()
-                                                    st.toast("Anexo removido.")
-                                                    st.rerun()
-
-                                    df_hist_card = df_historico[df_historico['card_id'] == card_id] if not df_historico.empty else df_historico
-                                    if not df_hist_card.empty:
-                                        st.caption("Histórico:")
-                                        for _, h in df_hist_card.iterrows():
-                                            st.caption(f"• {h['coluna_anterior']} → {h['coluna_nova']} — {h['usuario']} ({h['criado_em'].strftime('%d/%m %H:%M')})")
-
-                                    outras_colunas = df_colunas[df_colunas['id'] != coluna_id]
-                                    if not outras_colunas.empty:
-                                        destino_nome = st.selectbox("Mover para:", outras_colunas['nome'].tolist(), key=f"kanban_mover_sel_{card_id}")
-                                        if st.button("➡️ Mover", key=f"kanban_mover_btn_{card_id}"):
-                                            destino_row = outras_colunas[outras_colunas['nome'] == destino_nome].iloc[0]
-                                            ok_m, msg_m = mover_card(card_id, coluna['nome'], int(destino_row['id']), destino_row['nome'], st.session_state.usuario_nome)
-                                            if ok_m:
-                                                _limpar_cache_kanban()
-                                                registrar_auditoria(st.session_state.usuario_nome, "KANBAN_MOVER_CARTAO",
-                                                    f"Quadro: {quadro_row['nome']} | {card['titulo']}: {coluna['nome']} → {destino_row['nome']}")
-                                                st.toast("Cartão movido!")
-                                                st.rerun()
-                                            else:
-                                                st.error(msg_m)
-
-                                    del_key = f"kanban_confirm_del_card_{card_id}"
-                                    if not st.session_state.get(del_key):
-                                        if st.button("🗑️ Excluir cartão", key=f"btn_{del_key}"):
-                                            st.session_state[del_key] = True
-                                            st.rerun()
+                        st.markdown("---")
+                        st.caption("💬 Comentários")
+                        df_com_card = df_comentarios[df_comentarios['card_id'] == card_id] if not df_comentarios.empty else df_comentarios
+                        if df_com_card.empty:
+                            st.caption("Nenhum comentário ainda.")
+                        else:
+                            for _, com in df_com_card.iterrows():
+                                st.markdown(f"**{html_escape(com['autor'] or '—')}** _{com['criado_em'].strftime('%d/%m %H:%M')}_  \n{html_escape(com['texto'])}")
+                        with st.form(f"kanban_form_comentario_{card_id}", clear_on_submit=True):
+                            novo_comentario = st.text_area("Adicionar comentário:", key=f"kanban_comentario_txt_{card_id}", height=68)
+                            if st.form_submit_button("Comentar"):
+                                if not novo_comentario.strip():
+                                    st.error("Escreva algo antes de comentar.")
+                                else:
+                                    ok_com, msg_com = criar_comentario(card_id, st.session_state.usuario_nome, novo_comentario)
+                                    if ok_com:
+                                        _limpar_cache_kanban()
+                                        st.rerun()
                                     else:
-                                        st.warning("Excluir este cartão?")
-                                        dc1, dc2 = st.columns(2)
-                                        with dc1:
-                                            if st.button("✅ Confirmar", key=f"confirmar_{del_key}"):
-                                                ok_d, msg_d = excluir_card(card_id)
-                                                if ok_d:
-                                                    _limpar_cache_kanban()
-                                                    registrar_auditoria(st.session_state.usuario_nome, "KANBAN_EXCLUIR_CARTAO", f"Quadro: {quadro_row['nome']} | {card['titulo']}")
-                                                    st.session_state[del_key] = False
-                                                    st.toast("Cartão excluído.")
-                                                    st.rerun()
-                                                else:
-                                                    st.error(msg_d)
-                                        with dc2:
-                                            if st.button("Cancelar", key=f"cancelar_{del_key}"):
-                                                st.session_state[del_key] = False
-                                                st.rerun()
-
-                                    st.markdown("---")
-                                    st.caption("💬 Comentários")
-                                    df_com_card = df_comentarios[df_comentarios['card_id'] == card_id] if not df_comentarios.empty else df_comentarios
-                                    if df_com_card.empty:
-                                        st.caption("Nenhum comentário ainda.")
-                                    else:
-                                        for _, com in df_com_card.iterrows():
-                                            st.markdown(f"**{html_escape(com['autor'] or '—')}** _{com['criado_em'].strftime('%d/%m %H:%M')}_  \n{html_escape(com['texto'])}")
-                                    with st.form(f"kanban_form_comentario_{card_id}", clear_on_submit=True):
-                                        novo_comentario = st.text_area("Adicionar comentário:", key=f"kanban_comentario_txt_{card_id}", height=68)
-                                        if st.form_submit_button("Comentar"):
-                                            if not novo_comentario.strip():
-                                                st.error("Escreva algo antes de comentar.")
-                                            else:
-                                                ok_com, msg_com = criar_comentario(card_id, st.session_state.usuario_nome, novo_comentario)
-                                                if ok_com:
-                                                    _limpar_cache_kanban()
-                                                    st.rerun()
-                                                else:
-                                                    st.error(msg_com)
+                                        st.error(msg_com)
 
     # ==================================================
     # CONFIGURACOES
