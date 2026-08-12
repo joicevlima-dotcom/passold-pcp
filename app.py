@@ -1044,6 +1044,57 @@ def inicializar_banco_de_dados():
         # Default 1 (fator 100%) pra não alterar retroativamente o % das semanas já lançadas.
         cursor.execute("ALTER TABLE produtividade_semanal ADD COLUMN IF NOT EXISTS dificuldade INTEGER DEFAULT 1")
 
+# ── Kanban (multi-quadro) ────────────────────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS kanban_quadros (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL,
+                descricao TEXT,
+                setores_acesso TEXT,
+                criado_por TEXT,
+                criado_em TIMESTAMP DEFAULT NOW(),
+                ativo BOOLEAN DEFAULT TRUE,
+                ordem INTEGER DEFAULT 0
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS kanban_colunas (
+                id SERIAL PRIMARY KEY,
+                quadro_id INTEGER REFERENCES kanban_quadros(id) ON DELETE CASCADE,
+                nome TEXT NOT NULL,
+                ordem INTEGER DEFAULT 0
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS kanban_cards (
+                id SERIAL PRIMARY KEY,
+                quadro_id INTEGER REFERENCES kanban_quadros(id) ON DELETE CASCADE,
+                coluna_id INTEGER REFERENCES kanban_colunas(id) ON DELETE CASCADE,
+                titulo TEXT NOT NULL,
+                descricao TEXT,
+                obra TEXT,
+                numero_projeto TEXT,
+                responsavel TEXT,
+                criado_por TEXT,
+                criado_em TIMESTAMP DEFAULT NOW(),
+                atualizado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS kanban_historico (
+                id SERIAL PRIMARY KEY,
+                card_id INTEGER REFERENCES kanban_cards(id) ON DELETE CASCADE,
+                coluna_anterior TEXT,
+                coluna_nova TEXT,
+                usuario TEXT,
+                criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_colunas_quadro ON kanban_colunas(quadro_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_cards_quadro ON kanban_cards(quadro_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_cards_coluna ON kanban_cards(coluna_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_historico_card ON kanban_historico(card_id)")
+
 # ── Tabela de auditoria (nova) ──────────────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS auditoria_log (
@@ -1271,6 +1322,230 @@ def editar_nome_obra(obra_antiga: str, obra_nova: str):
     except Exception as e:
         conn.rollback()
         return False, f"Erro ao renomear obra: {e}"
+    finally:
+        liberar_conexao(conn)
+
+# ========================================================
+# KANBAN (multi-quadro)
+# ========================================================
+@st.cache_data(ttl=30)
+def carregar_kanban_quadros():
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query("SELECT * FROM kanban_quadros WHERE ativo ORDER BY ordem, nome", conn)
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=30)
+def carregar_kanban_colunas(quadro_id: int):
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            "SELECT * FROM kanban_colunas WHERE quadro_id=%(quadro_id)s ORDER BY ordem, id",
+            conn, params={"quadro_id": quadro_id}
+        )
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=30)
+def carregar_kanban_cards(quadro_id: int):
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            "SELECT * FROM kanban_cards WHERE quadro_id=%(quadro_id)s ORDER BY criado_em",
+            conn, params={"quadro_id": quadro_id}
+        )
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=30)
+def carregar_kanban_historico(quadro_id: int):
+    """Historico de todos os cards do quadro de uma vez (evita 1 query por card)."""
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            """SELECT h.* FROM kanban_historico h
+               JOIN kanban_cards c ON c.id = h.card_id
+               WHERE c.quadro_id=%(quadro_id)s ORDER BY h.criado_em""",
+            conn, params={"quadro_id": quadro_id}
+        )
+    finally:
+        liberar_conexao(conn)
+
+def _limpar_cache_kanban():
+    for fn in [carregar_kanban_quadros, carregar_kanban_colunas, carregar_kanban_cards, carregar_kanban_historico]:
+        try:
+            fn.clear()
+        except Exception:
+            pass
+
+def _kanban_setores_lista(setores_acesso) -> list:
+    """setores_acesso vem como CSV (ou None/NaN) direto da coluna do banco."""
+    if not setores_acesso or (isinstance(setores_acesso, float) and pd.isna(setores_acesso)):
+        return []
+    return [s.strip() for s in str(setores_acesso).split(",") if s.strip()]
+
+def _kanban_quadro_visivel(setores_acesso, setor_usuario: str) -> bool:
+    if setor_usuario == "Master":
+        return True
+    setores = _kanban_setores_lista(setores_acesso)
+    return not setores or setor_usuario in setores
+
+def criar_quadro(nome: str, descricao: str, setores_acesso: list, criado_por: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        setores_str = ",".join(setores_acesso) if setores_acesso else None
+        cursor.execute(
+            "INSERT INTO kanban_quadros (nome, descricao, setores_acesso, criado_por) VALUES (%s,%s,%s,%s) RETURNING id",
+            (nome.strip(), (descricao or "").strip(), setores_str, criado_por)
+        )
+        quadro_id = cursor.fetchone()[0]
+        cursor.execute("INSERT INTO kanban_colunas (quadro_id, nome, ordem) VALUES (%s,%s,0)", (quadro_id, "A Fazer"))
+        conn.commit()
+        return True, quadro_id
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao criar quadro: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def arquivar_quadro(quadro_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE kanban_quadros SET ativo=FALSE WHERE id=%s", (quadro_id,))
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao excluir quadro: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def criar_coluna(quadro_id: int, nome: str, ordem: int = None):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        if ordem is None:
+            cursor.execute("SELECT COALESCE(MAX(ordem), -1) + 1 FROM kanban_colunas WHERE quadro_id=%s", (quadro_id,))
+            ordem = cursor.fetchone()[0]
+        cursor.execute("INSERT INTO kanban_colunas (quadro_id, nome, ordem) VALUES (%s,%s,%s)", (quadro_id, nome.strip(), ordem))
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao criar coluna: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def renomear_coluna(coluna_id: int, novo_nome: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE kanban_colunas SET nome=%s WHERE id=%s", (novo_nome.strip(), coluna_id))
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao renomear coluna: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def reordenar_coluna(coluna_id: int, nova_ordem: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE kanban_colunas SET ordem=%s WHERE id=%s", (nova_ordem, coluna_id))
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao reordenar coluna: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def excluir_coluna(coluna_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM kanban_cards WHERE coluna_id=%s", (coluna_id,))
+        if cursor.fetchone()[0] > 0:
+            return False, "Essa coluna ainda tem cartões — mova ou exclua eles antes de apagar a coluna."
+        cursor.execute("DELETE FROM kanban_colunas WHERE id=%s", (coluna_id,))
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao excluir coluna: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def criar_card(quadro_id: int, coluna_id: int, titulo: str, descricao: str, obra: str,
+               numero_projeto: str, responsavel: str, criado_por: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT INTO kanban_cards
+               (quadro_id, coluna_id, titulo, descricao, obra, numero_projeto, responsavel, criado_por)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (quadro_id, coluna_id, titulo.strip(), (descricao or "").strip(),
+             obra or None, numero_projeto or None, (responsavel or "").strip(), criado_por)
+        )
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao criar cartão: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def editar_card(card_id: int, titulo: str, descricao: str, obra: str, numero_projeto: str, responsavel: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """UPDATE kanban_cards SET titulo=%s, descricao=%s, obra=%s, numero_projeto=%s,
+               responsavel=%s, atualizado_em=NOW() WHERE id=%s""",
+            (titulo.strip(), (descricao or "").strip(), obra or None, numero_projeto or None,
+             (responsavel or "").strip(), card_id)
+        )
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao editar cartão: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def mover_card(card_id: int, coluna_atual_nome: str, nova_coluna_id: int, nova_coluna_nome: str, usuario: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE kanban_cards SET coluna_id=%s, atualizado_em=NOW() WHERE id=%s", (nova_coluna_id, card_id))
+        cursor.execute(
+            "INSERT INTO kanban_historico (card_id, coluna_anterior, coluna_nova, usuario) VALUES (%s,%s,%s,%s)",
+            (card_id, coluna_atual_nome, nova_coluna_nome, usuario)
+        )
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao mover cartão: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def excluir_card(card_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM kanban_cards WHERE id=%s", (card_id,))
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao excluir cartão: {e}"
     finally:
         liberar_conexao(conn)
 
@@ -4756,6 +5031,9 @@ GRUPOS_NAV = {
         "Relatorio Geral":    ("📊  Relatório Geral",    ["Master","Diretoria","PCP","Medicao"]),
         "Relatorio Produtividade": ("📈  Produtividade", ["Master","Diretoria","PCP","Medicao"]),
         "Sistema de Medicao": ("📏  Sistema de Medição", ["Master","Medicao"]),
+    },
+    "🗂️  Kanban": {
+        "Kanban": ("🗂️  Kanban", ["Master","Producao","Engenharia","Diretoria","Logistica","Almoxarifado","Medicao","PCP","Esquadria"]),
     },
     "⚙️  Sistema": {
         "Configuracoes": ("⚙️  Configurações", ["Master"]),
@@ -9800,6 +10078,261 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 df_comp_tab.style.format({"m²": "{:.2f}", "R$/m²": "R$ {:.2f}", "Subtotal (R$)": "R$ {:,.2f}"}),
                                 hide_index=True, use_container_width=True
                             )
+
+    # ==================================================
+    # KANBAN
+    # ==================================================
+    elif nome_aba == "Kanban":
+        with aba_objeto:
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Kanban</h2><p>Quadros de acompanhamento por etapas — compras, projetos e outros fluxos</p></div><span class="page-icon">🗂️</span></div>', unsafe_allow_html=True)
+
+            _KANBAN_SETORES = ["Master","Producao","Engenharia","Diretoria","Logistica","Almoxarifado","Medicao","PCP","Esquadria"]
+
+            df_quadros = carregar_kanban_quadros()
+            if df_quadros.empty:
+                df_quadros_visiveis = df_quadros
+            else:
+                df_quadros_visiveis = df_quadros[df_quadros['setores_acesso'].apply(lambda s: _kanban_quadro_visivel(s, setor))]
+
+            with st.expander("➕ Novo quadro"):
+                with st.form("kanban_form_novo_quadro"):
+                    nq_nome = st.text_input("Nome do quadro:", placeholder="Ex: Compras")
+                    nq_desc = st.text_area("Descrição (opcional):", height=68)
+                    nq_setores = st.multiselect("Setores com acesso (vazio = todos veem):", _KANBAN_SETORES)
+                    if st.form_submit_button("Criar quadro"):
+                        if not nq_nome.strip():
+                            st.error("Informe o nome do quadro.")
+                        else:
+                            ok_nq, res_nq = criar_quadro(nq_nome, nq_desc, nq_setores, st.session_state.usuario_nome)
+                            if ok_nq:
+                                _limpar_cache_kanban()
+                                registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_QUADRO", f"Quadro: {nq_nome.strip()}")
+                                st.session_state.kanban_quadro_atual = res_nq
+                                st.toast(f"Quadro '{nq_nome.strip()}' criado!")
+                                st.rerun()
+                            else:
+                                st.error(res_nq)
+
+            if df_quadros_visiveis.empty:
+                st.info("Nenhum quadro disponível ainda — crie o primeiro acima.")
+                st.stop()
+
+            ids_quadros = df_quadros_visiveis['id'].tolist()
+            if st.session_state.get("kanban_quadro_atual") not in ids_quadros:
+                st.session_state.kanban_quadro_atual = ids_quadros[0]
+            idx_atual = ids_quadros.index(st.session_state.kanban_quadro_atual)
+
+            nome_escolhido = st.selectbox("Quadro:", df_quadros_visiveis['nome'].tolist(), index=idx_atual, key="kanban_select_quadro")
+            quadro_row = df_quadros_visiveis[df_quadros_visiveis['nome'] == nome_escolhido].iloc[0]
+            quadro_atual_id = int(quadro_row['id'])
+            st.session_state.kanban_quadro_atual = quadro_atual_id
+
+            if quadro_row.get('descricao'):
+                st.caption(quadro_row['descricao'])
+
+            col_ger, col_exc = st.columns([3, 1])
+            with col_ger:
+                with st.expander("⚙️ Gerenciar colunas deste quadro"):
+                    df_colunas_ger = carregar_kanban_colunas(quadro_atual_id)
+                    if not df_colunas_ger.empty:
+                        st.dataframe(df_colunas_ger[['nome', 'ordem']], hide_index=True, use_container_width=True)
+
+                    with st.form(f"kanban_form_nova_coluna_{quadro_atual_id}"):
+                        nc_nome = st.text_input("Nova coluna:", placeholder="Ex: Em Cotação")
+                        if st.form_submit_button("Adicionar coluna"):
+                            if not nc_nome.strip():
+                                st.error("Informe o nome da coluna.")
+                            else:
+                                ok_nc, msg_nc = criar_coluna(quadro_atual_id, nc_nome)
+                                if ok_nc:
+                                    _limpar_cache_kanban()
+                                    registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_COLUNA", f"Quadro: {quadro_row['nome']} | Coluna: {nc_nome.strip()}")
+                                    st.rerun()
+                                else:
+                                    st.error(msg_nc)
+
+                    if not df_colunas_ger.empty:
+                        st.markdown("**Editar / excluir coluna existente**")
+                        col_edit_id = st.selectbox(
+                            "Coluna:", df_colunas_ger['id'].tolist(),
+                            format_func=lambda cid: df_colunas_ger[df_colunas_ger['id'] == cid]['nome'].iloc[0],
+                            key=f"kanban_col_edit_sel_{quadro_atual_id}"
+                        )
+                        ce1, ce2, ce3 = st.columns(3)
+                        with ce1:
+                            novo_nome_col = st.text_input("Renomear para:", key=f"kanban_col_rename_{quadro_atual_id}")
+                            if st.button("Renomear", key=f"kanban_col_rename_btn_{quadro_atual_id}"):
+                                if novo_nome_col.strip():
+                                    ok_r, msg_r = renomear_coluna(col_edit_id, novo_nome_col)
+                                    if ok_r:
+                                        _limpar_cache_kanban()
+                                        st.rerun()
+                                    else:
+                                        st.error(msg_r)
+                        with ce2:
+                            nova_ordem_col = st.number_input("Nova ordem:", min_value=0, step=1, key=f"kanban_col_ordem_{quadro_atual_id}")
+                            if st.button("Reordenar", key=f"kanban_col_ordem_btn_{quadro_atual_id}"):
+                                ok_o, msg_o = reordenar_coluna(col_edit_id, int(nova_ordem_col))
+                                if ok_o:
+                                    _limpar_cache_kanban()
+                                    st.rerun()
+                                else:
+                                    st.error(msg_o)
+                        with ce3:
+                            st.write("")
+                            if st.button("🗑️ Excluir coluna", key=f"kanban_col_del_btn_{quadro_atual_id}"):
+                                ok_e, msg_e = excluir_coluna(col_edit_id)
+                                if ok_e:
+                                    _limpar_cache_kanban()
+                                    registrar_auditoria(st.session_state.usuario_nome, "KANBAN_EXCLUIR_COLUNA", f"Quadro: {quadro_row['nome']}")
+                                    st.rerun()
+                                else:
+                                    st.error(msg_e)
+
+            with col_exc:
+                pode_excluir_quadro = (setor == "Master") or (quadro_row.get('criado_por') == st.session_state.usuario_nome)
+                if pode_excluir_quadro:
+                    confirm_key = f"kanban_confirm_excluir_quadro_{quadro_atual_id}"
+                    if not st.session_state.get(confirm_key):
+                        if st.button("🗑️ Excluir quadro", key=f"btn_{confirm_key}"):
+                            st.session_state[confirm_key] = True
+                            st.rerun()
+                    else:
+                        st.warning(f"Excluir '{quadro_row['nome']}' e todos os seus cartões?")
+                        cc1, cc2 = st.columns(2)
+                        with cc1:
+                            if st.button("✅ Confirmar", key=f"confirmar_{confirm_key}"):
+                                ok_eq, msg_eq = arquivar_quadro(quadro_atual_id)
+                                if ok_eq:
+                                    _limpar_cache_kanban()
+                                    registrar_auditoria(st.session_state.usuario_nome, "KANBAN_EXCLUIR_QUADRO", f"Quadro: {quadro_row['nome']}")
+                                    st.session_state[confirm_key] = False
+                                    st.session_state.pop("kanban_quadro_atual", None)
+                                    st.toast("Quadro excluído.")
+                                    st.rerun()
+                                else:
+                                    st.error(msg_eq)
+                        with cc2:
+                            if st.button("Cancelar", key=f"cancelar_{confirm_key}"):
+                                st.session_state[confirm_key] = False
+                                st.rerun()
+
+            st.markdown("---")
+            df_colunas = carregar_kanban_colunas(quadro_atual_id)
+            df_cards = carregar_kanban_cards(quadro_atual_id)
+            df_historico = carregar_kanban_historico(quadro_atual_id)
+
+            if df_colunas.empty:
+                st.info("Esse quadro ainda não tem colunas — adicione uma em 'Gerenciar colunas'.")
+                st.stop()
+
+            obras_disponiveis = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
+            cores_coluna = ['#3B82F6', '#8B5CF6', '#F59E0B', '#10B981', '#EF4444', '#06B6D4', '#EC4899', '#84CC16']
+
+            colunas_st = st.columns(len(df_colunas))
+            for i, (_, coluna) in enumerate(df_colunas.iterrows()):
+                cor = cores_coluna[i % len(cores_coluna)]
+                coluna_id = int(coluna['id'])
+                cards_da_coluna = df_cards[df_cards['coluna_id'] == coluna_id] if not df_cards.empty else df_cards
+
+                with colunas_st[i]:
+                    st.markdown(f"""<div style='background:{cor}22;border-top:3px solid {cor};border-radius:6px;padding:6px 12px;margin-bottom:10px;text-align:center;'>
+                        <span style='color:{cor};font-weight:800;font-size:13px;'>{html_escape(coluna['nome'])}</span><br>
+                        <span style='color:{cor};font-size:19px;font-weight:800;'>{len(cards_da_coluna)}</span>
+                    </div>""", unsafe_allow_html=True)
+
+                    with st.expander("➕ Cartão"):
+                        with st.form(f"kanban_form_novo_card_{coluna_id}"):
+                            nc_titulo = st.text_input("Título:", key=f"kanban_card_titulo_{coluna_id}")
+                            nc_desc = st.text_area("Descrição:", key=f"kanban_card_desc_{coluna_id}", height=68)
+                            nc_obra = st.selectbox("Obra (opcional):", ["—"] + obras_disponiveis, key=f"kanban_card_obra_{coluna_id}")
+                            projetos_obra = sorted(df_projetos[df_projetos['Obra'] == nc_obra]['Numero_Projeto'].unique().tolist()) if nc_obra != "—" and not df_projetos.empty else []
+                            nc_projeto = st.selectbox("Projeto (opcional):", ["—"] + projetos_obra, key=f"kanban_card_projeto_{coluna_id}")
+                            nc_resp = st.text_input("Responsável (opcional):", key=f"kanban_card_resp_{coluna_id}")
+                            if st.form_submit_button("Adicionar"):
+                                if not nc_titulo.strip():
+                                    st.error("Informe o título.")
+                                else:
+                                    ok_c, msg_c = criar_card(
+                                        quadro_atual_id, coluna_id, nc_titulo, nc_desc,
+                                        nc_obra if nc_obra != "—" else None,
+                                        nc_projeto if nc_projeto != "—" else None,
+                                        nc_resp, st.session_state.usuario_nome
+                                    )
+                                    if ok_c:
+                                        _limpar_cache_kanban()
+                                        registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_CARTAO",
+                                            f"Quadro: {quadro_row['nome']} | Coluna: {coluna['nome']} | {nc_titulo.strip()}")
+                                        st.toast("Cartão criado!")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg_c)
+
+                    if cards_da_coluna.empty:
+                        st.markdown("<div style='text-align:center;color:#94A3B8;padding:12px;font-size:12px;'>Nenhum cartão</div>", unsafe_allow_html=True)
+                    else:
+                        for _, card in cards_da_coluna.iterrows():
+                            card_id = int(card['id'])
+                            with st.container(border=True):
+                                st.markdown(f"**{html_escape(card['titulo'])}**")
+                                tag_bits = []
+                                if card.get('obra'):
+                                    proj_txt = f" · {card['numero_projeto']}" if card.get('numero_projeto') else ""
+                                    tag_bits.append(f"🏗️ {card['obra']}{proj_txt}")
+                                if card.get('responsavel'):
+                                    tag_bits.append(f"👤 {card['responsavel']}")
+                                dias_parado = (hoje_projeto() - card['criado_em']).days
+                                tag_bits.append(f"🕐 há {dias_parado}d" if dias_parado != 1 else "🕐 há 1d")
+                                st.caption(" · ".join(tag_bits))
+
+                                with st.expander("Detalhes"):
+                                    if card.get('descricao'):
+                                        st.write(card['descricao'])
+
+                                    df_hist_card = df_historico[df_historico['card_id'] == card_id] if not df_historico.empty else df_historico
+                                    if not df_hist_card.empty:
+                                        st.caption("Histórico:")
+                                        for _, h in df_hist_card.iterrows():
+                                            st.caption(f"• {h['coluna_anterior']} → {h['coluna_nova']} — {h['usuario']} ({h['criado_em'].strftime('%d/%m %H:%M')})")
+
+                                    outras_colunas = df_colunas[df_colunas['id'] != coluna_id]
+                                    if not outras_colunas.empty:
+                                        destino_nome = st.selectbox("Mover para:", outras_colunas['nome'].tolist(), key=f"kanban_mover_sel_{card_id}")
+                                        if st.button("➡️ Mover", key=f"kanban_mover_btn_{card_id}"):
+                                            destino_row = outras_colunas[outras_colunas['nome'] == destino_nome].iloc[0]
+                                            ok_m, msg_m = mover_card(card_id, coluna['nome'], int(destino_row['id']), destino_row['nome'], st.session_state.usuario_nome)
+                                            if ok_m:
+                                                _limpar_cache_kanban()
+                                                registrar_auditoria(st.session_state.usuario_nome, "KANBAN_MOVER_CARTAO",
+                                                    f"Quadro: {quadro_row['nome']} | {card['titulo']}: {coluna['nome']} → {destino_row['nome']}")
+                                                st.toast("Cartão movido!")
+                                                st.rerun()
+                                            else:
+                                                st.error(msg_m)
+
+                                    del_key = f"kanban_confirm_del_card_{card_id}"
+                                    if not st.session_state.get(del_key):
+                                        if st.button("🗑️ Excluir cartão", key=f"btn_{del_key}"):
+                                            st.session_state[del_key] = True
+                                            st.rerun()
+                                    else:
+                                        st.warning("Excluir este cartão?")
+                                        dc1, dc2 = st.columns(2)
+                                        with dc1:
+                                            if st.button("✅ Confirmar", key=f"confirmar_{del_key}"):
+                                                ok_d, msg_d = excluir_card(card_id)
+                                                if ok_d:
+                                                    _limpar_cache_kanban()
+                                                    registrar_auditoria(st.session_state.usuario_nome, "KANBAN_EXCLUIR_CARTAO", f"Quadro: {quadro_row['nome']} | {card['titulo']}")
+                                                    st.session_state[del_key] = False
+                                                    st.toast("Cartão excluído.")
+                                                    st.rerun()
+                                                else:
+                                                    st.error(msg_d)
+                                        with dc2:
+                                            if st.button("Cancelar", key=f"cancelar_{del_key}"):
+                                                st.session_state[del_key] = False
+                                                st.rerun()
 
     # ==================================================
     # CONFIGURACOES
