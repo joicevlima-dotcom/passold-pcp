@@ -10094,39 +10094,61 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             else:
                 df_quadros_visiveis = df_quadros[df_quadros['setores_acesso'].apply(lambda s: _kanban_quadro_visivel(s, setor))]
 
-            with st.expander("➕ Novo quadro"):
-                with st.form("kanban_form_novo_quadro"):
-                    nq_nome = st.text_input("Nome do quadro:", placeholder="Ex: Compras")
-                    nq_desc = st.text_area("Descrição (opcional):", height=68)
-                    nq_setores = st.multiselect("Setores com acesso (vazio = todos veem):", _KANBAN_SETORES)
-                    if st.form_submit_button("Criar quadro"):
-                        if not nq_nome.strip():
-                            st.error("Informe o nome do quadro.")
-                        else:
-                            ok_nq, res_nq = criar_quadro(nq_nome, nq_desc, nq_setores, st.session_state.usuario_nome)
-                            if ok_nq:
-                                _limpar_cache_kanban()
-                                registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_QUADRO", f"Quadro: {nq_nome.strip()}")
-                                st.session_state.kanban_quadro_atual = res_nq
-                                st.toast(f"Quadro '{nq_nome.strip()}' criado!")
-                                st.rerun()
-                            else:
-                                st.error(res_nq)
+            if "kanban_quadro_atual" not in st.session_state:
+                st.session_state.kanban_quadro_atual = None
 
-            if df_quadros_visiveis.empty:
-                st.info("Nenhum quadro disponível ainda — crie o primeiro acima.")
+            ids_quadros = df_quadros_visiveis['id'].tolist() if not df_quadros_visiveis.empty else []
+            mostrar_hub = st.session_state.kanban_quadro_atual not in ids_quadros
+
+            if mostrar_hub:
+                with st.expander("➕ Novo quadro"):
+                    with st.form("kanban_form_novo_quadro"):
+                        nq_nome = st.text_input("Nome do quadro:", placeholder="Ex: Compras")
+                        nq_desc = st.text_area("Descrição (opcional):", height=68)
+                        nq_setores = st.multiselect("Setores com acesso (vazio = todos veem):", _KANBAN_SETORES)
+                        if st.form_submit_button("Criar quadro"):
+                            if not nq_nome.strip():
+                                st.error("Informe o nome do quadro.")
+                            else:
+                                ok_nq, res_nq = criar_quadro(nq_nome, nq_desc, nq_setores, st.session_state.usuario_nome)
+                                if ok_nq:
+                                    _limpar_cache_kanban()
+                                    registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_QUADRO", f"Quadro: {nq_nome.strip()}")
+                                    st.session_state.kanban_quadro_atual = res_nq
+                                    st.toast(f"Quadro '{nq_nome.strip()}' criado!")
+                                    st.rerun()
+                                else:
+                                    st.error(res_nq)
+
+                if df_quadros_visiveis.empty:
+                    st.info("Nenhum quadro disponível ainda — crie o primeiro acima.")
+                else:
+                    st.markdown("#### Escolha um quadro")
+                    quadros_lista = df_quadros_visiveis.reset_index(drop=True)
+                    NUM_COLS_HUB = 4
+                    for inicio in range(0, len(quadros_lista), NUM_COLS_HUB):
+                        bloco = quadros_lista.iloc[inicio:inicio + NUM_COLS_HUB]
+                        cols_hub = st.columns(NUM_COLS_HUB)
+                        for j, (_, q) in enumerate(bloco.iterrows()):
+                            with cols_hub[j]:
+                                with st.container(border=True):
+                                    st.markdown(f"**🗂️ {html_escape(q['nome'])}**")
+                                    if q.get('descricao'):
+                                        st.caption(q['descricao'])
+                                    if st.button("Abrir →", key=f"kanban_abrir_{int(q['id'])}", use_container_width=True):
+                                        st.session_state.kanban_quadro_atual = int(q['id'])
+                                        st.rerun()
                 st.stop()
 
-            ids_quadros = df_quadros_visiveis['id'].tolist()
-            if st.session_state.get("kanban_quadro_atual") not in ids_quadros:
-                st.session_state.kanban_quadro_atual = ids_quadros[0]
-            idx_atual = ids_quadros.index(st.session_state.kanban_quadro_atual)
+            # ── Um quadro específico está aberto ──────────────────────────
+            quadro_atual_id = int(st.session_state.kanban_quadro_atual)
+            quadro_row = df_quadros_visiveis[df_quadros_visiveis['id'] == quadro_atual_id].iloc[0]
 
-            nome_escolhido = st.selectbox("Quadro:", df_quadros_visiveis['nome'].tolist(), index=idx_atual, key="kanban_select_quadro")
-            quadro_row = df_quadros_visiveis[df_quadros_visiveis['nome'] == nome_escolhido].iloc[0]
-            quadro_atual_id = int(quadro_row['id'])
-            st.session_state.kanban_quadro_atual = quadro_atual_id
+            if st.button("← Voltar aos quadros", key="kanban_voltar"):
+                st.session_state.kanban_quadro_atual = None
+                st.rerun()
 
+            st.markdown(f"### 🗂️ {html_escape(quadro_row['nome'])}")
             if quadro_row.get('descricao'):
                 st.caption(quadro_row['descricao'])
 
