@@ -1116,6 +1116,7 @@ def inicializar_banco_de_dados():
                 obra TEXT,
                 numero_projeto TEXT,
                 responsavel TEXT,
+                destinatario TEXT,
                 prazo DATE,
                 criado_por TEXT,
                 criado_em TIMESTAMP DEFAULT NOW(),
@@ -1123,6 +1124,7 @@ def inicializar_banco_de_dados():
             )
         """)
         cursor.execute("ALTER TABLE kanban_cards ADD COLUMN IF NOT EXISTS prazo DATE")
+        cursor.execute("ALTER TABLE kanban_cards ADD COLUMN IF NOT EXISTS destinatario TEXT")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS kanban_historico (
                 id SERIAL PRIMARY KEY,
@@ -1605,8 +1607,8 @@ def gerar_relatorio_kanban_xlsx(nome_quadro: str, df_colunas: pd.DataFrame, df_c
     borda = Border(left=bd, right=bd, top=bd, bottom=bd)
     fill_cab = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
 
-    titulos = ["Coluna", "Título", "Descrição", "Obra", "Projeto", "Prazo", "Solicitante", "Criado por", "Criado em"]
-    larguras = [18, 26, 40, 20, 14, 12, 20, 18, 16]
+    titulos = ["Coluna", "Título", "Descrição", "Obra", "Projeto", "Prazo", "Solicitante", "Destinatário", "Criado por", "Criado em", "Concluído em"]
+    larguras = [18, 26, 40, 20, 14, 12, 20, 20, 18, 16, 16]
     for col, largura in zip(range(1, len(titulos) + 1), larguras):
         ws.column_dimensions[chr(64 + col)].width = largura
 
@@ -1629,18 +1631,27 @@ def gerar_relatorio_kanban_xlsx(nome_quadro: str, df_colunas: pd.DataFrame, df_c
     mapa_coluna_rel = dict(zip(df_colunas['id'].tolist(), df_colunas['nome'].tolist())) if not df_colunas.empty else {}
     if not df_cards.empty:
         for _, card in df_cards.sort_values('criado_em').iterrows():
+            coluna_atual_nome = mapa_coluna_rel.get(card['coluna_id'], '')
             prazo_txt = pd.Timestamp(card['prazo']).strftime('%d/%m/%Y') if pd.notna(card.get('prazo')) else ''
             criado_em_txt = card['criado_em'].strftime('%d/%m/%Y %H:%M') if pd.notna(card.get('criado_em')) else ''
+            # So preenche "Concluido em" se o cartao esta HOJE numa coluna de nome
+            # "conclu..." -- e' a data da ultima movimentacao, que nesse caso e' quando
+            # ele chegou nessa coluna final.
+            concluido_em_txt = ''
+            if 'conclu' in coluna_atual_nome.lower() and pd.notna(card.get('atualizado_em')):
+                concluido_em_txt = card['atualizado_em'].strftime('%d/%m/%Y %H:%M')
             dados = [
-                mapa_coluna_rel.get(card['coluna_id'], ''),
+                coluna_atual_nome,
                 card.get('titulo') or '',
                 card.get('descricao') or '',
                 card.get('obra') or '',
                 card.get('numero_projeto') or '',
                 prazo_txt,
                 card.get('responsavel') or '',
+                card.get('destinatario') or '',
                 card.get('criado_por') or '',
                 criado_em_txt,
+                concluido_em_txt,
             ]
             for col, val in enumerate(dados, 1):
                 cel = ws.cell(linha, col, val)
@@ -1733,16 +1744,16 @@ def excluir_coluna(coluna_id: int):
         liberar_conexao(conn)
 
 def criar_card(quadro_id: int, coluna_id: int, titulo: str, descricao: str, obra: str,
-               numero_projeto: str, responsavel: str, prazo, criado_por: str):
+               numero_projeto: str, responsavel: str, destinatario: str, prazo, criado_por: str):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute(
             """INSERT INTO kanban_cards
-               (quadro_id, coluna_id, titulo, descricao, obra, numero_projeto, responsavel, prazo, criado_por)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+               (quadro_id, coluna_id, titulo, descricao, obra, numero_projeto, responsavel, destinatario, prazo, criado_por)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (quadro_id, coluna_id, titulo.strip(), (descricao or "").strip(),
-             obra or None, numero_projeto or None, (responsavel or "").strip(), prazo, criado_por)
+             obra or None, numero_projeto or None, (responsavel or "").strip(), (destinatario or "").strip(), prazo, criado_por)
         )
         conn.commit()
         return True, ""
@@ -10561,6 +10572,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         nc_projeto = st.selectbox("Projeto:", ["—"] + projetos_obra, key=f"kanban_card_projeto_{quadro_atual_id}")
                         nc_prazo = st.date_input("Prazo:", value=None, key=f"kanban_card_prazo_{quadro_atual_id}")
                         nc_resp = st.text_input("Solicitante:", key=f"kanban_card_resp_{quadro_atual_id}")
+                        nc_dest = st.text_input("Destinatário:", key=f"kanban_card_dest_{quadro_atual_id}")
                         if st.form_submit_button("Adicionar"):
                             if not nc_titulo.strip():
                                 st.error("Informe o título.")
@@ -10574,13 +10586,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.error("Informe o prazo.")
                             elif not nc_resp.strip():
                                 st.error("Informe o solicitante.")
+                            elif not nc_dest.strip():
+                                st.error("Informe o destinatário.")
                             else:
                                 nc_coluna_id = int(df_colunas[df_colunas['nome'] == nc_coluna_nome]['id'].iloc[0])
                                 ok_c, msg_c = criar_card(
                                     quadro_atual_id, nc_coluna_id, nc_titulo, nc_desc,
                                     nc_obra if nc_obra != "—" else None,
                                     nc_projeto if nc_projeto != "—" else None,
-                                    nc_resp, nc_prazo, st.session_state.usuario_nome
+                                    nc_resp, nc_dest, nc_prazo, st.session_state.usuario_nome
                                 )
                                 if ok_c:
                                     _limpar_cache_kanban()
@@ -10622,6 +10636,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         tags_label.append(f"prazo {pd.Timestamp(card['prazo']).strftime('%d/%m')}")
                     if card.get('responsavel'):
                         tags_label.append(f"Solicitante: {card['responsavel']}")
+                    if card.get('destinatario'):
+                        tags_label.append(f"Para: {card['destinatario']}")
                     label_extra = f" — {' · '.join(tags_label)}" if tags_label else ""
 
                     with st.expander(f"🗂️ {card['titulo']}  ·  {coluna_nome_card}{label_extra}", expanded=False):
@@ -10633,6 +10649,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             st.caption(f"📅 Prazo: {pd.Timestamp(card['prazo']).strftime('%d/%m/%Y')}")
                         if card.get('responsavel'):
                             st.caption(f"🙋 Solicitante: {card['responsavel']}")
+                        if card.get('destinatario'):
+                            st.caption(f"📨 Destinatário: {card['destinatario']}")
                         dias_parado = (hoje_projeto() - card['criado_em']).days
                         st.caption(f"🕐 há {dias_parado}d" if dias_parado != 1 else "🕐 há 1d")
                         if card.get('descricao'):
