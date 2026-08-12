@@ -1075,11 +1075,13 @@ def inicializar_banco_de_dados():
                 obra TEXT,
                 numero_projeto TEXT,
                 responsavel TEXT,
+                prazo DATE,
                 criado_por TEXT,
                 criado_em TIMESTAMP DEFAULT NOW(),
                 atualizado_em TIMESTAMP DEFAULT NOW()
             )
         """)
+        cursor.execute("ALTER TABLE kanban_cards ADD COLUMN IF NOT EXISTS prazo DATE")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS kanban_historico (
                 id SERIAL PRIMARY KEY,
@@ -1090,10 +1092,20 @@ def inicializar_banco_de_dados():
                 criado_em TIMESTAMP DEFAULT NOW()
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS kanban_comentarios (
+                id SERIAL PRIMARY KEY,
+                card_id INTEGER REFERENCES kanban_cards(id) ON DELETE CASCADE,
+                autor TEXT,
+                texto TEXT NOT NULL,
+                criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_colunas_quadro ON kanban_colunas(quadro_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_cards_quadro ON kanban_cards(quadro_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_cards_coluna ON kanban_cards(coluna_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_historico_card ON kanban_historico(card_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_comentarios_card ON kanban_comentarios(card_id)")
 
 # ── Tabela de auditoria (nova) ──────────────────────
         cursor.execute("""
@@ -1372,8 +1384,23 @@ def carregar_kanban_historico(quadro_id: int):
     finally:
         liberar_conexao(conn)
 
+@st.cache_data(ttl=30)
+def carregar_kanban_comentarios(quadro_id: int):
+    """Comentarios de todos os cards do quadro de uma vez (evita 1 query por card)."""
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            """SELECT co.* FROM kanban_comentarios co
+               JOIN kanban_cards c ON c.id = co.card_id
+               WHERE c.quadro_id=%(quadro_id)s ORDER BY co.criado_em""",
+            conn, params={"quadro_id": quadro_id}
+        )
+    finally:
+        liberar_conexao(conn)
+
 def _limpar_cache_kanban():
-    for fn in [carregar_kanban_quadros, carregar_kanban_colunas, carregar_kanban_cards, carregar_kanban_historico]:
+    for fn in [carregar_kanban_quadros, carregar_kanban_colunas, carregar_kanban_cards,
+               carregar_kanban_historico, carregar_kanban_comentarios]:
         try:
             fn.clear()
         except Exception:
@@ -1482,16 +1509,16 @@ def excluir_coluna(coluna_id: int):
         liberar_conexao(conn)
 
 def criar_card(quadro_id: int, coluna_id: int, titulo: str, descricao: str, obra: str,
-               numero_projeto: str, responsavel: str, criado_por: str):
+               numero_projeto: str, responsavel: str, prazo, criado_por: str):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute(
             """INSERT INTO kanban_cards
-               (quadro_id, coluna_id, titulo, descricao, obra, numero_projeto, responsavel, criado_por)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+               (quadro_id, coluna_id, titulo, descricao, obra, numero_projeto, responsavel, prazo, criado_por)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (quadro_id, coluna_id, titulo.strip(), (descricao or "").strip(),
-             obra or None, numero_projeto or None, (responsavel or "").strip(), criado_por)
+             obra or None, numero_projeto or None, (responsavel or "").strip(), prazo, criado_por)
         )
         conn.commit()
         return True, ""
@@ -1501,21 +1528,19 @@ def criar_card(quadro_id: int, coluna_id: int, titulo: str, descricao: str, obra
     finally:
         liberar_conexao(conn)
 
-def editar_card(card_id: int, titulo: str, descricao: str, obra: str, numero_projeto: str, responsavel: str):
+def criar_comentario(card_id: int, autor: str, texto: str):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute(
-            """UPDATE kanban_cards SET titulo=%s, descricao=%s, obra=%s, numero_projeto=%s,
-               responsavel=%s, atualizado_em=NOW() WHERE id=%s""",
-            (titulo.strip(), (descricao or "").strip(), obra or None, numero_projeto or None,
-             (responsavel or "").strip(), card_id)
+            "INSERT INTO kanban_comentarios (card_id, autor, texto) VALUES (%s,%s,%s)",
+            (card_id, autor, texto.strip())
         )
         conn.commit()
         return True, ""
     except Exception as e:
         conn.rollback()
-        return False, f"Erro ao editar cartão: {e}"
+        return False, f"Erro ao adicionar comentário: {e}"
     finally:
         liberar_conexao(conn)
 
@@ -10243,6 +10268,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             df_colunas = carregar_kanban_colunas(quadro_atual_id)
             df_cards = carregar_kanban_cards(quadro_atual_id)
             df_historico = carregar_kanban_historico(quadro_atual_id)
+            df_comentarios = carregar_kanban_comentarios(quadro_atual_id)
 
             if df_colunas.empty:
                 st.info("Esse quadro ainda não tem colunas — adicione uma em 'Gerenciar colunas'.")
@@ -10270,7 +10296,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             nc_obra = st.selectbox("Obra (opcional):", ["—"] + obras_disponiveis, key=f"kanban_card_obra_{coluna_id}")
                             projetos_obra = sorted(df_projetos[df_projetos['Obra'] == nc_obra]['Numero_Projeto'].unique().tolist()) if nc_obra != "—" and not df_projetos.empty else []
                             nc_projeto = st.selectbox("Projeto (opcional):", ["—"] + projetos_obra, key=f"kanban_card_projeto_{coluna_id}")
-                            nc_resp = st.text_input("Responsável (opcional):", key=f"kanban_card_resp_{coluna_id}")
+                            nc_prazo = st.date_input("Prazo (opcional):", value=None, key=f"kanban_card_prazo_{coluna_id}")
+                            nc_resp = st.text_input("Solicitante (opcional):", key=f"kanban_card_resp_{coluna_id}")
                             if st.form_submit_button("Adicionar"):
                                 if not nc_titulo.strip():
                                     st.error("Informe o título.")
@@ -10279,7 +10306,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         quadro_atual_id, coluna_id, nc_titulo, nc_desc,
                                         nc_obra if nc_obra != "—" else None,
                                         nc_projeto if nc_projeto != "—" else None,
-                                        nc_resp, st.session_state.usuario_nome
+                                        nc_resp, nc_prazo, st.session_state.usuario_nome
                                     )
                                     if ok_c:
                                         _limpar_cache_kanban()
@@ -10297,15 +10324,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             card_id = int(card['id'])
                             with st.container(border=True):
                                 st.markdown(f"**{html_escape(card['titulo'])}**")
-                                tag_bits = []
                                 if card.get('obra'):
-                                    proj_txt = f" · {card['numero_projeto']}" if card.get('numero_projeto') else ""
-                                    tag_bits.append(f"🏗️ {card['obra']}{proj_txt}")
+                                    st.caption(f"🏗️ Obra: {card['obra']}")
+                                if card.get('numero_projeto'):
+                                    st.caption(f"📋 Projeto: {card['numero_projeto']}")
+                                if pd.notna(card.get('prazo')):
+                                    st.caption(f"📅 Prazo: {pd.Timestamp(card['prazo']).strftime('%d/%m/%Y')}")
                                 if card.get('responsavel'):
-                                    tag_bits.append(f"👤 {card['responsavel']}")
+                                    st.caption(f"🙋 Solicitante: {card['responsavel']}")
                                 dias_parado = (hoje_projeto() - card['criado_em']).days
-                                tag_bits.append(f"🕐 há {dias_parado}d" if dias_parado != 1 else "🕐 há 1d")
-                                st.caption(" · ".join(tag_bits))
+                                st.caption(f"🕐 há {dias_parado}d" if dias_parado != 1 else "🕐 há 1d")
 
                                 with st.expander("Detalhes"):
                                     if card.get('descricao'):
@@ -10355,6 +10383,27 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             if st.button("Cancelar", key=f"cancelar_{del_key}"):
                                                 st.session_state[del_key] = False
                                                 st.rerun()
+
+                                    st.markdown("---")
+                                    st.caption("💬 Comentários")
+                                    df_com_card = df_comentarios[df_comentarios['card_id'] == card_id] if not df_comentarios.empty else df_comentarios
+                                    if df_com_card.empty:
+                                        st.caption("Nenhum comentário ainda.")
+                                    else:
+                                        for _, com in df_com_card.iterrows():
+                                            st.markdown(f"**{html_escape(com['autor'] or '—')}** _{com['criado_em'].strftime('%d/%m %H:%M')}_  \n{html_escape(com['texto'])}")
+                                    with st.form(f"kanban_form_comentario_{card_id}", clear_on_submit=True):
+                                        novo_comentario = st.text_area("Adicionar comentário:", key=f"kanban_comentario_txt_{card_id}", height=68)
+                                        if st.form_submit_button("Comentar"):
+                                            if not novo_comentario.strip():
+                                                st.error("Escreva algo antes de comentar.")
+                                            else:
+                                                ok_com, msg_com = criar_comentario(card_id, st.session_state.usuario_nome, novo_comentario)
+                                                if ok_com:
+                                                    _limpar_cache_kanban()
+                                                    st.rerun()
+                                                else:
+                                                    st.error(msg_com)
 
     # ==================================================
     # CONFIGURACOES
