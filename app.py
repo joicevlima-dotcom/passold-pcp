@@ -1576,6 +1576,20 @@ def criar_quadro(nome: str, descricao: str, setores_acesso: list, criado_por: st
     finally:
         liberar_conexao(conn)
 
+def editar_setores_quadro(quadro_id: int, setores_acesso: list):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        setores_str = ",".join(setores_acesso) if setores_acesso else None
+        cursor.execute("UPDATE kanban_quadros SET setores_acesso=%s WHERE id=%s", (setores_str, quadro_id))
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao editar acesso do quadro: {e}"
+    finally:
+        liberar_conexao(conn)
+
 def arquivar_quadro(quadro_id: int):
     conn = conectar_banco()
     try:
@@ -10379,6 +10393,25 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         st.rerun()
                                     else:
                                         st.error(msg_e)
+
+                if setor == "Master":
+                    with st.expander("🔒 Quem pode ver este quadro"):
+                        setores_atuais = _kanban_setores_lista(quadro_row.get('setores_acesso'))
+                        st.caption("Vazio = todos os setores com acesso ao Kanban veem este quadro.")
+                        novos_setores = st.multiselect(
+                            "Setores com acesso:", _KANBAN_SETORES, default=setores_atuais,
+                            key=f"kanban_setores_acesso_{quadro_atual_id}"
+                        )
+                        if st.button("Salvar acesso", key=f"kanban_salvar_acesso_{quadro_atual_id}"):
+                            ok_sa, msg_sa = editar_setores_quadro(quadro_atual_id, novos_setores)
+                            if ok_sa:
+                                _limpar_cache_kanban()
+                                registrar_auditoria(st.session_state.usuario_nome, "KANBAN_EDITAR_ACESSO_QUADRO",
+                                    f"Quadro: {quadro_row['nome']} | Setores: {', '.join(novos_setores) if novos_setores else 'todos'}")
+                                st.toast("Acesso do quadro atualizado!")
+                                st.rerun()
+                            else:
+                                st.error(msg_sa)
 
             with col_exc:
                 pode_excluir_quadro = (setor == "Master") or (quadro_row.get('criado_por') == st.session_state.usuario_nome)
