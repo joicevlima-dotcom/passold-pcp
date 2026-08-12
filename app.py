@@ -71,17 +71,19 @@ _PALETA_CLARA = {
     "sidebar_bg": "#1E3A5F", "sidebar_text": "#CBD5E1", "sidebar_active": "#3B82F6",
 }
 _PALETA_ESCURA = {
+    # Cinza-chumbo neutro (tipo VSCode/Notion) em vez de azul-marinho -- so o azul de
+    # destaque (accent/primary) lembra a identidade visual da empresa, o fundo fica neutro.
     "color_scheme": "dark",
     "primary": "#8FB3E0", "primary_light": "#A9C6EA", "primary_hover": "#B9D3F0",
     "btn_bg": "#1E3A5F", "btn_bg_hover": "#355F90",
-    "accent": "#3B82F6", "accent_hover": "#60A5FA", "accent_light": "#1E3A5F",
-    "success": "#34D399", "success_light": "#064E3B",
-    "warning": "#FBBF24", "warning_light": "#78350F",
-    "danger": "#F87171", "danger_light": "#7F1D1D",
-    "info": "#38BDF8", "info_light": "#0C4A6E",
-    "bg": "#0B1220", "bg_card": "#16233B",
-    "border": "#2A3B55", "border_hover": "#3C516F",
-    "text": "#E2E8F0", "text_muted": "#94A3B8", "text_light": "#64748B",
+    "accent": "#3B82F6", "accent_hover": "#60A5FA", "accent_light": "#2A3542",
+    "success": "#34D399", "success_light": "#1C332B",
+    "warning": "#FBBF24", "warning_light": "#3A2F19",
+    "danger": "#F87171", "danger_light": "#3A2323",
+    "info": "#38BDF8", "info_light": "#1B2E38",
+    "bg": "#1B1B1F", "bg_card": "#242428",
+    "border": "#38383F", "border_hover": "#4A4A52",
+    "text": "#E8E8EA", "text_muted": "#A1A1AA", "text_light": "#71717A",
     "sidebar_bg": "#1E3A5F", "sidebar_text": "#CBD5E1", "sidebar_active": "#3B82F6",
 }
 _cores = _PALETA_ESCURA if st.session_state.tema_escuro else _PALETA_CLARA
