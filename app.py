@@ -40,34 +40,6 @@ FATOR_PRODUTIVIDADE_DIFICULDADE = {1: 1.00, 2: 0.90, 3: 0.80, 4: 0.70, 5: 0.50}
 
 st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide", page_icon="🏭", initial_sidebar_state="expanded")
 
-if "modo_contraste" not in st.session_state:
-    st.session_state.modo_contraste = False
-
-_col_contraste_a, _col_contraste_b = st.columns([30, 1])
-with _col_contraste_b:
-    st.session_state.modo_contraste = st.toggle(
-        "🌙", value=st.session_state.modo_contraste, key="toggle_modo_contraste",
-        help="Escurece o texto de rótulos e legendas fracas (não muda o fundo)"
-    )
-
-# So escurece letra -- fundo (--bg, --bg-card etc.) fica sempre igual. Alvo: os rotulos
-# de widget (checkbox/toggle/radio/selectbox/input) e a legenda dos st.metric, que o
-# Streamlit por padrao renderiza num cinza mais claro/baixa opacidade -- em telas com
-# brilho/contraste diferente (ou forcando modo escuro no navegador) isso fica quase
-# ilegivel mesmo com o fundo claro correto.
-_css_contraste = """
-<style>
-[data-testid="stWidgetLabel"] p,
-[data-testid="stWidgetLabel"] label,
-[data-testid="stMetricLabel"] {
-    opacity: 1 !important;
-    color: #0F172A !important;
-}
-</style>
-""" if st.session_state.modo_contraste else ""
-if _css_contraste:
-    st.markdown(_css_contraste, unsafe_allow_html=True)
-
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
