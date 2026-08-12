@@ -5193,7 +5193,7 @@ GRUPOS_NAV = {
         "Sistema de Medicao": ("📏  Sistema de Medição", ["Master","Medicao"]),
     },
     "🗂️  Kanban": {
-        "Kanban": ("🗂️  Kanban", ["Master","Producao","Engenharia","Diretoria","Logistica","Almoxarifado","Medicao","PCP","Esquadria"]),
+        "Kanban": ("🗂️  Kanban", ["Master","Producao","Engenharia","Diretoria","Logistica","Almoxarifado","Medicao","PCP","Esquadria","Compras"]),
     },
     "⚙️  Sistema": {
         "Configuracoes": ("⚙️  Configurações", ["Master"]),
@@ -10246,7 +10246,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
         with aba_objeto:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Kanban</h2><p>Quadros de acompanhamento por etapas — compras, projetos e outros fluxos</p></div><span class="page-icon">🗂️</span></div>', unsafe_allow_html=True)
 
-            _KANBAN_SETORES = ["Master","Producao","Engenharia","Diretoria","Logistica","Almoxarifado","Medicao","PCP","Esquadria"]
+            _KANBAN_SETORES = ["Master","Producao","Engenharia","Diretoria","Logistica","Almoxarifado","Medicao","PCP","Esquadria","Compras"]
+            # Setor "Compras" e' so visualizacao: ve tudo, move cartao entre colunas e
+            # comenta -- nao cria quadro/cartao, nao mexe em coluna, nao anexa arquivo.
+            pode_editar_kanban = setor != "Compras"
 
             df_quadros = carregar_kanban_quadros()
             if df_quadros.empty:
@@ -10261,24 +10264,25 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             mostrar_hub = st.session_state.kanban_quadro_atual not in ids_quadros
 
             if mostrar_hub:
-                with st.expander("➕ Novo quadro"):
-                    with st.form("kanban_form_novo_quadro"):
-                        nq_nome = st.text_input("Nome do quadro:", placeholder="Ex: Compras")
-                        nq_desc = st.text_area("Descrição (opcional):", height=68)
-                        nq_setores = st.multiselect("Setores com acesso (vazio = todos veem):", _KANBAN_SETORES)
-                        if st.form_submit_button("Criar quadro"):
-                            if not nq_nome.strip():
-                                st.error("Informe o nome do quadro.")
-                            else:
-                                ok_nq, res_nq = criar_quadro(nq_nome, nq_desc, nq_setores, st.session_state.usuario_nome)
-                                if ok_nq:
-                                    _limpar_cache_kanban()
-                                    registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_QUADRO", f"Quadro: {nq_nome.strip()}")
-                                    st.session_state.kanban_quadro_atual = res_nq
-                                    st.toast(f"Quadro '{nq_nome.strip()}' criado!")
-                                    st.rerun()
+                if pode_editar_kanban:
+                    with st.expander("➕ Novo quadro"):
+                        with st.form("kanban_form_novo_quadro"):
+                            nq_nome = st.text_input("Nome do quadro:", placeholder="Ex: Compras")
+                            nq_desc = st.text_area("Descrição (opcional):", height=68)
+                            nq_setores = st.multiselect("Setores com acesso (vazio = todos veem):", _KANBAN_SETORES)
+                            if st.form_submit_button("Criar quadro"):
+                                if not nq_nome.strip():
+                                    st.error("Informe o nome do quadro.")
                                 else:
-                                    st.error(res_nq)
+                                    ok_nq, res_nq = criar_quadro(nq_nome, nq_desc, nq_setores, st.session_state.usuario_nome)
+                                    if ok_nq:
+                                        _limpar_cache_kanban()
+                                        registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_QUADRO", f"Quadro: {nq_nome.strip()}")
+                                        st.session_state.kanban_quadro_atual = res_nq
+                                        st.toast(f"Quadro '{nq_nome.strip()}' criado!")
+                                        st.rerun()
+                                    else:
+                                        st.error(res_nq)
 
                 if df_quadros_visiveis.empty:
                     st.info("Nenhum quadro disponível ainda — crie o primeiro acima.")
@@ -10314,62 +10318,63 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
             col_ger, col_exc = st.columns([3, 1])
             with col_ger:
-                with st.expander("⚙️ Gerenciar colunas deste quadro"):
-                    df_colunas_ger = carregar_kanban_colunas(quadro_atual_id)
-                    if not df_colunas_ger.empty:
-                        st.dataframe(df_colunas_ger[['nome', 'ordem']], hide_index=True, use_container_width=True)
+                if pode_editar_kanban:
+                    with st.expander("⚙️ Gerenciar colunas deste quadro"):
+                        df_colunas_ger = carregar_kanban_colunas(quadro_atual_id)
+                        if not df_colunas_ger.empty:
+                            st.dataframe(df_colunas_ger[['nome', 'ordem']], hide_index=True, use_container_width=True)
 
-                    with st.form(f"kanban_form_nova_coluna_{quadro_atual_id}"):
-                        nc_nome = st.text_input("Nova coluna:", placeholder="Ex: Em Cotação")
-                        if st.form_submit_button("Adicionar coluna"):
-                            if not nc_nome.strip():
-                                st.error("Informe o nome da coluna.")
-                            else:
-                                ok_nc, msg_nc = criar_coluna(quadro_atual_id, nc_nome)
-                                if ok_nc:
-                                    _limpar_cache_kanban()
-                                    registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_COLUNA", f"Quadro: {quadro_row['nome']} | Coluna: {nc_nome.strip()}")
-                                    st.rerun()
+                        with st.form(f"kanban_form_nova_coluna_{quadro_atual_id}"):
+                            nc_nome = st.text_input("Nova coluna:", placeholder="Ex: Em Cotação")
+                            if st.form_submit_button("Adicionar coluna"):
+                                if not nc_nome.strip():
+                                    st.error("Informe o nome da coluna.")
                                 else:
-                                    st.error(msg_nc)
+                                    ok_nc, msg_nc = criar_coluna(quadro_atual_id, nc_nome)
+                                    if ok_nc:
+                                        _limpar_cache_kanban()
+                                        registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_COLUNA", f"Quadro: {quadro_row['nome']} | Coluna: {nc_nome.strip()}")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg_nc)
 
-                    if not df_colunas_ger.empty:
-                        st.markdown("**Editar / excluir coluna existente**")
-                        col_edit_id = st.selectbox(
-                            "Coluna:", df_colunas_ger['id'].tolist(),
-                            format_func=lambda cid: df_colunas_ger[df_colunas_ger['id'] == cid]['nome'].iloc[0],
-                            key=f"kanban_col_edit_sel_{quadro_atual_id}"
-                        )
-                        ce1, ce2, ce3 = st.columns(3)
-                        with ce1:
-                            novo_nome_col = st.text_input("Renomear para:", key=f"kanban_col_rename_{quadro_atual_id}")
-                            if st.button("Renomear", key=f"kanban_col_rename_btn_{quadro_atual_id}"):
-                                if novo_nome_col.strip():
-                                    ok_r, msg_r = renomear_coluna(col_edit_id, novo_nome_col)
-                                    if ok_r:
+                        if not df_colunas_ger.empty:
+                            st.markdown("**Editar / excluir coluna existente**")
+                            col_edit_id = st.selectbox(
+                                "Coluna:", df_colunas_ger['id'].tolist(),
+                                format_func=lambda cid: df_colunas_ger[df_colunas_ger['id'] == cid]['nome'].iloc[0],
+                                key=f"kanban_col_edit_sel_{quadro_atual_id}"
+                            )
+                            ce1, ce2, ce3 = st.columns(3)
+                            with ce1:
+                                novo_nome_col = st.text_input("Renomear para:", key=f"kanban_col_rename_{quadro_atual_id}")
+                                if st.button("Renomear", key=f"kanban_col_rename_btn_{quadro_atual_id}"):
+                                    if novo_nome_col.strip():
+                                        ok_r, msg_r = renomear_coluna(col_edit_id, novo_nome_col)
+                                        if ok_r:
+                                            _limpar_cache_kanban()
+                                            st.rerun()
+                                        else:
+                                            st.error(msg_r)
+                            with ce2:
+                                nova_ordem_col = st.number_input("Nova ordem:", min_value=0, step=1, key=f"kanban_col_ordem_{quadro_atual_id}")
+                                if st.button("Reordenar", key=f"kanban_col_ordem_btn_{quadro_atual_id}"):
+                                    ok_o, msg_o = reordenar_coluna(col_edit_id, int(nova_ordem_col))
+                                    if ok_o:
                                         _limpar_cache_kanban()
                                         st.rerun()
                                     else:
-                                        st.error(msg_r)
-                        with ce2:
-                            nova_ordem_col = st.number_input("Nova ordem:", min_value=0, step=1, key=f"kanban_col_ordem_{quadro_atual_id}")
-                            if st.button("Reordenar", key=f"kanban_col_ordem_btn_{quadro_atual_id}"):
-                                ok_o, msg_o = reordenar_coluna(col_edit_id, int(nova_ordem_col))
-                                if ok_o:
-                                    _limpar_cache_kanban()
-                                    st.rerun()
-                                else:
-                                    st.error(msg_o)
-                        with ce3:
-                            st.write("")
-                            if st.button("🗑️ Excluir coluna", key=f"kanban_col_del_btn_{quadro_atual_id}"):
-                                ok_e, msg_e = excluir_coluna(col_edit_id)
-                                if ok_e:
-                                    _limpar_cache_kanban()
-                                    registrar_auditoria(st.session_state.usuario_nome, "KANBAN_EXCLUIR_COLUNA", f"Quadro: {quadro_row['nome']}")
-                                    st.rerun()
-                                else:
-                                    st.error(msg_e)
+                                        st.error(msg_o)
+                            with ce3:
+                                st.write("")
+                                if st.button("🗑️ Excluir coluna", key=f"kanban_col_del_btn_{quadro_atual_id}"):
+                                    ok_e, msg_e = excluir_coluna(col_edit_id)
+                                    if ok_e:
+                                        _limpar_cache_kanban()
+                                        registrar_auditoria(st.session_state.usuario_nome, "KANBAN_EXCLUIR_COLUNA", f"Quadro: {quadro_row['nome']}")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg_e)
 
             with col_exc:
                 pode_excluir_quadro = (setor == "Master") or (quadro_row.get('criado_por') == st.session_state.usuario_nome)
@@ -10424,38 +10429,39 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     cols_stat[j].metric(coluna_stat['nome'], n_stat)
 
             st.markdown("---")
-            with st.expander("➕ Novo cartão"):
-                # Obra fica fora do form: precisa disparar rerun imediato ao trocar, senao a
-                # lista de Projetos (que depende dela) nao se atualiza -- widgets dentro de um
-                # st.form so recalculam no submit (mesmo padrao de "Cadastrar Obra").
-                nc_obra = st.selectbox("Obra (opcional):", ["—"] + obras_disponiveis, key=f"kanban_card_obra_{quadro_atual_id}")
-                projetos_obra = sorted(df_projetos[df_projetos['Obra'] == nc_obra]['Numero_Projeto'].unique().tolist()) if nc_obra != "—" and not df_projetos.empty else []
-                with st.form(f"kanban_form_novo_card_{quadro_atual_id}"):
-                    nc_coluna_nome = st.selectbox("Coluna:", df_colunas['nome'].tolist(), key=f"kanban_card_coluna_{quadro_atual_id}")
-                    nc_titulo = st.text_input("Título:", key=f"kanban_card_titulo_{quadro_atual_id}")
-                    nc_desc = st.text_area("Descrição:", key=f"kanban_card_desc_{quadro_atual_id}", height=68)
-                    nc_projeto = st.selectbox("Projeto (opcional):", ["—"] + projetos_obra, key=f"kanban_card_projeto_{quadro_atual_id}")
-                    nc_prazo = st.date_input("Prazo (opcional):", value=None, key=f"kanban_card_prazo_{quadro_atual_id}")
-                    nc_resp = st.text_input("Solicitante (opcional):", key=f"kanban_card_resp_{quadro_atual_id}")
-                    if st.form_submit_button("Adicionar"):
-                        if not nc_titulo.strip():
-                            st.error("Informe o título.")
-                        else:
-                            nc_coluna_id = int(df_colunas[df_colunas['nome'] == nc_coluna_nome]['id'].iloc[0])
-                            ok_c, msg_c = criar_card(
-                                quadro_atual_id, nc_coluna_id, nc_titulo, nc_desc,
-                                nc_obra if nc_obra != "—" else None,
-                                nc_projeto if nc_projeto != "—" else None,
-                                nc_resp, nc_prazo, st.session_state.usuario_nome
-                            )
-                            if ok_c:
-                                _limpar_cache_kanban()
-                                registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_CARTAO",
-                                    f"Quadro: {quadro_row['nome']} | Coluna: {nc_coluna_nome} | {nc_titulo.strip()}")
-                                st.toast("Cartão criado!")
-                                st.rerun()
+            if pode_editar_kanban:
+                with st.expander("➕ Novo cartão"):
+                    # Obra fica fora do form: precisa disparar rerun imediato ao trocar, senao
+                    # a lista de Projetos (que depende dela) nao se atualiza -- widgets dentro
+                    # de um st.form so recalculam no submit (mesmo padrao de "Cadastrar Obra").
+                    nc_obra = st.selectbox("Obra (opcional):", ["—"] + obras_disponiveis, key=f"kanban_card_obra_{quadro_atual_id}")
+                    projetos_obra = sorted(df_projetos[df_projetos['Obra'] == nc_obra]['Numero_Projeto'].unique().tolist()) if nc_obra != "—" and not df_projetos.empty else []
+                    with st.form(f"kanban_form_novo_card_{quadro_atual_id}"):
+                        nc_coluna_nome = st.selectbox("Coluna:", df_colunas['nome'].tolist(), key=f"kanban_card_coluna_{quadro_atual_id}")
+                        nc_titulo = st.text_input("Título:", key=f"kanban_card_titulo_{quadro_atual_id}")
+                        nc_desc = st.text_area("Descrição:", key=f"kanban_card_desc_{quadro_atual_id}", height=68)
+                        nc_projeto = st.selectbox("Projeto (opcional):", ["—"] + projetos_obra, key=f"kanban_card_projeto_{quadro_atual_id}")
+                        nc_prazo = st.date_input("Prazo (opcional):", value=None, key=f"kanban_card_prazo_{quadro_atual_id}")
+                        nc_resp = st.text_input("Solicitante (opcional):", key=f"kanban_card_resp_{quadro_atual_id}")
+                        if st.form_submit_button("Adicionar"):
+                            if not nc_titulo.strip():
+                                st.error("Informe o título.")
                             else:
-                                st.error(msg_c)
+                                nc_coluna_id = int(df_colunas[df_colunas['nome'] == nc_coluna_nome]['id'].iloc[0])
+                                ok_c, msg_c = criar_card(
+                                    quadro_atual_id, nc_coluna_id, nc_titulo, nc_desc,
+                                    nc_obra if nc_obra != "—" else None,
+                                    nc_projeto if nc_projeto != "—" else None,
+                                    nc_resp, nc_prazo, st.session_state.usuario_nome
+                                )
+                                if ok_c:
+                                    _limpar_cache_kanban()
+                                    registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_CARTAO",
+                                        f"Quadro: {quadro_row['nome']} | Coluna: {nc_coluna_nome} | {nc_titulo.strip()}")
+                                    st.toast("Cartão criado!")
+                                    st.rerun()
+                                else:
+                                    st.error(msg_c)
 
             filtro_coluna = st.radio(
                 "Mostrar cartões de:", ["Todos"] + df_colunas['nome'].tolist(),
@@ -10503,20 +10509,21 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         st.markdown("---")
                         df_anexos_card = df_anexos[df_anexos['card_id'] == card_id] if not df_anexos.empty else df_anexos
                         st.caption(f"📎 Anexos ({len(df_anexos_card)})" if not df_anexos_card.empty else "📎 Anexos")
-                        uploaded_kanban = st.file_uploader(
-                            "Anexar arquivo(s) — RC física, solicitação etc.:",
-                            type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "doc", "docx"],
-                            key=f"kanban_upload_{card_id}", accept_multiple_files=True
-                        )
-                        if uploaded_kanban:
-                            if st.button(f"💾 Salvar {len(uploaded_kanban)} arquivo(s)", key=f"kanban_btn_salvar_anexo_{card_id}"):
-                                prontos_kanban = [(f.name, f.type or "", f.read()) for f in uploaded_kanban]
-                                n_salvos_kanban = salvar_anexos_kanban_lote(card_id, prontos_kanban, st.session_state.usuario_nome)
-                                _limpar_cache_kanban()
-                                registrar_auditoria(st.session_state.usuario_nome, "KANBAN_ANEXAR_ARQUIVO",
-                                    f"Quadro: {quadro_row['nome']} | {card['titulo']} | {n_salvos_kanban} arquivo(s)")
-                                st.toast(f"✅ {n_salvos_kanban} arquivo(s) salvo(s)!")
-                                st.rerun()
+                        if pode_editar_kanban:
+                            uploaded_kanban = st.file_uploader(
+                                "Anexar arquivo(s) — RC física, solicitação etc.:",
+                                type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "doc", "docx"],
+                                key=f"kanban_upload_{card_id}", accept_multiple_files=True
+                            )
+                            if uploaded_kanban:
+                                if st.button(f"💾 Salvar {len(uploaded_kanban)} arquivo(s)", key=f"kanban_btn_salvar_anexo_{card_id}"):
+                                    prontos_kanban = [(f.name, f.type or "", f.read()) for f in uploaded_kanban]
+                                    n_salvos_kanban = salvar_anexos_kanban_lote(card_id, prontos_kanban, st.session_state.usuario_nome)
+                                    _limpar_cache_kanban()
+                                    registrar_auditoria(st.session_state.usuario_nome, "KANBAN_ANEXAR_ARQUIVO",
+                                        f"Quadro: {quadro_row['nome']} | {card['titulo']} | {n_salvos_kanban} arquivo(s)")
+                                    st.toast(f"✅ {n_salvos_kanban} arquivo(s) salvo(s)!")
+                                    st.rerun()
                         if not df_anexos_card.empty:
                             for _, anexo in df_anexos_card.iterrows():
                                 anexo_id = int(anexo['id'])
@@ -10524,11 +10531,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 col_an1.markdown(f"📄 {html_escape(anexo['nome_arquivo'])}")
                                 col_an2.caption(f"{anexo['enviado_por']} — {anexo['enviado_em'].strftime('%d/%m/%Y')}")
                                 _kanban_bloco_baixar_anexo(anexo_id, col_an3)
-                                if st.button("🗑️ Remover anexo", key=f"kanban_del_anexo_{anexo_id}"):
-                                    if excluir_anexo_kanban(anexo_id):
-                                        _limpar_cache_kanban()
-                                        st.toast("Anexo removido.")
-                                        st.rerun()
+                                if pode_editar_kanban:
+                                    if st.button("🗑️ Remover anexo", key=f"kanban_del_anexo_{anexo_id}"):
+                                        if excluir_anexo_kanban(anexo_id):
+                                            _limpar_cache_kanban()
+                                            st.toast("Anexo removido.")
+                                            st.rerun()
 
                         df_hist_card = df_historico[df_historico['card_id'] == card_id] if not df_historico.empty else df_historico
                         if not df_hist_card.empty:
@@ -10611,7 +10619,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 with st.form("form_user"):
                     nu = st.text_input("Login:").lower().strip()
                     nn = st.text_input("Nome:")
-                    ns = st.selectbox("Setor:", ["Producao", "Engenharia", "Diretoria", "Logistica", "Almoxarifado", "Medicao", "PCP", "Master"])
+                    ns = st.selectbox("Setor:", ["Producao", "Engenharia", "Diretoria", "Logistica", "Almoxarifado", "Medicao", "PCP", "Compras", "Master"])
                     np = st.text_input("Senha:", type="password")
                     st.caption("Mínimo 8 caracteres, ao menos 1 número e 1 letra maiúscula.")
                     if st.form_submit_button("Salvar"):
