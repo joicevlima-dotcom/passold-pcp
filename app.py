@@ -44,6 +44,11 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 :root {
+    /* Impede que o navegador "escureça" a pagina sozinho (Edge/Chrome tem uma opcao de
+    modo escuro forcado pra sites que repinta tudo por cima, ignorando ate cor fixa em
+    hexadecimal) -- essa propriedade e' o jeito padrao do navegador saber que essa pagina
+    ja e' clara de proposito e nao deve mexer nela. */
+    color-scheme: light only;
     --primary:        #1E3A5F;
     --primary-light:  #2A4F7C;
     --primary-hover:  #355F90;
@@ -78,6 +83,7 @@ st.markdown("""
 }
 
 /* ── Base ───────────────────────────────────── */
+html, body { color-scheme: light only; }
 .stApp { background: var(--bg); font-family: 'Inter', sans-serif; color: var(--text); }
 #MainMenu, footer, header { visibility: hidden; }
 
