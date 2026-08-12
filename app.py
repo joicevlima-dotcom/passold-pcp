@@ -10425,12 +10425,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
             st.markdown("---")
             with st.expander("➕ Novo cartão"):
+                # Obra fica fora do form: precisa disparar rerun imediato ao trocar, senao a
+                # lista de Projetos (que depende dela) nao se atualiza -- widgets dentro de um
+                # st.form so recalculam no submit (mesmo padrao de "Cadastrar Obra").
+                nc_obra = st.selectbox("Obra (opcional):", ["—"] + obras_disponiveis, key=f"kanban_card_obra_{quadro_atual_id}")
+                projetos_obra = sorted(df_projetos[df_projetos['Obra'] == nc_obra]['Numero_Projeto'].unique().tolist()) if nc_obra != "—" and not df_projetos.empty else []
                 with st.form(f"kanban_form_novo_card_{quadro_atual_id}"):
                     nc_coluna_nome = st.selectbox("Coluna:", df_colunas['nome'].tolist(), key=f"kanban_card_coluna_{quadro_atual_id}")
                     nc_titulo = st.text_input("Título:", key=f"kanban_card_titulo_{quadro_atual_id}")
                     nc_desc = st.text_area("Descrição:", key=f"kanban_card_desc_{quadro_atual_id}", height=68)
-                    nc_obra = st.selectbox("Obra (opcional):", ["—"] + obras_disponiveis, key=f"kanban_card_obra_{quadro_atual_id}")
-                    projetos_obra = sorted(df_projetos[df_projetos['Obra'] == nc_obra]['Numero_Projeto'].unique().tolist()) if nc_obra != "—" and not df_projetos.empty else []
                     nc_projeto = st.selectbox("Projeto (opcional):", ["—"] + projetos_obra, key=f"kanban_card_projeto_{quadro_atual_id}")
                     nc_prazo = st.date_input("Prazo (opcional):", value=None, key=f"kanban_card_prazo_{quadro_atual_id}")
                     nc_resp = st.text_input("Solicitante (opcional):", key=f"kanban_card_resp_{quadro_atual_id}")
@@ -10548,29 +10551,30 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 else:
                                     st.error(msg_m)
 
-                        del_key = f"kanban_confirm_del_card_{card_id}"
-                        if not st.session_state.get(del_key):
-                            if st.button("🗑️ Excluir cartão", key=f"btn_{del_key}"):
-                                st.session_state[del_key] = True
-                                st.rerun()
-                        else:
-                            st.warning("Excluir este cartão?")
-                            dc1, dc2 = st.columns(2)
-                            with dc1:
-                                if st.button("✅ Confirmar", key=f"confirmar_{del_key}"):
-                                    ok_d, msg_d = excluir_card(card_id)
-                                    if ok_d:
-                                        _limpar_cache_kanban()
-                                        registrar_auditoria(st.session_state.usuario_nome, "KANBAN_EXCLUIR_CARTAO", f"Quadro: {quadro_row['nome']} | {card['titulo']}")
-                                        st.session_state[del_key] = False
-                                        st.toast("Cartão excluído.")
-                                        st.rerun()
-                                    else:
-                                        st.error(msg_d)
-                            with dc2:
-                                if st.button("Cancelar", key=f"cancelar_{del_key}"):
-                                    st.session_state[del_key] = False
+                        if setor == "Master":
+                            del_key = f"kanban_confirm_del_card_{card_id}"
+                            if not st.session_state.get(del_key):
+                                if st.button("🗑️ Excluir cartão", key=f"btn_{del_key}"):
+                                    st.session_state[del_key] = True
                                     st.rerun()
+                            else:
+                                st.warning("Excluir este cartão?")
+                                dc1, dc2 = st.columns(2)
+                                with dc1:
+                                    if st.button("✅ Confirmar", key=f"confirmar_{del_key}"):
+                                        ok_d, msg_d = excluir_card(card_id)
+                                        if ok_d:
+                                            _limpar_cache_kanban()
+                                            registrar_auditoria(st.session_state.usuario_nome, "KANBAN_EXCLUIR_CARTAO", f"Quadro: {quadro_row['nome']} | {card['titulo']}")
+                                            st.session_state[del_key] = False
+                                            st.toast("Cartão excluído.")
+                                            st.rerun()
+                                        else:
+                                            st.error(msg_d)
+                                with dc2:
+                                    if st.button("Cancelar", key=f"cancelar_{del_key}"):
+                                        st.session_state[del_key] = False
+                                        st.rerun()
 
                         st.markdown("---")
                         st.caption("💬 Comentários")
