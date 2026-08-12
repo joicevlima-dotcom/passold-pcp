@@ -40,87 +40,41 @@ FATOR_PRODUTIVIDADE_DIFICULDADE = {1: 1.00, 2: 0.90, 3: 0.80, 4: 0.70, 5: 0.50}
 
 st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide", page_icon="🏭", initial_sidebar_state="expanded")
 
-if "tema_escuro" not in st.session_state:
-    st.session_state.tema_escuro = False
-
-_col_tema_a, _col_tema_b = st.columns([30, 1])
-with _col_tema_b:
-    st.session_state.tema_escuro = st.toggle(
-        "🌙", value=st.session_state.tema_escuro, key="toggle_tema_escuro", help="Modo escuro"
-    )
-
-# Duas paletas com os MESMOS nomes de variavel -- trocar os valores aqui recolore o app
-# inteiro, porque quase todo o CSS abaixo (e boa parte do HTML customizado no resto do
-# arquivo) referencia var(--x) em vez de cor fixa. --btn-bg fica fora dessa troca de
-# proposito: e' usado so no fundo do botao principal (com texto branco forcado), e
-# precisa continuar escuro/saturado nos dois temas pra manter contraste com o texto branco
-# -- os demais (--primary etc.) sao usados como COR DE TEXTO em cima do --bg-card, entao
-# precisam clarear no escuro pra continuar legivel.
-_PALETA_CLARA = {
-    "color_scheme": "light only",
-    "primary": "#1E3A5F", "primary_light": "#2A4F7C", "primary_hover": "#355F90",
-    "btn_bg": "#1E3A5F", "btn_bg_hover": "#355F90",
-    "accent": "#1A56DB", "accent_hover": "#1447C0", "accent_light": "#EFF6FF",
-    "success": "#059669", "success_light": "#ECFDF5",
-    "warning": "#D97706", "warning_light": "#FFFBEB",
-    "danger": "#DC2626", "danger_light": "#FEF2F2",
-    "info": "#0EA5E9", "info_light": "#F0F9FF",
-    "bg": "#F1F5F9", "bg_card": "#FFFFFF",
-    "border": "#E2E8F0", "border_hover": "#CBD5E1",
-    "text": "#1E293B", "text_muted": "#64748B", "text_light": "#94A3B8",
-    "sidebar_bg": "#1E3A5F", "sidebar_text": "#CBD5E1", "sidebar_active": "#3B82F6",
-}
-_PALETA_ESCURA = {
-    # Cinza-chumbo neutro (tipo VSCode/Notion) em vez de azul-marinho -- so o azul de
-    # destaque (accent/primary) lembra a identidade visual da empresa, o fundo fica neutro.
-    "color_scheme": "dark",
-    "primary": "#8FB3E0", "primary_light": "#A9C6EA", "primary_hover": "#B9D3F0",
-    "btn_bg": "#1E3A5F", "btn_bg_hover": "#355F90",
-    "accent": "#3B82F6", "accent_hover": "#60A5FA", "accent_light": "#2A3542",
-    "success": "#34D399", "success_light": "#1C332B",
-    "warning": "#FBBF24", "warning_light": "#3A2F19",
-    "danger": "#F87171", "danger_light": "#3A2323",
-    "info": "#38BDF8", "info_light": "#1B2E38",
-    "bg": "#1B1B1F", "bg_card": "#242428",
-    "border": "#38383F", "border_hover": "#4A4A52",
-    "text": "#E8E8EA", "text_muted": "#A1A1AA", "text_light": "#71717A",
-    "sidebar_bg": "#1E3A5F", "sidebar_text": "#CBD5E1", "sidebar_active": "#3B82F6",
-}
-_cores = _PALETA_ESCURA if st.session_state.tema_escuro else _PALETA_CLARA
-
-_root_vars_css = f"""
-:root {{
-    /* Impede que o navegador "escureça" a pagina sozinho por cima da paleta que a gente
-    ja escolheu (Edge/Chrome tem uma opcao de modo escuro forcado pra sites que repinta
-    tudo, ignorando ate cor fixa em hexadecimal) -- essa propriedade e' o jeito padrao do
-    navegador saber qual tema a pagina ja esta usando de proposito e nao mexer nela. */
-    color-scheme: {_cores['color_scheme']};
-    --primary:        {_cores['primary']};
-    --primary-light:  {_cores['primary_light']};
-    --primary-hover:  {_cores['primary_hover']};
-    --btn-bg:         {_cores['btn_bg']};
-    --btn-bg-hover:   {_cores['btn_bg_hover']};
-    --accent:         {_cores['accent']};
-    --accent-hover:   {_cores['accent_hover']};
-    --accent-light:   {_cores['accent_light']};
-    --success:        {_cores['success']};
-    --success-light:  {_cores['success_light']};
-    --warning:        {_cores['warning']};
-    --warning-light:  {_cores['warning_light']};
-    --danger:         {_cores['danger']};
-    --danger-light:   {_cores['danger_light']};
-    --info:           {_cores['info']};
-    --info-light:     {_cores['info_light']};
-    --bg:             {_cores['bg']};
-    --bg-card:        {_cores['bg_card']};
-    --border:         {_cores['border']};
-    --border-hover:   {_cores['border_hover']};
-    --text:           {_cores['text']};
-    --text-muted:     {_cores['text_muted']};
-    --text-light:     {_cores['text_light']};
-    --sidebar-bg:     {_cores['sidebar_bg']};
-    --sidebar-text:   {_cores['sidebar_text']};
-    --sidebar-active: {_cores['sidebar_active']};
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+:root {
+    /* Impede que o navegador "escureça" a pagina sozinho (Edge/Chrome tem uma opcao de
+    modo escuro forcado pra sites que repinta tudo por cima, ignorando ate cor fixa em
+    hexadecimal) -- essa propriedade e' o jeito padrao do navegador saber que essa pagina
+    ja e' clara de proposito e nao deve mexer nela. */
+    color-scheme: light only;
+    --primary:        #1E3A5F;
+    --primary-light:  #2A4F7C;
+    --primary-hover:  #355F90;
+    --btn-bg:         #1E3A5F;
+    --btn-bg-hover:   #355F90;
+    --accent:         #1A56DB;
+    --accent-hover:   #1447C0;
+    --accent-light:   #EFF6FF;
+    --success:        #059669;
+    --success-light:  #ECFDF5;
+    --warning:        #D97706;
+    --warning-light:  #FFFBEB;
+    --danger:         #DC2626;
+    --danger-light:   #FEF2F2;
+    --info:           #0EA5E9;
+    --info-light:     #F0F9FF;
+    --bg:             #F1F5F9;
+    --bg-card:        #FFFFFF;
+    --border:         #E2E8F0;
+    --border-hover:   #CBD5E1;
+    --text:           #1E293B;
+    --text-muted:     #64748B;
+    --text-light:     #94A3B8;
+    --sidebar-bg:     #1E3A5F;
+    --sidebar-text:   #CBD5E1;
+    --sidebar-active: #3B82F6;
     --shadow-xs:  0 1px 2px rgba(0,0,0,0.05);
     --shadow-sm:  0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
     --shadow-md:  0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
@@ -128,15 +82,10 @@ _root_vars_css = f"""
     --radius-sm:  6px;
     --radius:     10px;
     --radius-lg:  14px;
-}}
-html, body {{ color-scheme: {_cores['color_scheme']}; }}
-"""
+}
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
-""" + _root_vars_css + """
 /* ── Base ───────────────────────────────────── */
+html, body { color-scheme: light only; }
 .stApp { background: var(--bg); font-family: 'Inter', sans-serif; color: var(--text); }
 #MainMenu, footer, header { visibility: hidden; }
 
