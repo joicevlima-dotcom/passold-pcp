@@ -10473,9 +10473,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     coluna_nome_card = mapa_coluna_nome.get(coluna_id, "—")
                     tags_label = []
                     if card.get('obra'):
-                        tags_label.append(str(card['obra']))
+                        obra_txt = str(card['obra'])
+                        if card.get('numero_projeto'):
+                            obra_txt += f" (Proj. {card['numero_projeto']})"
+                        tags_label.append(obra_txt)
                     if pd.notna(card.get('prazo')):
                         tags_label.append(f"prazo {pd.Timestamp(card['prazo']).strftime('%d/%m')}")
+                    if card.get('responsavel'):
+                        tags_label.append(f"Solicitante: {card['responsavel']}")
                     label_extra = f" — {' · '.join(tags_label)}" if tags_label else ""
 
                     with st.expander(f"🗂️ {card['titulo']}  ·  {coluna_nome_card}{label_extra}", expanded=False):
