@@ -1608,8 +1608,16 @@ def criar_coluna(quadro_id: int, nome: str, ordem: int = None):
     try:
         cursor = conn.cursor()
         if ordem is None:
-            cursor.execute("SELECT COALESCE(MAX(ordem), -1) + 1 FROM kanban_colunas WHERE quadro_id=%s", (quadro_id,))
-            ordem = cursor.fetchone()[0]
+            cursor.execute("SELECT MAX(ordem) FROM kanban_colunas WHERE quadro_id=%s", (quadro_id,))
+            max_ordem = cursor.fetchone()[0]
+            if max_ordem is None:
+                ordem = 0
+            else:
+                # Empurra quem esta por ultimo pra frente, e a nova coluna entra no lugar
+                # que era dela -- assim uma coluna "terminal" (ex: Concluidos) continua
+                # sempre por ultimo mesmo depois de criar mais colunas.
+                cursor.execute("UPDATE kanban_colunas SET ordem = ordem + 1 WHERE quadro_id=%s AND ordem = %s", (quadro_id, max_ordem))
+                ordem = max_ordem
         cursor.execute("INSERT INTO kanban_colunas (quadro_id, nome, ordem) VALUES (%s,%s,%s)", (quadro_id, nome.strip(), ordem))
         conn.commit()
         return True, ""
