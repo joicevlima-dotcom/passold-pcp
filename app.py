@@ -10514,11 +10514,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 "Mostrar cartões de:", ["Todos"] + df_colunas['nome'].tolist(),
                 horizontal=True, key=f"kanban_filtro_coluna_{quadro_atual_id}"
             )
-            if filtro_coluna == "Todos" or df_cards.empty:
-                df_cards_filtrado = df_cards
-            else:
+            obras_nos_cards = sorted(df_cards['obra'].dropna().unique().tolist()) if not df_cards.empty else []
+            filtro_obra = st.selectbox("Filtrar por obra:", ["Todas"] + obras_nos_cards, key=f"kanban_filtro_obra_{quadro_atual_id}")
+
+            df_cards_filtrado = df_cards
+            if filtro_coluna != "Todos" and not df_cards_filtrado.empty:
                 ids_coluna_filtro = df_colunas[df_colunas['nome'] == filtro_coluna]['id'].tolist()
-                df_cards_filtrado = df_cards[df_cards['coluna_id'].isin(ids_coluna_filtro)]
+                df_cards_filtrado = df_cards_filtrado[df_cards_filtrado['coluna_id'].isin(ids_coluna_filtro)]
+            if filtro_obra != "Todas" and not df_cards_filtrado.empty:
+                df_cards_filtrado = df_cards_filtrado[df_cards_filtrado['obra'] == filtro_obra]
 
             if df_cards_filtrado.empty:
                 st.caption("Nenhum cartão aqui.")
