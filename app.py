@@ -1590,6 +1590,69 @@ def editar_setores_quadro(quadro_id: int, setores_acesso: list):
     finally:
         liberar_conexao(conn)
 
+def gerar_relatorio_kanban_xlsx(nome_quadro: str, df_colunas: pd.DataFrame, df_cards: pd.DataFrame) -> bytes:
+    """Planilha com todos os cartoes do quadro -- 1 linha por cartao, com todos os campos."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from io import BytesIO
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Kanban"
+    ws.sheet_view.showGridLines = False
+
+    bd = Side(style='thin', color="CCCCCC")
+    borda = Border(left=bd, right=bd, top=bd, bottom=bd)
+    fill_cab = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
+
+    titulos = ["Coluna", "Título", "Descrição", "Obra", "Projeto", "Prazo", "Solicitante", "Criado por", "Criado em"]
+    larguras = [18, 26, 40, 20, 14, 12, 20, 18, 16]
+    for col, largura in zip(range(1, len(titulos) + 1), larguras):
+        ws.column_dimensions[chr(64 + col)].width = largura
+
+    ws.merge_cells(f"A1:{chr(64 + len(titulos))}1")
+    ws["A1"] = f"KANBAN — {nome_quadro.upper()} ({hoje_projeto().strftime('%d/%m/%Y %H:%M')})"
+    ws["A1"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+    ws["A1"].fill = fill_cab
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 22
+
+    linha = 3
+    for col, titulo in enumerate(titulos, 1):
+        cel = ws.cell(linha, col, titulo)
+        cel.font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        cel.fill = fill_cab
+        cel.alignment = Alignment(horizontal="center", vertical="center")
+        cel.border = borda
+    linha += 1
+
+    mapa_coluna_rel = dict(zip(df_colunas['id'].tolist(), df_colunas['nome'].tolist())) if not df_colunas.empty else {}
+    if not df_cards.empty:
+        for _, card in df_cards.sort_values('criado_em').iterrows():
+            prazo_txt = pd.Timestamp(card['prazo']).strftime('%d/%m/%Y') if pd.notna(card.get('prazo')) else ''
+            criado_em_txt = card['criado_em'].strftime('%d/%m/%Y %H:%M') if pd.notna(card.get('criado_em')) else ''
+            dados = [
+                mapa_coluna_rel.get(card['coluna_id'], ''),
+                card.get('titulo') or '',
+                card.get('descricao') or '',
+                card.get('obra') or '',
+                card.get('numero_projeto') or '',
+                prazo_txt,
+                card.get('responsavel') or '',
+                card.get('criado_por') or '',
+                criado_em_txt,
+            ]
+            for col, val in enumerate(dados, 1):
+                cel = ws.cell(linha, col, val)
+                cel.font = Font(name="Arial", size=10)
+                cel.alignment = Alignment(horizontal="left", vertical="center", wrap_text=(col in (2, 3)))
+                cel.border = borda
+            linha += 1
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
 def arquivar_quadro(quadro_id: int):
     conn = conectar_banco()
     try:
@@ -10420,6 +10483,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.rerun()
                             else:
                                 st.error(msg_sa)
+
+                    df_colunas_rel = carregar_kanban_colunas(quadro_atual_id)
+                    df_cards_rel = carregar_kanban_cards(quadro_atual_id)
+                    rel_bytes = gerar_relatorio_kanban_xlsx(quadro_row['nome'], df_colunas_rel, df_cards_rel)
+                    st.download_button(
+                        "📄 Baixar relatório (Excel)", data=rel_bytes,
+                        file_name=f"Kanban_{quadro_row['nome'].replace(' ', '_')}_{hoje_projeto().strftime('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"kanban_dl_relatorio_{quadro_atual_id}"
+                    )
 
             with col_exc:
                 pode_excluir_quadro = (setor == "Master") or (quadro_row.get('criado_por') == st.session_state.usuario_nome)
