@@ -1101,11 +1101,23 @@ def inicializar_banco_de_dados():
                 criado_em TIMESTAMP DEFAULT NOW()
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS kanban_anexos (
+                id SERIAL PRIMARY KEY,
+                card_id INTEGER REFERENCES kanban_cards(id) ON DELETE CASCADE,
+                nome_arquivo TEXT NOT NULL,
+                tipo_arquivo TEXT,
+                conteudo BYTEA NOT NULL,
+                enviado_por TEXT,
+                enviado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_colunas_quadro ON kanban_colunas(quadro_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_cards_quadro ON kanban_cards(quadro_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_cards_coluna ON kanban_cards(coluna_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_historico_card ON kanban_historico(card_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_comentarios_card ON kanban_comentarios(card_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_anexos_card ON kanban_anexos(card_id)")
 
 # ── Tabela de auditoria (nova) ──────────────────────
         cursor.execute("""
@@ -1398,9 +1410,91 @@ def carregar_kanban_comentarios(quadro_id: int):
     finally:
         liberar_conexao(conn)
 
+@st.cache_data(ttl=30)
+def carregar_kanban_anexos(quadro_id: int):
+    """Lista de anexos (sem o conteudo) de todos os cards do quadro de uma vez.
+    O conteudo (BYTEA) so e' buscado sob demanda, no clique de baixar -- ver
+    carregar_conteudo_anexo_kanban -- mesmo motivo de carregar_arquivos_op_varios."""
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            """SELECT a.id, a.card_id, a.nome_arquivo, a.tipo_arquivo, a.enviado_por, a.enviado_em
+               FROM kanban_anexos a
+               JOIN kanban_cards c ON c.id = a.card_id
+               WHERE c.quadro_id=%(quadro_id)s ORDER BY a.enviado_em DESC""",
+            conn, params={"quadro_id": quadro_id}
+        )
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=60)
+def carregar_conteudo_anexo_kanban(anexo_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT nome_arquivo, tipo_arquivo, conteudo FROM kanban_anexos WHERE id=%s", (anexo_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        nome, tipo, conteudo = row
+        return (nome, tipo, bytes(conteudo))  # bytes puro -- memoryview do psycopg2 nao e picklable pro cache
+    except Exception:
+        return None
+    finally:
+        liberar_conexao(conn)
+
+def salvar_anexos_kanban_lote(card_id: int, arquivos: list, usuario: str) -> int:
+    """arquivos: lista de (nome, tipo, conteudo)."""
+    if not arquivos:
+        return 0
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.executemany(
+            "INSERT INTO kanban_anexos (card_id, nome_arquivo, tipo_arquivo, conteudo, enviado_por) VALUES (%s,%s,%s,%s,%s)",
+            [(card_id, nome, tipo, conteudo, usuario) for nome, tipo, conteudo in arquivos]
+        )
+        conn.commit()
+        return len(arquivos)
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar anexos: {e}")
+        return 0
+    finally:
+        liberar_conexao(conn)
+
+def excluir_anexo_kanban(anexo_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM kanban_anexos WHERE id=%s", (anexo_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao excluir anexo: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
+def _kanban_bloco_baixar_anexo(anexo_id: int, alvo):
+    """Botao de baixar 1 anexo sem puxar o conteudo do banco ate o clique (mesmo padrao de _bloco_baixar_arquivo)."""
+    flag_key = f"kanban_ver_anexo_{anexo_id}"
+    if not st.session_state.get(flag_key):
+        if alvo.button("⬇️", key=f"kanban_prep_anexo_{anexo_id}", help="Carregar arquivo"):
+            st.session_state[flag_key] = True
+        else:
+            return
+    conteudo = carregar_conteudo_anexo_kanban(anexo_id)
+    if not conteudo:
+        alvo.caption("Erro ao carregar.")
+        return
+    nome_c, tipo_c, bytes_c = conteudo
+    alvo.download_button("⬇️", data=bytes_c, file_name=nome_c, mime=tipo_c or "application/octet-stream", key=f"kanban_dl_anexo_{anexo_id}")
+
 def _limpar_cache_kanban():
     for fn in [carregar_kanban_quadros, carregar_kanban_colunas, carregar_kanban_cards,
-               carregar_kanban_historico, carregar_kanban_comentarios]:
+               carregar_kanban_historico, carregar_kanban_comentarios, carregar_kanban_anexos]:
         try:
             fn.clear()
         except Exception:
@@ -10269,6 +10363,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             df_cards = carregar_kanban_cards(quadro_atual_id)
             df_historico = carregar_kanban_historico(quadro_atual_id)
             df_comentarios = carregar_kanban_comentarios(quadro_atual_id)
+            df_anexos = carregar_kanban_anexos(quadro_atual_id)
 
             if df_colunas.empty:
                 st.info("Esse quadro ainda não tem colunas — adicione uma em 'Gerenciar colunas'.")
@@ -10338,6 +10433,35 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 with st.expander("Detalhes"):
                                     if card.get('descricao'):
                                         st.write(card['descricao'])
+
+                                    df_anexos_card = df_anexos[df_anexos['card_id'] == card_id] if not df_anexos.empty else df_anexos
+                                    st.caption(f"📎 Anexos ({len(df_anexos_card)})" if not df_anexos_card.empty else "📎 Anexos")
+                                    uploaded_kanban = st.file_uploader(
+                                        "Anexar arquivo(s) — RC física, solicitação etc.:",
+                                        type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "doc", "docx"],
+                                        key=f"kanban_upload_{card_id}", accept_multiple_files=True
+                                    )
+                                    if uploaded_kanban:
+                                        if st.button(f"💾 Salvar {len(uploaded_kanban)} arquivo(s)", key=f"kanban_btn_salvar_anexo_{card_id}"):
+                                            prontos_kanban = [(f.name, f.type or "", f.read()) for f in uploaded_kanban]
+                                            n_salvos_kanban = salvar_anexos_kanban_lote(card_id, prontos_kanban, st.session_state.usuario_nome)
+                                            _limpar_cache_kanban()
+                                            registrar_auditoria(st.session_state.usuario_nome, "KANBAN_ANEXAR_ARQUIVO",
+                                                f"Quadro: {quadro_row['nome']} | {card['titulo']} | {n_salvos_kanban} arquivo(s)")
+                                            st.toast(f"✅ {n_salvos_kanban} arquivo(s) salvo(s)!")
+                                            st.rerun()
+                                    if not df_anexos_card.empty:
+                                        for _, anexo in df_anexos_card.iterrows():
+                                            anexo_id = int(anexo['id'])
+                                            col_an1, col_an2, col_an3 = st.columns([4, 3, 1])
+                                            col_an1.markdown(f"📄 {html_escape(anexo['nome_arquivo'])}")
+                                            col_an2.caption(f"{anexo['enviado_por']} — {anexo['enviado_em'].strftime('%d/%m/%Y')}")
+                                            _kanban_bloco_baixar_anexo(anexo_id, col_an3)
+                                            if st.button("🗑️ Remover anexo", key=f"kanban_del_anexo_{anexo_id}"):
+                                                if excluir_anexo_kanban(anexo_id):
+                                                    _limpar_cache_kanban()
+                                                    st.toast("Anexo removido.")
+                                                    st.rerun()
 
                                     df_hist_card = df_historico[df_historico['card_id'] == card_id] if not df_historico.empty else df_historico
                                     if not df_hist_card.empty:
