@@ -1518,8 +1518,8 @@ def excluir_anexo_kanban(anexo_id: int):
     finally:
         liberar_conexao(conn)
 
-def _kanban_bloco_baixar_anexo(anexo_id: int, alvo):
-    """Botao de baixar 1 anexo sem puxar o conteudo do banco ate o clique (mesmo padrao de _bloco_baixar_arquivo)."""
+def _kanban_bloco_baixar_anexo(anexo_id: int, alvo, col_link=None):
+    """Botao de abrir/baixar 1 anexo sem puxar o conteudo do banco ate o clique (mesmo padrao de _bloco_baixar_arquivo)."""
     flag_key = f"kanban_ver_anexo_{anexo_id}"
     if not st.session_state.get(flag_key):
         if alvo.button("⬇️", key=f"kanban_prep_anexo_{anexo_id}", help="Carregar arquivo"):
@@ -1531,6 +1531,10 @@ def _kanban_bloco_baixar_anexo(anexo_id: int, alvo):
         alvo.caption("Erro ao carregar.")
         return
     nome_c, tipo_c, bytes_c = conteudo
+    if col_link is not None:
+        link_abrir = _link_abrir_arquivo(nome_c, tipo_c, bytes_c)
+        if link_abrir:
+            col_link.markdown(link_abrir, unsafe_allow_html=True)
     alvo.download_button("⬇️", data=bytes_c, file_name=nome_c, mime=tipo_c or "application/octet-stream", key=f"kanban_dl_anexo_{anexo_id}")
 
 def _limpar_cache_kanban():
@@ -10434,18 +10438,28 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     # Obra fica fora do form: precisa disparar rerun imediato ao trocar, senao
                     # a lista de Projetos (que depende dela) nao se atualiza -- widgets dentro
                     # de um st.form so recalculam no submit (mesmo padrao de "Cadastrar Obra").
-                    nc_obra = st.selectbox("Obra (opcional):", ["—"] + obras_disponiveis, key=f"kanban_card_obra_{quadro_atual_id}")
+                    nc_obra = st.selectbox("Obra:", ["—"] + obras_disponiveis, key=f"kanban_card_obra_{quadro_atual_id}")
                     projetos_obra = sorted(df_projetos[df_projetos['Obra'] == nc_obra]['Numero_Projeto'].unique().tolist()) if nc_obra != "—" and not df_projetos.empty else []
                     with st.form(f"kanban_form_novo_card_{quadro_atual_id}"):
                         nc_coluna_nome = st.selectbox("Coluna:", df_colunas['nome'].tolist(), key=f"kanban_card_coluna_{quadro_atual_id}")
                         nc_titulo = st.text_input("Título:", key=f"kanban_card_titulo_{quadro_atual_id}")
                         nc_desc = st.text_area("Descrição:", key=f"kanban_card_desc_{quadro_atual_id}", height=68)
-                        nc_projeto = st.selectbox("Projeto (opcional):", ["—"] + projetos_obra, key=f"kanban_card_projeto_{quadro_atual_id}")
-                        nc_prazo = st.date_input("Prazo (opcional):", value=None, key=f"kanban_card_prazo_{quadro_atual_id}")
-                        nc_resp = st.text_input("Solicitante (opcional):", key=f"kanban_card_resp_{quadro_atual_id}")
+                        nc_projeto = st.selectbox("Projeto:", ["—"] + projetos_obra, key=f"kanban_card_projeto_{quadro_atual_id}")
+                        nc_prazo = st.date_input("Prazo:", value=None, key=f"kanban_card_prazo_{quadro_atual_id}")
+                        nc_resp = st.text_input("Solicitante:", key=f"kanban_card_resp_{quadro_atual_id}")
                         if st.form_submit_button("Adicionar"):
                             if not nc_titulo.strip():
                                 st.error("Informe o título.")
+                            elif not nc_desc.strip():
+                                st.error("Informe a descrição.")
+                            elif nc_obra == "—":
+                                st.error("Escolha a obra.")
+                            elif nc_projeto == "—":
+                                st.error("Escolha o projeto.")
+                            elif not nc_prazo:
+                                st.error("Informe o prazo.")
+                            elif not nc_resp.strip():
+                                st.error("Informe o solicitante.")
                             else:
                                 nc_coluna_id = int(df_colunas[df_colunas['nome'] == nc_coluna_nome]['id'].iloc[0])
                                 ok_c, msg_c = criar_card(
@@ -10527,10 +10541,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         if not df_anexos_card.empty:
                             for _, anexo in df_anexos_card.iterrows():
                                 anexo_id = int(anexo['id'])
-                                col_an1, col_an2, col_an3 = st.columns([4, 3, 1])
+                                col_an1, col_an2, col_an3, col_an4 = st.columns([4, 3, 1, 1])
                                 col_an1.markdown(f"📄 {html_escape(anexo['nome_arquivo'])}")
                                 col_an2.caption(f"{anexo['enviado_por']} — {anexo['enviado_em'].strftime('%d/%m/%Y')}")
-                                _kanban_bloco_baixar_anexo(anexo_id, col_an3)
+                                _kanban_bloco_baixar_anexo(anexo_id, col_an4, col_link=col_an3)
                                 if pode_editar_kanban:
                                     if st.button("🗑️ Remover anexo", key=f"kanban_del_anexo_{anexo_id}"):
                                         if excluir_anexo_kanban(anexo_id):
@@ -10538,11 +10552,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             st.toast("Anexo removido.")
                                             st.rerun()
 
-                        df_hist_card = df_historico[df_historico['card_id'] == card_id] if not df_historico.empty else df_historico
-                        if not df_hist_card.empty:
-                            st.caption("Histórico:")
-                            for _, h in df_hist_card.iterrows():
-                                st.caption(f"• {h['coluna_anterior']} → {h['coluna_nova']} — {h['usuario']} ({h['criado_em'].strftime('%d/%m %H:%M')})")
+                        if setor == "Master":
+                            df_hist_card = df_historico[df_historico['card_id'] == card_id] if not df_historico.empty else df_historico
+                            if not df_hist_card.empty:
+                                st.caption("Histórico:")
+                                for _, h in df_hist_card.iterrows():
+                                    st.caption(f"• {h['coluna_anterior']} → {h['coluna_nova']} — {h['usuario']} ({h['criado_em'].strftime('%d/%m %H:%M')})")
 
                         outras_colunas = df_colunas[df_colunas['id'] != coluna_id]
                         if not outras_colunas.empty:
