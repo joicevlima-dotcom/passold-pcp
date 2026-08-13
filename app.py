@@ -7201,7 +7201,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
             # ── CARD 2: LANÇAR PEÇAS ──────────────────────────────
             n_lib_card = len(df_banco_micro[df_banco_micro["Status_Item"].isin(["Liberado para Fabrica","Parcialmente Concluido"])]) if not df_banco_micro.empty else 0
-            with st.expander(f"✏️ Lançar Peças da OP  ·  {n_lib_card} OP(s) liberada(s)", expanded=False):
+            with st.expander(f"✏️ Lançar Peças da OP  ·  {n_lib_card} OP(s) liberada(s)", expanded=False, key="op_lancar_pecas_expander"):
                 st.markdown("Selecione a OP liberada e lance as peças do romaneio.")
                 incluir_concluidas_fat = st.toggle(
                     "Incluir OPs concluídas (somente para tirar 2ª via)",
@@ -7579,7 +7579,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown("<br>", unsafe_allow_html=True)
 
             # ── CARD 4: COMPONENTES POR OP ────────────────────────
-            with st.expander("📦 Componentes por OP", expanded=False):
+            with st.expander("📦 Componentes por OP", expanded=False, key="op_componentes_expander"):
                 st.caption("Cadastre os componentes necessários para cada OP liberada.")
 
                 df_lib_ops_todas = df_banco_micro[
@@ -8797,7 +8797,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             titulo_op = f"🏗️ {ob_row.Obra_Vinculada} — {int(ob_row.qtd)} OP(s) pronta(s)"
                             if ob_row.parciais > 0:
                                 titulo_op += f"  🟠 {int(ob_row.parciais)} parcial(is)"
-                            with st.expander(titulo_op, expanded=False):
+                            with st.expander(titulo_op, expanded=False, key=f"log_op_pronta_expander_{ob_row.Obra_Vinculada}"):
                                 df_obra_op = df_conc_log[df_conc_log['Obra_Vinculada'] == ob_row.Obra_Vinculada]
                                 for _, row_c in df_obra_op.iterrows():
                                     _render_op_pronta(row_c)
@@ -8842,7 +8842,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     titulo_obra = f"🏗️ {ob_row.Obra_Vinculada} — {int(ob_row.qtd)} lote(s)"
                     if ob_row.atrasados > 0:
                         titulo_obra += f"  🔴 {int(ob_row.atrasados)} atrasado(s)"
-                    with st.expander(titulo_obra, expanded=False):
+                    with st.expander(titulo_obra, expanded=False, key=f"log_grupo_expander_{col_sort}_{ob_row.Obra_Vinculada}"):
                         df_obra = df_secao[df_secao['Obra_Vinculada'] == ob_row.Obra_Vinculada].sort_values(col_sort, na_position='last')
                         for _, row in df_obra.iterrows():
                             render_item(row)
@@ -9090,7 +9090,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             f"{icone} OP: {op_row['num_op']} — {op_row['cod_lote']} | {op_row['obra_vinculada']}"
                             f"{' (Proj. ' + str(op_row['numero_projeto']) + ')' if op_row.get('numero_projeto') else ''}  "
                             f"({n_conf}/{n_total} conferidos{f' — {n_indisp} FALTANDO' if n_indisp > 0 else ''})",
-                            expanded=False
+                            expanded=False, key=f"alm_comp_expander_{int(op_row['item_id'])}"
                         ):
                             hc = st.columns([4, 2, 2, 3, 2])
                             for col_h, label in zip(hc, ["COMPONENTE", "QTD", "UN", "STATUS", "AÇÃO"]):
@@ -9296,7 +9296,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             f"{' (Proj. ' + str(saida_row['numero_projeto']) + ')' if pd.notna(saida_row.get('numero_projeto')) else ''}"
                             f" — {_nn(saida_row.get('destino'), '—')} "
                             f"({n_conf_ins}/{n_total_ins} conferidos{f' — {n_indisp_ins} FALTANDO' if n_indisp_ins > 0 else ''}) — por {saida_row['registrado_por']}",
-                            expanded=False
+                            expanded=False, key=f"alm_ins_expander_{int(saida_row['id'])}"
                         ):
                             hci = st.columns([4, 2, 2, 3, 2])
                             for col_h, label in zip(hci, ["INSUMO", "QTD", "UN", "STATUS", "AÇÃO"]):
@@ -9343,7 +9343,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 bloco_comentarios('saida_insumo_item', int(item_ins['id']), f"insumo_{item_ins['id']}")
                                 st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
 
-                            with st.expander("➕ Adicionar item a esta saída", expanded=False):
+                            with st.expander("➕ Adicionar item a esta saída", expanded=False, key=f"alm_ins_add_expander_{int(saida_row['id'])}"):
                                 nic1, nic2, nic3, nic4 = st.columns([4, 2, 2, 1])
                                 with nic1:
                                     novo_item_desc = st.text_input("Descrição:", key=f"novo_item_desc_{saida_row['id']}", placeholder="Ex: Spray, silicone...")
@@ -9515,7 +9515,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     tag_terc = f"  🏭 Terceirizado #{int(rm_num)}" if rm_terc and pd.notna(rm_num) else ("  🏭 Terceirizado" if rm_terc else "")
                     with st.expander(
                         f"{rm_row['obra_vinculada']} — {pd.to_datetime(rm_row['data_recebimento']).strftime('%d/%m/%Y')} "
-                        f"({int(rm_row['qtd_itens'])} item(ns)) — por {rm_row['criado_por']}{tag_terc}"
+                        f"({int(rm_row['qtd_itens'])} item(ns)) — por {rm_row['criado_por']}{tag_terc}",
+                        key=f"rom_manual_expander_{int(rm_row['id'])}"
                     ):
                         rom_id_atual = int(rm_row['id'])
                         df_itens_rom = (
@@ -9675,7 +9676,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                     with st.expander(
                         f"{icone_lm} {lista_row['obra']} — {lista_row['titulo']} "
-                        f"({int(_nn(lista_row.get('qtd_itens'), 0))} item(ns)) — por {_nn(lista_row.get('criado_por'), '—')}"
+                        f"({int(_nn(lista_row.get('qtd_itens'), 0))} item(ns)) — por {_nn(lista_row.get('criado_por'), '—')}",
+                        key=f"lm_expander_{lista_id}"
                     ):
                         st.caption(f"Projeto {_nn(lista_row.get('numero_projeto'), '—')} · Criada em {pd.to_datetime(lista_row['criado_em']).strftime('%d/%m/%Y %H:%M')}")
 
@@ -9702,7 +9704,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 key=f"dl_relatorio_lm_{lista_id}"
                             )
 
-                        with st.expander("📋 Adicionar mais itens"):
+                        with st.expander("📋 Adicionar mais itens", key=f"lm_add_expander_{lista_id}"):
                             tab_colar_extra_lm, tab_manual_extra_lm = st.tabs(["📋 Colar", "✍️ Manual"])
 
                             with tab_colar_extra_lm:
@@ -9763,7 +9765,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     st.error(msg_extra)
 
                         if not df_itens_lm.empty:
-                            with st.expander("✏️ Editar / excluir item"):
+                            with st.expander("✏️ Editar / excluir item", key=f"lm_edit_expander_{lista_id}"):
                                 opcoes_item_lm = {f"{r['item']} (saldo {r['saldo']:g})": int(r['id']) for _, r in df_itens_lm.iterrows()}
                                 item_sel_label = st.selectbox("Item:", list(opcoes_item_lm.keys()), key=f"lm_item_edit_sel_{lista_id}")
                                 item_sel_id = opcoes_item_lm[item_sel_label]
@@ -9800,7 +9802,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                         df_disponiveis_lm = df_itens_lm[df_itens_lm['saldo'] > 0] if not df_itens_lm.empty else pd.DataFrame()
                         st.markdown("---")
-                        with st.expander("📦 Registrar Envio Parcial", expanded=False):
+                        with st.expander("📦 Registrar Envio Parcial", expanded=False, key=f"lm_envio_expander_{lista_id}"):
                             if df_disponiveis_lm.empty:
                                 st.caption("Nenhum item com saldo disponível pra enviar.")
                             else:
