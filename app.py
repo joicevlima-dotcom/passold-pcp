@@ -10640,7 +10640,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         tags_label.append(f"Para: {card['destinatario']}")
                     label_extra = f" — {' · '.join(tags_label)}" if tags_label else ""
 
-                    with st.expander(f"🗂️ {card['titulo']}  ·  {coluna_nome_card}{label_extra}", expanded=False):
+                    with st.expander(f"🗂️ {card['titulo']}  ·  {coluna_nome_card}{label_extra}", expanded=False, key=f"kanban_expander_{card_id}"):
                         if card.get('obra'):
                             st.caption(f"🏗️ Obra: {card['obra']}")
                         if card.get('numero_projeto'):
