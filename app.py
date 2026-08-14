@@ -9965,6 +9965,23 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     else:
                         st.caption("Nenhum anexo ainda.")
 
+            def _render_rd_grupo(df_secao, obra_col, render_item, key_prefix):
+                df_secao = df_secao.copy()
+                df_secao[obra_col] = df_secao[obra_col].fillna('Sem obra vinculada')
+                resumo = (df_secao.groupby(obra_col)
+                          .agg(qtd=('_devolvido', 'count'), pendentes=('_devolvido', lambda s: int((~s).sum())))
+                          .reset_index()
+                          .sort_values(['pendentes', 'qtd'], ascending=[False, False]))
+                for ob_row in resumo.itertuples(index=False):
+                    obra_nome_rd = getattr(ob_row, obra_col)
+                    titulo_obra_rd = f"🏗️ {obra_nome_rd} — {int(ob_row.qtd)} item(ns)"
+                    if ob_row.pendentes > 0:
+                        titulo_obra_rd += f"  🔴 {int(ob_row.pendentes)} pendente(s)"
+                    with st.expander(titulo_obra_rd, expanded=False, key=f"rd_grupo_{key_prefix}_{obra_nome_rd}"):
+                        df_obra_rd = df_secao[df_secao[obra_col] == obra_nome_rd]
+                        for _, row_grp in df_obra_rd.iterrows():
+                            render_item(row_grp)
+
             tab_rd_op, tab_rd_comp, tab_rd_ins, tab_rd_man, tab_rd_lm = st.tabs([
                 "📋 Romaneios de OP / Peças", "🧩 Romaneios de Componentes", "📦 Romaneios de Insumos", "🗒️ Romaneio Manual", "📑 Lista Mestra"
             ])
@@ -9975,11 +9992,13 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     df_rd_op['_devolvido'] = df_rd_op['id'].apply(lambda i: ('OP', int(i)) in status_rd)
                     if filtro_rd == "Pendentes":
                         df_rd_op = df_rd_op[~df_rd_op['_devolvido']]
+                    if obra_selecionada:
+                        df_rd_op = df_rd_op[df_rd_op['Obra_Vinculada'] == obra_selecionada]
                     df_rd_op = df_rd_op.sort_values('Data_Despacho', ascending=False, na_position='last')
                 if df_rd_op.empty:
                     st.info("Nenhum romaneio de OP pendente de devolução." if filtro_rd == "Pendentes" else "Nenhum romaneio de OP encontrado.")
                 else:
-                    for _, row_rd in df_rd_op.iterrows():
+                    def _render_item_rd_op(row_rd):
                         item_id_rd = int(row_rd['id'])
                         badge_rd = "🟢 Devolvido assinado" if row_rd['_devolvido'] else "🔴 Pendente"
                         with st.container(border=True):
@@ -9991,17 +10010,25 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.markdown(badge_rd)
                             _bloco_anexo_rd('OP', item_id_rd, f"op_{item_id_rd}")
 
+                    if obra_selecionada:
+                        for _, row_rd in df_rd_op.iterrows():
+                            _render_item_rd_op(row_rd)
+                    else:
+                        _render_rd_grupo(df_rd_op, 'Obra_Vinculada', _render_item_rd_op, 'op')
+
             with tab_rd_comp:
                 df_rd_comp = carregar_romaneios_componentes_emitidos()
                 if not df_rd_comp.empty:
                     df_rd_comp['_devolvido'] = df_rd_comp['item_id'].apply(lambda i: ('COMPONENTES', int(i)) in status_rd)
                     if filtro_rd == "Pendentes":
                         df_rd_comp = df_rd_comp[~df_rd_comp['_devolvido']]
+                    if obra_selecionada:
+                        df_rd_comp = df_rd_comp[df_rd_comp['obra'] == obra_selecionada]
                     df_rd_comp = df_rd_comp.sort_values('emitido_em', ascending=False)
                 if df_rd_comp.empty:
                     st.info("Nenhum romaneio de componentes pendente de devolução." if filtro_rd == "Pendentes" else "Nenhum romaneio de componentes emitido ainda.")
                 else:
-                    for _, row_rc in df_rd_comp.iterrows():
+                    def _render_item_rd_comp(row_rc):
                         item_id_rc = int(row_rc['item_id'])
                         badge_rc = "🟢 Devolvido assinado" if row_rc['_devolvido'] else "🔴 Pendente"
                         with st.container(border=True):
@@ -10013,16 +10040,24 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.markdown(badge_rc)
                             _bloco_anexo_rd('COMPONENTES', item_id_rc, f"comp_{item_id_rc}")
 
+                    if obra_selecionada:
+                        for _, row_rc in df_rd_comp.iterrows():
+                            _render_item_rd_comp(row_rc)
+                    else:
+                        _render_rd_grupo(df_rd_comp, 'obra', _render_item_rd_comp, 'comp')
+
             with tab_rd_ins:
                 df_rd_ins = carregar_saidas_insumos()
                 if not df_rd_ins.empty:
                     df_rd_ins['_devolvido'] = df_rd_ins['id'].apply(lambda i: ('INSUMO', int(i)) in status_rd)
                     if filtro_rd == "Pendentes":
                         df_rd_ins = df_rd_ins[~df_rd_ins['_devolvido']]
+                    if obra_selecionada:
+                        df_rd_ins = df_rd_ins[df_rd_ins['obra'] == obra_selecionada]
                 if df_rd_ins.empty:
                     st.info("Nenhuma saída de insumos pendente de devolução." if filtro_rd == "Pendentes" else "Nenhuma saída de insumos encontrada.")
                 else:
-                    for _, row_ri in df_rd_ins.iterrows():
+                    def _render_item_rd_ins(row_ri):
                         saida_id_rd = int(row_ri['id'])
                         badge_ri = "🟢 Devolvido assinado" if row_ri['_devolvido'] else "🔴 Pendente"
                         with st.container(border=True):
@@ -10034,16 +10069,24 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.markdown(badge_ri)
                             _bloco_anexo_rd('INSUMO', saida_id_rd, f"ins_{saida_id_rd}")
 
+                    if obra_selecionada:
+                        for _, row_ri in df_rd_ins.iterrows():
+                            _render_item_rd_ins(row_ri)
+                    else:
+                        _render_rd_grupo(df_rd_ins, 'obra', _render_item_rd_ins, 'ins')
+
             with tab_rd_man:
                 df_rd_man = carregar_romaneios_manuais()
                 if not df_rd_man.empty:
                     df_rd_man['_devolvido'] = df_rd_man['id'].apply(lambda i: ('MANUAL', int(i)) in status_rd)
                     if filtro_rd == "Pendentes":
                         df_rd_man = df_rd_man[~df_rd_man['_devolvido']]
+                    if obra_selecionada:
+                        df_rd_man = df_rd_man[df_rd_man['obra_vinculada'] == obra_selecionada]
                 if df_rd_man.empty:
                     st.info("Nenhum romaneio manual pendente de devolução." if filtro_rd == "Pendentes" else "Nenhum romaneio manual cadastrado ainda.")
                 else:
-                    for _, row_rm in df_rd_man.iterrows():
+                    def _render_item_rd_man(row_rm):
                         romaneio_id_rd = int(row_rm['id'])
                         badge_rm = "🟢 Devolvido assinado" if row_rm['_devolvido'] else "🔴 Pendente"
                         rm_terc_rd = bool(row_rm.get('terceirizado', False))
@@ -10063,17 +10106,25 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.markdown(badge_rm)
                             _bloco_anexo_rd('MANUAL', romaneio_id_rd, f"man_{romaneio_id_rd}")
 
+                    if obra_selecionada:
+                        for _, row_rm in df_rd_man.iterrows():
+                            _render_item_rd_man(row_rm)
+                    else:
+                        _render_rd_grupo(df_rd_man, 'obra_vinculada', _render_item_rd_man, 'man')
+
             with tab_rd_lm:
                 df_rd_lm = carregar_envios_lista_mestra_todos()
                 if not df_rd_lm.empty:
                     df_rd_lm['_devolvido'] = df_rd_lm['id'].apply(lambda i: ('LISTA_MESTRA', int(i)) in status_rd)
                     if filtro_rd == "Pendentes":
                         df_rd_lm = df_rd_lm[~df_rd_lm['_devolvido']]
+                    if obra_selecionada:
+                        df_rd_lm = df_rd_lm[df_rd_lm['obra'] == obra_selecionada]
                     df_rd_lm = df_rd_lm.sort_values('data_envio', ascending=False, na_position='last')
                 if df_rd_lm.empty:
                     st.info("Nenhum envio de lista mestra pendente de devolução." if filtro_rd == "Pendentes" else "Nenhum envio de lista mestra registrado ainda.")
                 else:
-                    for _, row_rlm in df_rd_lm.iterrows():
+                    def _render_item_rd_lm(row_rlm):
                         envio_id_rlm = int(row_rlm['id'])
                         badge_rlm = "🟢 Devolvido assinado" if row_rlm['_devolvido'] else "🔴 Pendente"
                         with st.container(border=True):
@@ -10084,6 +10135,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             with clm2:
                                 st.markdown(badge_rlm)
                             _bloco_anexo_rd('LISTA_MESTRA', envio_id_rlm, f"lm_{envio_id_rlm}")
+
+                    if obra_selecionada:
+                        for _, row_rlm in df_rd_lm.iterrows():
+                            _render_item_rd_lm(row_rlm)
+                    else:
+                        _render_rd_grupo(df_rd_lm, 'obra', _render_item_rd_lm, 'lm')
 
     # ==================================================
     # SISTEMA DE MEDICAO — agora 100% no banco
