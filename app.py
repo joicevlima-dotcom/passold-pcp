@@ -959,6 +959,24 @@ def inicializar_banco_de_dados():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_lote ON op_pecas(lote_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_op_pecas_obra ON op_pecas(obra)")
 
+        # Historico de envios (Total/Parcial) por lote -- permite numerar romaneios de
+        # OPs enviadas em varias partes (ver registrar_envio_op / Romaneios Devolvidos).
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS envios_op_historico (
+                id SERIAL PRIMARY KEY,
+                lote_id INTEGER REFERENCES itens_detalhado(id) ON DELETE CASCADE,
+                obra TEXT,
+                cod_lote TEXT,
+                num_op TEXT,
+                tipo_envio TEXT NOT NULL,
+                numero_sequencial INTEGER NOT NULL,
+                qtd_itens INTEGER DEFAULT 0,
+                enviado_por TEXT,
+                enviado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_envios_op_historico_lote ON envios_op_historico(lote_id)")
+
         # Orcamento de peso (kg) da frente, espelhando M2_Total_Tarefa/m2_executado — necessario
         # porque frentes de Esquadria-Vidro sao medidas em kg, nao em m2.
         cursor.execute("ALTER TABLE cronograma_macro ADD COLUMN IF NOT EXISTS Peso_Total_Tarefa REAL")
@@ -4213,6 +4231,39 @@ def carregar_pecas_lote(lote_id: int):
         liberar_conexao(conn)
     return df
 
+@st.cache_data(ttl=15)
+def carregar_envios_op_historico():
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            "SELECT * FROM envios_op_historico ORDER BY lote_id, numero_sequencial", conn
+        )
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
+def registrar_envio_op(lote_id: int, obra: str, cod_lote: str, num_op: str, tipo_envio: str, qtd_itens: int, usuario: str):
+    """Loga um envio (Total/Parcial) de OP no historico -- usado pra numerar
+    romaneios de OPs enviadas em varias partes (ver Romaneios Devolvidos)."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COALESCE(MAX(numero_sequencial),0)+1 FROM envios_op_historico WHERE lote_id=%s", (lote_id,))
+        seq = cursor.fetchone()[0]
+        cursor.execute(
+            "INSERT INTO envios_op_historico (lote_id, obra, cod_lote, num_op, tipo_envio, numero_sequencial, qtd_itens, enviado_por) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            (lote_id, obra, cod_lote, num_op, tipo_envio, seq, qtd_itens, usuario)
+        )
+        conn.commit()
+        carregar_envios_op_historico.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao registrar histórico de envio: {e}")
+    finally:
+        liberar_conexao(conn)
+
 def carregar_pecas_varios_lotes(lote_ids) -> dict:
     """Pecas de VARIOS lotes numa consulta so — versao em lote de carregar_pecas_lote.
 
@@ -4635,7 +4686,7 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
     buf.seek(0)
     return buf.getvalue()
 
-def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: str, etapa: str = '', num_volumes: int = None) -> bytes:
+def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: str, etapa: str = '', num_volumes: int = None, numero_envio: int = None) -> bytes:
     """Gera o romaneio .xlsx com as peças do lote."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -4679,6 +4730,8 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
         ("Digitado por:", str(digitado_por)),
         ("Data:", datetime.now(FUSO_BR).strftime('%d/%m/%Y')),
     ]
+    if numero_envio:
+        infos.insert(3, ("Envio Parcial nº:", str(numero_envio)))
     linha = 3
     for label, valor in infos:
         ws.cell(linha, 1, label).font = Font(name="Arial", size=11, bold=True)
@@ -6144,6 +6197,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 carregar_micro_completo.clear()
                                                 _montar_calendario_producao.clear()
                                                 enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
+                                                registrar_envio_op(
+                                                    int(row['id']), row['Obra_Vinculada'], row['Cod_Lote'], row.get('Num_OP'),
+                                                    'Total', int(_pecas_lote_check['saldo'].sum()), st.session_state.usuario_nome
+                                                )
                                                 st.session_state[f"modal_pronto_{row['id']}"] = False
                                                 st.toast(f"✅ {row['Cod_Lote']} concluido!")
                                                 st.rerun()
@@ -6254,6 +6311,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                         carregar_micro_completo.clear()
                                                         _montar_calendario_producao.clear()
                                                         enviar_para_logistica(row, limite_desp if prazo_valido(limite_desp) else pd.NaT)
+                                                        registrar_envio_op(
+                                                            int(row['id']), row['Obra_Vinculada'], row['Cod_Lote'], row.get('Num_OP'),
+                                                            'Parcial', sum(pe['qtd_enviar'] for pe in pecas_envio), st.session_state.usuario_nome
+                                                        )
                                                         st.session_state[f"modal_pronto_{row['id']}"] = False
                                                         emoji_t = "✅" if todas_zeradas else "🟠"
                                                         st.toast(f"{emoji_t} {row['Cod_Lote']} — {'Concluido!' if todas_zeradas else 'Envio parcial registrado!'}")
@@ -6779,6 +6840,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 carregar_pecas_lote.clear(); carregar_todas_pecas_obra.clear()
                                                 carregar_micro_completo.clear(); _montar_calendario_producao.clear()
                                                 enviar_para_logistica(row, limite_desp_esq if prazo_valido(limite_desp_esq) else pd.NaT)
+                                                registrar_envio_op(
+                                                    int(row['id']), row['Obra_Vinculada'], row['Cod_Lote'], row.get('Num_OP'),
+                                                    'Total', int(_pecas_lote_check_esq['saldo'].sum()), st.session_state.usuario_nome
+                                                )
                                                 st.session_state[f"esq_modal_{row['id']}"] = False
                                                 st.toast(f"✅ {row['Cod_Lote']} concluido!")
                                                 st.rerun()
@@ -6856,6 +6921,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                     carregar_pecas_lote.clear(); carregar_todas_pecas_obra.clear()
                                                     carregar_micro_completo.clear(); _montar_calendario_producao.clear()
                                                     enviar_para_logistica(row, limite_desp_esq if prazo_valido(limite_desp_esq) else pd.NaT)
+                                                    registrar_envio_op(
+                                                        int(row['id']), row['Obra_Vinculada'], row['Cod_Lote'], row.get('Num_OP'),
+                                                        'Parcial', sum(p['qtd'] for p in pecas_envio_esq), st.session_state.usuario_nome
+                                                    )
                                                     st.session_state[f"esq_modal_{row['id']}"] = False
                                                     st.toast(f"Envio parcial de {row['Cod_Lote']} registrado!"); st.rerun()
                                             with b2:
@@ -8686,12 +8755,19 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 else:
                     # Pecas de todas as OPs da fila numa consulta so (antes era 1 por OP)
                     _pecas_por_lote_log = carregar_pecas_varios_lotes(df_conc_log['id'])
+                    df_envios_hist_log = carregar_envios_op_historico()
+                    contagem_envios_hist_log = df_envios_hist_log['lote_id'].value_counts() if not df_envios_hist_log.empty else pd.Series(dtype=int)
 
                     def _render_op_pronta(row_c):
                         df_pecas_c = _pecas_por_lote_log.get(int(row_c['id']))
                         if df_pecas_c is None:
                             df_pecas_c = carregar_pecas_lote(int(row_c['id']))
                         eh_parcial_c = row_c.get('Status_Item') == 'Parcialmente Concluido'
+                        n_envios_c = int(contagem_envios_hist_log.get(int(row_c['id']), 0))
+                        numero_envio_c = (
+                            int(df_envios_hist_log[df_envios_hist_log['lote_id'] == int(row_c['id'])]['numero_sequencial'].max())
+                            if n_envios_c > 1 else None
+                        )
                         with st.container(border=True):
                             cc1, cc2, cc3 = st.columns([4, 2, 2])
                             with cc1:
@@ -8714,7 +8790,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.caption(f"{row_c['M2_Item']:.2f} m² &nbsp;|&nbsp; {int(row_c['Qtd_Caixas'])} cx &nbsp;|&nbsp; {row_c['Romaneio_Chapas']}")
                                 if not df_pecas_c.empty:
                                     if eh_parcial_c:
-                                        st.caption(f"🔩 {len(df_pecas_c)} peça(s) | Enviado: {int(df_pecas_c['qtd_enviada'].sum())} de {int(df_pecas_c['qtd_total'].sum())} un")
+                                        txt_parcial_c = f"🔩 {len(df_pecas_c)} peça(s) | Enviado: {int(df_pecas_c['qtd_enviada'].sum())} de {int(df_pecas_c['qtd_total'].sum())} un"
+                                        if numero_envio_c:
+                                            txt_parcial_c += f" · Envio nº {numero_envio_c}"
+                                        st.caption(txt_parcial_c)
                                     else:
                                         st.caption(f"🔩 {len(df_pecas_c)} peça(s) | Total: {int(df_pecas_c['qtd_total'].sum())} un")
                                 else:
@@ -8765,7 +8844,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     rom_bytes = gerar_romaneio_xlsx(
                                         row_c, df_pecas_rom_c, end_r,
                                         st.session_state.usuario_nome, etapa=etapa_c,
-                                        num_volumes=int(volumes_c) if eh_esq_log else None
+                                        num_volumes=int(volumes_c) if eh_esq_log else None,
+                                        numero_envio=numero_envio_c
                                     )
                                     sufixo_arq_c = "_PARCIAL" if eh_parcial_c else ""
                                     romaneio_baixado = st.download_button(
@@ -9987,28 +10067,63 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             ])
 
             with tab_rd_op:
-                df_rd_op = df_banco_micro[df_banco_micro['Num_OP'].notna()].copy() if not df_banco_micro.empty else pd.DataFrame()
+                df_lotes_op = df_banco_micro[df_banco_micro['Num_OP'].notna()].copy() if not df_banco_micro.empty else pd.DataFrame()
+                df_envios_op_hist = carregar_envios_op_historico()
+                contagem_envios_op = df_envios_op_hist['lote_id'].value_counts() if not df_envios_op_hist.empty else pd.Series(dtype=int)
+
+                # OP enviada de uma vez so (ou sem historico, lote antigo) vira 1 card, igual
+                # sempre foi. OP enviada em varias partes vira 1 card POR envio, numerado --
+                # so assim da pra marcar cada romaneio parcial como devolvido separadamente.
+                linhas_rd_op = []
+                for _, lote_row in df_lotes_op.iterrows():
+                    lote_id_rd = int(lote_row['id'])
+                    n_envios_lote = int(contagem_envios_op.get(lote_id_rd, 0))
+                    if n_envios_lote > 1:
+                        envios_lote_df = df_envios_op_hist[df_envios_op_hist['lote_id'] == lote_id_rd].sort_values('numero_sequencial')
+                        for _, envio_row in envios_lote_df.iterrows():
+                            linha = lote_row.to_dict()
+                            linha['_status_key'] = ('OP_ENVIO', int(envio_row['id']))
+                            linha['_tipo_card'] = 'ENVIO'
+                            linha['_numero_sequencial'] = int(envio_row['numero_sequencial'])
+                            linha['_qtd_envio'] = envio_row['qtd_itens']
+                            linha['_data_envio'] = envio_row['enviado_em']
+                            linhas_rd_op.append(linha)
+                    else:
+                        linha = lote_row.to_dict()
+                        linha['_status_key'] = ('OP', lote_id_rd)
+                        linha['_tipo_card'] = 'LOTE'
+                        linha['_data_envio'] = lote_row.get('Data_Despacho')
+                        linhas_rd_op.append(linha)
+
+                df_rd_op = pd.DataFrame(linhas_rd_op)
                 if not df_rd_op.empty:
-                    df_rd_op['_devolvido'] = df_rd_op['id'].apply(lambda i: ('OP', int(i)) in status_rd)
+                    df_rd_op['_devolvido'] = df_rd_op['_status_key'].apply(lambda k: k in status_rd)
                     if filtro_rd == "Pendentes":
                         df_rd_op = df_rd_op[~df_rd_op['_devolvido']]
                     if obra_selecionada:
                         df_rd_op = df_rd_op[df_rd_op['Obra_Vinculada'] == obra_selecionada]
-                    df_rd_op = df_rd_op.sort_values('Data_Despacho', ascending=False, na_position='last')
+                    df_rd_op = df_rd_op.sort_values('_data_envio', ascending=False, na_position='last')
                 if df_rd_op.empty:
                     st.info("Nenhum romaneio de OP pendente de devolução." if filtro_rd == "Pendentes" else "Nenhum romaneio de OP encontrado.")
                 else:
                     def _render_item_rd_op(row_rd):
-                        item_id_rd = int(row_rd['id'])
+                        tipo_origem_rd, origem_id_rd = row_rd['_status_key']
                         badge_rd = "🟢 Devolvido assinado" if row_rd['_devolvido'] else "🔴 Pendente"
                         with st.container(border=True):
                             crop1, crop2 = st.columns([4, 1])
                             with crop1:
-                                st.markdown(f"**{row_rd['Num_OP']}** — {row_rd['Obra_Vinculada']} · {row_rd.get('Cod_Lote','')}")
-                                st.caption(f"{row_rd.get('Tipo_Material','—')}")
+                                titulo_rd = f"**{row_rd['Num_OP']}** — {row_rd['Obra_Vinculada']} · {row_rd.get('Cod_Lote','')}"
+                                if row_rd['_tipo_card'] == 'ENVIO':
+                                    titulo_rd += f"  🔀 Parcial nº {int(row_rd['_numero_sequencial'])}"
+                                st.markdown(titulo_rd)
+                                if row_rd['_tipo_card'] == 'ENVIO':
+                                    data_env_rd = pd.to_datetime(row_rd['_data_envio']).strftime('%d/%m/%Y') if pd.notna(row_rd.get('_data_envio')) else '—'
+                                    st.caption(f"{row_rd.get('Tipo_Material','—')} · Envio de {int(row_rd.get('_qtd_envio') or 0)} peça(s) em {data_env_rd}")
+                                else:
+                                    st.caption(f"{row_rd.get('Tipo_Material','—')}")
                             with crop2:
                                 st.markdown(badge_rd)
-                            _bloco_anexo_rd('OP', item_id_rd, f"op_{item_id_rd}")
+                            _bloco_anexo_rd(tipo_origem_rd, origem_id_rd, f"op_{tipo_origem_rd}_{origem_id_rd}")
 
                     if obra_selecionada:
                         for _, row_rd in df_rd_op.iterrows():
