@@ -11060,12 +11060,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     # de um st.form so recalculam no submit (mesmo padrao de "Cadastrar Obra").
                     nc_obra = st.selectbox("Obra:", ["—"] + obras_disponiveis, key=f"kanban_card_obra_{quadro_atual_id}")
                     projetos_obra = sorted(df_projetos[df_projetos['Obra'] == nc_obra]['Numero_Projeto'].unique().tolist()) if nc_obra != "—" and not df_projetos.empty else []
-                    with st.form(f"kanban_form_novo_card_{quadro_atual_id}"):
+                    with st.form(f"kanban_form_novo_card_{quadro_atual_id}", clear_on_submit=True):
                         nc_coluna_nome = st.selectbox("Coluna:", df_colunas['nome'].tolist(), key=f"kanban_card_coluna_{quadro_atual_id}")
                         nc_titulo = st.text_input("Título:", key=f"kanban_card_titulo_{quadro_atual_id}")
                         nc_desc = st.text_area("Descrição:", key=f"kanban_card_desc_{quadro_atual_id}", height=68)
                         nc_projeto = st.selectbox("Projeto:", ["—"] + projetos_obra, key=f"kanban_card_projeto_{quadro_atual_id}")
-                        nc_prazo = st.date_input("Prazo:", value=None, key=f"kanban_card_prazo_{quadro_atual_id}")
+                        nc_prazo = st.date_input("Prazo:", value=None, format="DD/MM/YYYY", key=f"kanban_card_prazo_{quadro_atual_id}")
                         nc_resp = st.text_input("Solicitante:", key=f"kanban_card_resp_{quadro_atual_id}")
                         nc_dest = st.text_input("Destinatário:", key=f"kanban_card_dest_{quadro_atual_id}")
                         if st.form_submit_button("Adicionar"):
