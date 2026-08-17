@@ -1575,7 +1575,7 @@ def _kanban_bloco_baixar_anexo(anexo_id: int, alvo, col_link=None):
     """Botao de abrir/baixar 1 anexo sem puxar o conteudo do banco ate o clique (mesmo padrao de _bloco_baixar_arquivo)."""
     flag_key = f"kanban_ver_anexo_{anexo_id}"
     if not st.session_state.get(flag_key):
-        if alvo.button("⬇️", key=f"kanban_prep_anexo_{anexo_id}", help="Carregar arquivo"):
+        if alvo.button("👁️", key=f"kanban_prep_anexo_{anexo_id}", help="Carregar anexo"):
             st.session_state[flag_key] = True
         else:
             return
@@ -2964,7 +2964,7 @@ def _link_abrir_arquivo(nome: str, tipo: str, conteudo: bytes) -> str | None:
     if not mime:
         return None
     b64 = base64.b64encode(conteudo).decode('ascii')
-    return f'<a href="data:{mime};base64,{b64}" target="_blank" rel="noopener noreferrer" title="Abrir em nova aba">🔗</a>'
+    return f'<a href="data:{mime};base64,{b64}" target="_blank" rel="noopener noreferrer" title="Visualizar sem baixar">👁️</a>'
 
 def _bloco_baixar_arquivo(arq_id: int, arq_nome: str, arq_tipo: str, key_prefix: str,
                            col_link=None, col_download=None, rotulo: str = "⬇️"):
