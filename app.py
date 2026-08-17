@@ -10,6 +10,7 @@ import base64
 import io
 import zipfile
 import bcrypt
+import json
 import psycopg2
 import psycopg2.extras
 from psycopg2 import pool
@@ -1180,6 +1181,38 @@ def inicializar_banco_de_dados():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_comentarios_card ON kanban_comentarios(card_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_kanban_anexos_card ON kanban_anexos(card_id)")
 
+# ── Tabelas de Documentos (termos de envio de ferramenta/maquina etc) ──
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS documentos_emitidos (
+                id SERIAL PRIMARY KEY,
+                tipo_documento TEXT NOT NULL,
+                obra TEXT NOT NULL,
+                numero_projeto TEXT,
+                destinatario TEXT NOT NULL,
+                setor_destinatario TEXT,
+                responsavel_entrega TEXT,
+                data_envio DATE,
+                data_prevista_devolucao DATE,
+                observacoes TEXT,
+                itens_json TEXT,
+                criado_por TEXT,
+                criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS documentos_fotos (
+                id SERIAL PRIMARY KEY,
+                documento_id INTEGER REFERENCES documentos_emitidos(id) ON DELETE CASCADE,
+                nome_arquivo TEXT NOT NULL,
+                tipo_arquivo TEXT,
+                conteudo BYTEA NOT NULL,
+                enviado_por TEXT,
+                enviado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_documentos_emitidos_obra ON documentos_emitidos(obra)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_documentos_fotos_documento ON documentos_fotos(documento_id)")
+
 # ── Tabela de auditoria (nova) ──────────────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS auditoria_log (
@@ -1564,6 +1597,150 @@ def _limpar_cache_kanban():
             fn.clear()
         except Exception:
             pass
+
+# ── DOCUMENTOS (termos de envio de ferramenta/maquina, com fotos anexadas) ──
+TIPOS_DOCUMENTO = ["Termo de Envio de Ferramenta", "Termo de Envio de Máquina"]
+
+@st.cache_data(ttl=30)
+def carregar_documentos_emitidos():
+    """Lista de documentos emitidos. O xlsx nao fica salvo no banco -- e' remontado
+    sob demanda a partir dos dados estruturados (mesmo padrao dos romaneios manuais)."""
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            """SELECT id, tipo_documento, obra, numero_projeto, destinatario, setor_destinatario,
+                      responsavel_entrega, data_envio, data_prevista_devolucao, observacoes,
+                      itens_json, criado_por, criado_em
+               FROM documentos_emitidos ORDER BY criado_em DESC""",
+            conn
+        )
+    finally:
+        liberar_conexao(conn)
+
+def salvar_documento_emitido(tipo_documento: str, obra: str, numero_projeto: str, destinatario: str,
+                              setor_destinatario: str, responsavel_entrega: str, data_envio,
+                              data_prevista_devolucao, observacoes: str, itens: list, criado_por: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT INTO documentos_emitidos
+               (tipo_documento, obra, numero_projeto, destinatario, setor_destinatario, responsavel_entrega,
+                data_envio, data_prevista_devolucao, observacoes, itens_json, criado_por)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (tipo_documento, obra, numero_projeto or None, destinatario.strip(), setor_destinatario or None,
+             responsavel_entrega.strip(), data_envio, data_prevista_devolucao, (observacoes or '').strip(),
+             json.dumps(itens), criado_por)
+        )
+        documento_id = cursor.fetchone()[0]
+        conn.commit()
+        carregar_documentos_emitidos.clear()
+        return documento_id
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar documento: {e}")
+        return None
+    finally:
+        liberar_conexao(conn)
+
+def excluir_documento_emitido(documento_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM documentos_emitidos WHERE id=%s", (documento_id,))
+        conn.commit()
+        carregar_documentos_emitidos.clear()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao excluir documento: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=30)
+def carregar_documentos_fotos_todas():
+    """Fotos (sem conteudo) de TODOS os documentos numa query so -- evita 1 query por
+    documento ao montar o historico, mesmo motivo de carregar_kanban_anexos."""
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query(
+            "SELECT id, documento_id, nome_arquivo, tipo_arquivo, enviado_por, enviado_em FROM documentos_fotos ORDER BY enviado_em",
+            conn
+        )
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=60)
+def carregar_conteudo_foto_documento(foto_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT nome_arquivo, tipo_arquivo, conteudo FROM documentos_fotos WHERE id=%s", (foto_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        nome, tipo, conteudo = row
+        return (nome, tipo, bytes(conteudo))
+    except Exception:
+        return None
+    finally:
+        liberar_conexao(conn)
+
+def salvar_fotos_documento_lote(documento_id: int, arquivos: list, usuario: str) -> int:
+    """arquivos: lista de (nome, tipo, conteudo)."""
+    if not arquivos:
+        return 0
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.executemany(
+            "INSERT INTO documentos_fotos (documento_id, nome_arquivo, tipo_arquivo, conteudo, enviado_por) VALUES (%s,%s,%s,%s,%s)",
+            [(documento_id, nome, tipo, conteudo, usuario) for nome, tipo, conteudo in arquivos]
+        )
+        conn.commit()
+        carregar_documentos_fotos_todas.clear()
+        return len(arquivos)
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao salvar fotos: {e}")
+        return 0
+    finally:
+        liberar_conexao(conn)
+
+def excluir_foto_documento(foto_id: int):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM documentos_fotos WHERE id=%s", (foto_id,))
+        conn.commit()
+        carregar_documentos_fotos_todas.clear()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao excluir foto: {e}")
+        return False
+    finally:
+        liberar_conexao(conn)
+
+def _bloco_baixar_foto_documento(foto_id: int, alvo, col_link=None):
+    """Botao de abrir/baixar 1 foto sem puxar o conteudo do banco ate o clique (mesmo padrao de _kanban_bloco_baixar_anexo)."""
+    flag_key = f"doc_ver_foto_{foto_id}"
+    if not st.session_state.get(flag_key):
+        if alvo.button("⬇️", key=f"doc_prep_foto_{foto_id}", help="Carregar arquivo"):
+            st.session_state[flag_key] = True
+        else:
+            return
+    conteudo = carregar_conteudo_foto_documento(foto_id)
+    if not conteudo:
+        alvo.caption("Erro ao carregar.")
+        return
+    nome_c, tipo_c, bytes_c = conteudo
+    if col_link is not None:
+        link_abrir = _link_abrir_arquivo(nome_c, tipo_c, bytes_c)
+        if link_abrir:
+            col_link.markdown(link_abrir, unsafe_allow_html=True)
+    alvo.download_button("⬇️", data=bytes_c, file_name=nome_c, mime=tipo_c or "application/octet-stream", key=f"doc_dl_foto_{foto_id}")
 
 def _kanban_setores_lista(setores_acesso) -> list:
     """setores_acesso vem como CSV (ou None/NaN) direto da coluna do banco."""
@@ -3271,6 +3448,119 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
         [("Recebedor na Obra", True), ("Conferência Almoxarifado", False), ("Assinatura motorista", False)]
     )
     _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=4, col_data=6)
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+def gerar_termo_envio_xlsx(tipo_documento: str, numero_doc: int, obra: str, numero_projeto: str, itens: list,
+                            destinatario: str, setor_destinatario: str, responsavel_entrega: str,
+                            data_envio, data_prevista_devolucao, observacoes: str) -> bytes:
+    """Gera o termo de envio (.xlsx) -- ferramenta, maquina etc -- com o mesmo layout de
+    cabecalho/assinatura dos outros romaneios do sistema."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+    from openpyxl.cell.text import InlineFont
+    from io import BytesIO
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Termo"
+    ws.sheet_view.showGridLines = False
+    ws.page_setup.orientation = "portrait"
+
+    bd = Side(style='thin', color="000000")
+    borda = Border(left=bd, right=bd, top=bd, bottom=bd)
+    fill_cab = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    fill_sub = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+
+    ws.column_dimensions['A'].width = 6
+    ws.column_dimensions['B'].width = 34
+    ws.column_dimensions['C'].width = 20
+    ws.column_dimensions['D'].width = 14
+    ws.column_dimensions['E'].width = 14
+
+    ws.merge_cells("A1:E1")
+    _inserir_logo_cabecalho(ws, "E")
+
+    ws.merge_cells("A2:E2")
+    ws["A2"] = tipo_documento.upper()
+    ws["A2"].font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+    ws["A2"].fill = fill_cab
+    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    infos = [
+        ("Nº do Termo:", f"{int(numero_doc):06d}"),
+        ("Obra:", str(obra)),
+        ("Projeto:", str(numero_projeto or '—')),
+        ("Destinatário:", str(destinatario)),
+        ("Setor / Empresa:", str(setor_destinatario or '—')),
+        ("Responsável pela entrega:", str(responsavel_entrega or '—')),
+        ("Data de envio:", pd.to_datetime(data_envio).strftime('%d/%m/%Y') if data_envio else '—'),
+        ("Devolução prevista:", pd.to_datetime(data_prevista_devolucao).strftime('%d/%m/%Y') if data_prevista_devolucao else '—'),
+    ]
+    linha = 3
+    for label, valor in infos:
+        ws.cell(linha, 1, label).font = Font(name="Arial", size=11, bold=True)
+        ws.merge_cells(start_row=linha, start_column=2, end_row=linha, end_column=5)
+        ws.cell(linha, 2, valor).font = Font(name="Arial", size=11)
+        for c in range(1, 6):
+            ws.cell(linha, c).border = borda
+        linha += 1
+
+    linha += 1
+    titulos = ["#", "DESCRIÇÃO", "CÓD. / PATRIMÔNIO", "QUANTIDADE"]
+    for col, titulo in enumerate(titulos, 1):
+        cel = ws.cell(linha, col, titulo)
+        cel.font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        cel.fill = fill_cab
+        cel.alignment = Alignment(horizontal="center", vertical="center")
+        cel.border = borda
+    ws.cell(linha, 5).border = borda
+    ws.cell(linha, 5).fill = fill_cab
+    linha += 1
+
+    for i, item in enumerate(itens, 1):
+        dados = [i, item.get('descricao', ''), item.get('codigo', '') or '—', item.get('quantidade', 0)]
+        for col, val in enumerate(dados, 1):
+            cel = ws.cell(linha, col, val)
+            cel.font = Font(name="Arial", size=11)
+            cel.alignment = Alignment(horizontal="center", vertical="center")
+            cel.border = borda
+            if i % 2 == 0:
+                cel.fill = fill_sub
+        ws.cell(linha, 5).border = borda
+        if i % 2 == 0:
+            ws.cell(linha, 5).fill = fill_sub
+        linha += 1
+
+    linha += 1
+    if observacoes:
+        ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=5)
+        ws.cell(linha, 1, f"Observações: {observacoes}").font = Font(name="Arial", size=10, italic=True)
+        ws.cell(linha, 1).alignment = Alignment(wrap_text=True, vertical="top")
+        ws.row_dimensions[linha].height = 40
+        linha += 2
+
+    normal  = InlineFont(rFont="Arial", sz=10)
+    negrito = InlineFont(rFont="Arial", sz=10, b=True)
+    ws.merge_cells(f"A{linha}:E{linha+2}")
+    cell = ws[f"A{linha}"]
+    cell.value = CellRichText(
+        TextBlock(negrito, "Declaro "),
+        TextBlock(normal, "estar recebendo o(s) item(ns) relacionado(s) acima em "),
+        TextBlock(negrito, "perfeito estado de conservação e funcionamento"),
+        TextBlock(normal, ", comprometendo-me a devolvê-lo(s) na data prevista e a zelar pela sua guarda e uso adequado.\n"),
+        TextBlock(normal, "Em caso de perda, dano ou extravio, o(a) responsável acima poderá arcar com os custos de reparo ou reposição."),
+    )
+    cell.alignment = Alignment(wrap_text=True, vertical="top")
+    ws.row_dimensions[linha].height = 55
+    linha += 4
+
+    assinaturas = [("Responsável pela entrega", False), ("Recebedor / Destinatário", True)]
+    _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=3, col_data=4)
 
     buf = BytesIO()
     wb.save(buf)
@@ -5347,6 +5637,9 @@ GRUPOS_NAV = {
     },
     "🗂️  Kanban": {
         "Kanban": ("🗂️  Kanban", ["Master","Producao","Engenharia","Diretoria","Logistica","Almoxarifado","Medicao","PCP","Esquadria","Compras"]),
+    },
+    "📁  Documentos": {
+        "Documentos": ("📁  Documentos", ["Master","Producao","Engenharia","Diretoria","Logistica","Almoxarifado","Medicao","PCP","Esquadria","Compras"]),
     },
     "⚙️  Sistema": {
         "Configuracoes": ("⚙️  Configurações", ["Master"]),
@@ -10929,6 +11222,177 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         st.rerun()
                                     else:
                                         st.error(msg_com)
+
+    # ==================================================
+    # DOCUMENTOS — emissao de termos (ferramenta, maquina...) com fotos anexadas
+    # ==================================================
+    elif nome_aba == "Documentos":
+        with aba_objeto:
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Documentos</h2><p>Emissão e histórico de termos (ferramentas, máquinas...)</p></div><span class="page-icon">📁</span></div>', unsafe_allow_html=True)
+            st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
+
+            tab_emitir_doc, tab_hist_doc = st.tabs(["📝 Emitir Documento", "🗂️ Histórico"])
+
+            with tab_emitir_doc:
+                if "doc_itens" not in st.session_state:
+                    st.session_state.doc_itens = []
+
+                obras_doc = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
+                if not obras_doc:
+                    st.info("Nenhuma obra/projeto cadastrado ainda — cadastre em 'Cadastrar Obra'.")
+                else:
+                    doc_tipo = st.selectbox("Modelo do documento:", TIPOS_DOCUMENTO, key="doc_tipo")
+
+                    dm1, dm2 = st.columns(2)
+                    with dm1:
+                        doc_obra = st.selectbox("Obra:", obras_doc, key="doc_obra")
+                    with dm2:
+                        projetos_doc = sorted(df_projetos[df_projetos['Obra'] == doc_obra]['Numero_Projeto'].unique().tolist())
+                        doc_projeto = st.selectbox("Projeto:", projetos_doc, key="doc_projeto") if projetos_doc else None
+
+                    dd1, dd2 = st.columns(2)
+                    with dd1:
+                        doc_destinatario = st.text_input("Destinatário (quem recebe):", key="doc_destinatario", placeholder="Ex: João Silva")
+                    with dd2:
+                        doc_setor = st.text_input("Setor / Empresa do destinatário:", key="doc_setor", placeholder="Ex: Produção, ou Metalúrgica XYZ Ltda")
+
+                    dr1, dr2, dr3 = st.columns(3)
+                    with dr1:
+                        doc_responsavel = st.text_input("Responsável pela entrega:", key="doc_responsavel", value=st.session_state.usuario_nome)
+                    with dr2:
+                        doc_data_envio = st.date_input("Data de envio:", value=hoje_projeto().date(), format="DD/MM/YYYY", key="doc_data_envio")
+                    with dr3:
+                        doc_tem_devolucao = st.toggle("Tem previsão de devolução?", value=True, key="doc_tem_devolucao")
+                    doc_data_devolucao = None
+                    if doc_tem_devolucao:
+                        doc_data_devolucao = st.date_input("Devolução prevista:", value=hoje_projeto().date(), format="DD/MM/YYYY", key="doc_data_devolucao")
+
+                    st.markdown("**Adicionar item ao termo:**")
+                    di1, di2, di3 = st.columns([4, 2, 2])
+                    with di1:
+                        doc_item_desc = st.text_input("Descrição:", key="doc_item_desc", placeholder="Ex: Furadeira de impacto Bosch")
+                    with di2:
+                        doc_item_cod = st.text_input("Cód. / Patrimônio:", key="doc_item_cod", placeholder="Opcional")
+                    with di3:
+                        doc_item_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="doc_item_qtd")
+                    if st.button("➕ Adicionar item", key="btn_add_doc_item"):
+                        if not doc_item_desc.strip():
+                            st.error("Informe a descrição do item antes de adicionar.")
+                        else:
+                            st.session_state.doc_itens.append({
+                                "descricao": doc_item_desc.strip(), "codigo": doc_item_cod.strip(), "quantidade": doc_item_qtd
+                            })
+                            st.rerun()
+
+                    if st.session_state.doc_itens:
+                        st.markdown("**Itens do termo:**")
+                        for i, item in enumerate(st.session_state.doc_itens):
+                            col_desc, col_cod, col_qtd, col_rem = st.columns([4, 2, 2, 1])
+                            col_desc.write(f"{i+1}. {item['descricao']}")
+                            col_cod.write(item.get('codigo') or '—')
+                            col_qtd.write(f"{item['quantidade']:g}")
+                            with col_rem:
+                                if st.button("🗑", key=f"rem_doc_item_{i}"):
+                                    st.session_state.doc_itens.pop(i)
+                                    st.rerun()
+                    else:
+                        st.caption("Nenhum item adicionado ainda.")
+
+                    doc_observacoes = st.text_area("Observações (opcional):", key="doc_observacoes")
+                    doc_fotos = st.file_uploader("📷 Fotos (opcional):", type=["png", "jpg", "jpeg"],
+                                                  accept_multiple_files=True, key="doc_fotos_up")
+
+                    if not doc_destinatario.strip():
+                        st.warning("Informe o destinatário antes de emitir.")
+                    if st.button("💾 Emitir Documento", type="primary", key="btn_emitir_doc",
+                                 disabled=not doc_projeto or not doc_destinatario.strip() or not st.session_state.doc_itens):
+                        documento_id = salvar_documento_emitido(
+                            doc_tipo, doc_obra, doc_projeto or '', doc_destinatario, doc_setor.strip(),
+                            doc_responsavel.strip(), doc_data_envio, doc_data_devolucao, doc_observacoes,
+                            st.session_state.doc_itens, st.session_state.usuario_nome
+                        )
+                        if documento_id:
+                            if doc_fotos:
+                                prontos_doc = [(f.name, f.type or "", f.read()) for f in doc_fotos]
+                                salvar_fotos_documento_lote(documento_id, prontos_doc, st.session_state.usuario_nome)
+                            registrar_auditoria(st.session_state.usuario_nome, "DOCUMENTO_EMITIDO",
+                                f"{doc_tipo} #{documento_id} — Obra: {doc_obra} — Destinatário: {doc_destinatario}")
+                            st.session_state.doc_itens = []
+                            st.toast("Documento emitido! Baixe no Histórico.")
+                            st.rerun()
+
+            with tab_hist_doc:
+                df_docs = carregar_documentos_emitidos()
+                if df_docs.empty:
+                    st.caption("Nenhum documento emitido ainda.")
+                else:
+                    tipos_disp_doc = ["Todos"] + sorted(df_docs['tipo_documento'].dropna().unique().tolist())
+                    filtro_tipo_doc = st.selectbox("Filtrar por modelo:", tipos_disp_doc, key="doc_filtro_tipo")
+                    if filtro_tipo_doc != "Todos":
+                        df_docs = df_docs[df_docs['tipo_documento'] == filtro_tipo_doc]
+                    if obra_selecionada:
+                        df_docs = df_docs[df_docs['obra'] == obra_selecionada]
+
+                    if df_docs.empty:
+                        st.caption("Nenhum documento encontrado.")
+                    else:
+                        df_fotos_doc_todas = carregar_documentos_fotos_todas()
+
+                        def _render_documento(row_doc):
+                            doc_id = int(row_doc['id'])
+                            itens_doc = json.loads(row_doc['itens_json'] or '[]')
+                            fotos_doc = (
+                                df_fotos_doc_todas[df_fotos_doc_todas['documento_id'] == doc_id]
+                                if not df_fotos_doc_todas.empty else df_fotos_doc_todas
+                            )
+                            with st.container(border=True):
+                                c1, c2 = st.columns([4, 1])
+                                with c1:
+                                    st.markdown(f"**{row_doc['tipo_documento']}** — {row_doc['obra']} · Nº {doc_id:06d}")
+                                    st.caption(f"Destinatário: {row_doc['destinatario']} ({_nn(row_doc.get('setor_destinatario'), '—')}) · {len(itens_doc)} item(ns) · {len(fotos_doc)} foto(s)")
+                                    st.caption(f"Emitido em {pd.to_datetime(row_doc['criado_em']).strftime('%d/%m/%Y %H:%M')} por {row_doc['criado_por']}")
+                                with c2:
+                                    doc_bytes = gerar_termo_envio_xlsx(
+                                        row_doc['tipo_documento'], doc_id, row_doc['obra'], _nn(row_doc.get('numero_projeto')),
+                                        itens_doc, row_doc['destinatario'], _nn(row_doc.get('setor_destinatario')),
+                                        row_doc.get('responsavel_entrega'), row_doc.get('data_envio'), row_doc.get('data_prevista_devolucao'),
+                                        _nn(row_doc.get('observacoes'))
+                                    )
+                                    st.download_button(
+                                        "🖨️ Baixar", data=doc_bytes, file_name=f"Termo_{doc_id:06d}.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key=f"dl_doc_{doc_id}"
+                                    )
+                                if itens_doc:
+                                    st.dataframe(
+                                        pd.DataFrame(itens_doc).rename(columns={"descricao": "Descrição", "codigo": "Cód./Patrimônio", "quantidade": "Qtd"}),
+                                        hide_index=True, use_container_width=True
+                                    )
+                                if not fotos_doc.empty:
+                                    st.markdown("**📷 Fotos:**")
+                                    for _, foto_row in fotos_doc.iterrows():
+                                        cf1, cf2, cf3 = st.columns([3, 2, 1])
+                                        cf1.markdown(f"🖼️ {html_escape(foto_row['nome_arquivo'])}")
+                                        cf2.caption(f"{foto_row['enviado_por']} — {pd.to_datetime(foto_row['enviado_em']).strftime('%d/%m/%Y')}")
+                                        _bloco_baixar_foto_documento(int(foto_row['id']), cf3)
+                                if setor == "Master":
+                                    if st.button("🗑️ Excluir documento", key=f"del_doc_{doc_id}"):
+                                        excluir_documento_emitido(doc_id)
+                                        st.toast("Documento removido.")
+                                        st.rerun()
+
+                        if obra_selecionada:
+                            for _, row_doc in df_docs.sort_values('criado_em', ascending=False).iterrows():
+                                _render_documento(row_doc)
+                        else:
+                            df_docs = df_docs.copy()
+                            df_docs['obra'] = df_docs['obra'].fillna('Sem obra vinculada')
+                            resumo_doc = df_docs.groupby('obra').size().reset_index(name='qtd').sort_values('qtd', ascending=False)
+                            for i_grp, ob_row in enumerate(resumo_doc.itertuples(index=False)):
+                                with st.expander(f"🏗️ {ob_row.obra} — {int(ob_row.qtd)} documento(s)", expanded=(i_grp == 0), key=f"doc_grupo_{ob_row.obra}"):
+                                    df_obra_doc = df_docs[df_docs['obra'] == ob_row.obra].sort_values('criado_em', ascending=False)
+                                    for _, row_doc in df_obra_doc.iterrows():
+                                        _render_documento(row_doc)
 
     # ==================================================
     # CONFIGURACOES
