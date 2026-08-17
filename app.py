@@ -6255,7 +6255,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         _ids_lotes_acm = tuple(sorted(int(i) for i in lotes_sel['id']))
                         _arqs_por_lote_acm = carregar_arquivos_op_varios(_ids_lotes_acm)
                         _coms_por_lote_acm = carregar_comentarios_varios('lote_producao', _ids_lotes_acm)
-                        for _, row in lotes_sel.iterrows():
+                        def _render_lote_dia_acm(row):
                             # Parcialmente Concluido sempre pode concluir o restante
                             eh_parcial    = row.get('Status_Item', '') == 'Parcialmente Concluido'
                             pode_concluir = bool(row.get('_pode_concluir', False)) or eh_parcial
@@ -6641,6 +6641,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             st.session_state[f"modal_parada_{row['id']}"] = False
                                             st.rerun()
 
+                        if obra_tv == "Todas as obras" and lotes_sel['Obra_Vinculada'].nunique() > 1:
+                            _resumo_dia_acm = lotes_sel.groupby('Obra_Vinculada').size().reset_index(name='qtd').sort_values('qtd', ascending=False)
+                            for i_dia_acm, ob_row_acm in enumerate(_resumo_dia_acm.itertuples(index=False)):
+                                with st.expander(f"🏗️ {ob_row_acm.Obra_Vinculada} — {int(ob_row_acm.qtd)} lote(s)",
+                                                  expanded=(i_dia_acm == 0), key=f"acm_dia_grupo_{ob_row_acm.Obra_Vinculada}"):
+                                    for _, row in lotes_sel[lotes_sel['Obra_Vinculada'] == ob_row_acm.Obra_Vinculada].iterrows():
+                                        _render_lote_dia_acm(row)
+                        else:
+                            for _, row in lotes_sel.iterrows():
+                                _render_lote_dia_acm(row)
+
                 else:
                     st.info("Nenhuma OP liberada para este filtro ainda.")
             else:
@@ -6901,7 +6912,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         _ids_lotes_esq = tuple(sorted(int(i) for i in lotes_sel_esq['id']))
                         _arqs_por_lote_esq = carregar_arquivos_op_varios(_ids_lotes_esq)
                         _coms_por_lote_esq = carregar_comentarios_varios('lote_producao', _ids_lotes_esq)
-                        for _, row in lotes_sel_esq.iterrows():
+                        def _render_lote_dia_esq(row):
                             eh_parcial = row.get('Status_Item', '') == 'Parcialmente Concluido'
                             pode_concluir = bool(row.get('_pode_concluir', False)) or eh_parcial
                             atrasado = dia_sel_esq > pd.to_datetime(row['Data_Limite_Obra']).date()
@@ -7247,6 +7258,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         if st.button("Cancelar", key=f"esq_cancel_parada_{row['id']}", use_container_width=True):
                                             st.session_state[f"esq_modal_parada_{row['id']}"] = False
                                             st.rerun()
+
+                        if obra_esq == "Todas as obras" and lotes_sel_esq['Obra_Vinculada'].nunique() > 1:
+                            _resumo_dia_esq = lotes_sel_esq.groupby('Obra_Vinculada').size().reset_index(name='qtd').sort_values('qtd', ascending=False)
+                            for i_dia_esq, ob_row_esq in enumerate(_resumo_dia_esq.itertuples(index=False)):
+                                with st.expander(f"🏗️ {ob_row_esq.Obra_Vinculada} — {int(ob_row_esq.qtd)} lote(s)",
+                                                  expanded=(i_dia_esq == 0), key=f"esq_dia_grupo_{ob_row_esq.Obra_Vinculada}"):
+                                    for _, row in lotes_sel_esq[lotes_sel_esq['Obra_Vinculada'] == ob_row_esq.Obra_Vinculada].iterrows():
+                                        _render_lote_dia_esq(row)
+                        else:
+                            for _, row in lotes_sel_esq.iterrows():
+                                _render_lote_dia_esq(row)
 
                 else:
                     st.info("Nenhum lote de Esquadrias/Vidro liberado para produção.")
