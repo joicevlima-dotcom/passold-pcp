@@ -11138,8 +11138,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         tags_label.append(f"prazo {pd.Timestamp(card['prazo']).strftime('%d/%m')}")
                     if card.get('responsavel'):
                         tags_label.append(f"Solicitante: {card['responsavel']}")
-                    if card.get('destinatario'):
-                        tags_label.append(f"Para: {card['destinatario']}")
+                    if card.get('descricao'):
+                        desc_resumo = str(card['descricao']).replace('\n', ' ').strip()
+                        if len(desc_resumo) > 60:
+                            desc_resumo = desc_resumo[:60].rstrip() + "…"
+                        tags_label.append(desc_resumo)
                     label_extra = f" — {' · '.join(tags_label)}" if tags_label else ""
 
                     with st.expander(f"🗂️ {card['titulo']}  ·  {coluna_nome_card}{label_extra}", expanded=False, key=f"kanban_expander_{card_id}"):
