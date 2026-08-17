@@ -6,7 +6,6 @@ import calendar as py_calendar
 import os
 import secrets
 import time
-import base64
 import io
 import zipfile
 import bcrypt
@@ -1594,9 +1593,7 @@ def _kanban_bloco_baixar_anexo(anexo_id: int, alvo, col_link=None):
         return
     nome_c, tipo_c, bytes_c = conteudo
     if col_link is not None:
-        link_abrir = _link_abrir_arquivo(nome_c, tipo_c, bytes_c)
-        if link_abrir:
-            col_link.markdown(link_abrir, unsafe_allow_html=True)
+        _bloco_visualizar_imagem(nome_c, bytes_c, col_link, flag_key=f"kanban_{anexo_id}")
     alvo.download_button("⬇️", data=bytes_c, file_name=nome_c, mime=tipo_c or "application/octet-stream", key=f"kanban_dl_anexo_{anexo_id}")
 
 def _limpar_cache_kanban():
@@ -1746,9 +1743,7 @@ def _bloco_baixar_foto_documento(foto_id: int, alvo, col_link=None):
         return
     nome_c, tipo_c, bytes_c = conteudo
     if col_link is not None:
-        link_abrir = _link_abrir_arquivo(nome_c, tipo_c, bytes_c)
-        if link_abrir:
-            col_link.markdown(link_abrir, unsafe_allow_html=True)
+        _bloco_visualizar_imagem(nome_c, bytes_c, col_link, flag_key=f"docfoto_{foto_id}")
     alvo.download_button("⬇️", data=bytes_c, file_name=nome_c, mime=tipo_c or "application/octet-stream", key=f"doc_dl_foto_{foto_id}")
 
 def _kanban_setores_lista(setores_acesso) -> list:
@@ -2964,16 +2959,19 @@ def _montar_zip_arquivos_op(arquivos: list) -> bytes:
             zf.writestr(arq_nome, bytes(bytes_arq))
     return buffer.getvalue()
 
-def _link_abrir_arquivo(nome: str, tipo: str, conteudo: bytes) -> str | None:
-    """Link 'abrir em nova aba' (via data URI) pra tipos que o navegador consegue exibir
-    sozinho (PDF/imagem). Pra outros tipos (xlsx, dwg etc) retorna None — so da pra baixar."""
+def _bloco_visualizar_imagem(nome: str, conteudo: bytes, alvo_botao, flag_key: str):
+    """Botao 'olho' que mostra a imagem (png/jpg/jpeg) direto na tela, em vez de abrir um
+    link data: URI em aba nova -- o Chrome tem um bug conhecido de pagina em branco ao
+    abrir um data: URI grande em aba nova (so corrige com F5, confirmado pela Joice em
+    2026-08-17). Pra outros tipos (PDF, xlsx etc) nao faz nada aqui -- so da pra baixar."""
     ext = nome.rsplit('.', 1)[-1].lower() if '.' in nome else ''
-    mime_por_ext = {'pdf': 'application/pdf', 'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg'}
-    mime = mime_por_ext.get(ext)
-    if not mime:
-        return None
-    b64 = base64.b64encode(conteudo).decode('ascii')
-    return f'<a href="data:{mime};base64,{b64}" target="_blank" rel="noopener noreferrer" title="Abrir em nova aba">🔗</a>'
+    if ext not in ('png', 'jpg', 'jpeg'):
+        return
+    ver_key = f"ver_img_{flag_key}"
+    if alvo_botao.button("👁️", key=f"prep_img_{flag_key}", help="Visualizar imagem"):
+        st.session_state[ver_key] = not st.session_state.get(ver_key, False)
+    if st.session_state.get(ver_key):
+        st.image(conteudo, caption=nome, width=400)
 
 def _bloco_baixar_arquivo(arq_id: int, arq_nome: str, arq_tipo: str, key_prefix: str,
                            col_link=None, col_download=None, rotulo: str = "⬇️"):
@@ -2999,9 +2997,7 @@ def _bloco_baixar_arquivo(arq_id: int, arq_nome: str, arq_tipo: str, key_prefix:
         return
     _, _, bytes_arq = conteudo_arq
     if col_link is not None:
-        link_abrir = _link_abrir_arquivo(arq_nome, arq_tipo, bytes(bytes_arq))
-        if link_abrir:
-            col_link.markdown(link_abrir, unsafe_allow_html=True)
+        _bloco_visualizar_imagem(arq_nome, bytes(bytes_arq), col_link, flag_key=f"{key_prefix}_{arq_id}")
     alvo.download_button(
         rotulo, data=bytes(bytes_arq), file_name=arq_nome,
         mime=arq_tipo or "application/octet-stream", key=f"dl_{key_prefix}_{arq_id}"
@@ -10364,9 +10360,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             cont_rd = carregar_conteudo_arquivo_romaneio_devolvido(arq_id)
                             if cont_rd:
                                 _, _, bytes_rd = cont_rd
-                                link_abrir_rd = _link_abrir_arquivo(arq_nome, arq_tipo, bytes(bytes_rd))
-                                if link_abrir_rd:
-                                    crlink.markdown(link_abrir_rd, unsafe_allow_html=True)
+                                _bloco_visualizar_imagem(arq_nome, bytes(bytes_rd), crlink, flag_key=f"rd_{key_prefix}_{arq_id}")
                                 with crc:
                                     st.download_button(
                                         "⬇️", data=bytes(bytes_rd), file_name=arq_nome,
@@ -11414,10 +11408,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if not fotos_doc.empty:
                                     st.markdown("**📷 Fotos:**")
                                     for _, foto_row in fotos_doc.iterrows():
-                                        cf1, cf2, cf3 = st.columns([3, 2, 1])
+                                        cf1, cf2, cf3, cf4 = st.columns([3, 2, 1, 1])
                                         cf1.markdown(f"🖼️ {html_escape(foto_row['nome_arquivo'])}")
                                         cf2.caption(f"{foto_row['enviado_por']} — {pd.to_datetime(foto_row['enviado_em']).strftime('%d/%m/%Y')}")
-                                        _bloco_baixar_foto_documento(int(foto_row['id']), cf3)
+                                        _bloco_baixar_foto_documento(int(foto_row['id']), cf4, col_link=cf3)
                                 if setor == "Master":
                                     if st.button("🗑️ Excluir documento", key=f"del_doc_{doc_id}"):
                                         excluir_documento_emitido(doc_id)
