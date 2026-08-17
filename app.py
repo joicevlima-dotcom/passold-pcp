@@ -1322,6 +1322,15 @@ def _nn(valor, padrao=''):
     literalmente na tela/documento como o texto "nan"."""
     return valor if pd.notna(valor) else padrao
 
+def _uploader_key(base: str) -> str:
+    """Key do file_uploader que muda depois de salvar, pra ele voltar vazio em vez de
+    continuar mostrando os arquivos ja anexados -- o Streamlit mantem a selecao enquanto
+    a key do widget nao mudar, entao trocar a key e' o jeito de "limpar" ele."""
+    return f"{base}_v{st.session_state.get(f'_upv_{base}', 0)}"
+
+def _resetar_uploader(base: str):
+    st.session_state[f'_upv_{base}'] = st.session_state.get(f'_upv_{base}', 0) + 1
+
 def normaliza_escopo(bruto):
     """Reduz um Tipo_Escopo/Escopo bruto (pode vir sujo de dado legado) para um dos
     3 valores canonicos usados em toda a aplicacao. Mesmas palavras-chave do CASE
@@ -6403,7 +6412,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     uploaded_list_acm = st.file_uploader(
                                         "Anexar arquivo(s) (PDF, Excel, imagem):",
                                         type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg"],
-                                        key=f"upload_acm_{row['id']}",
+                                        key=_uploader_key(f"upload_acm_{row['id']}"),
                                         accept_multiple_files=True
                                     )
                                     if uploaded_list_acm:
@@ -6417,6 +6426,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 progress_acm.progress(i_acm / len(uploaded_list_acm), text=f"Processando {i_acm}/{len(uploaded_list_acm)}...")
                                             n_salvos_acm = salvar_arquivos_op_lote(int(row['id']), prontos_acm, st.session_state.usuario_nome)
                                             progress_acm.empty()
+                                            _resetar_uploader(f"upload_acm_{row['id']}")
                                             st.toast(f"✅ {n_salvos_acm} arquivo(s) salvo(s)!")
                                             st.rerun()
                                 if arqs_op:
@@ -7061,7 +7071,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     uploaded_list_esq = st.file_uploader(
                                         "Anexar arquivo(s) (PDF, Excel, imagem):",
                                         type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg"],
-                                        key=f"upload_esq_{row['id']}",
+                                        key=_uploader_key(f"upload_esq_{row['id']}"),
                                         accept_multiple_files=True
                                     )
                                     if uploaded_list_esq:
@@ -7075,6 +7085,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 progress_esq.progress(i_esq / len(uploaded_list_esq), text=f"Processando {i_esq}/{len(uploaded_list_esq)}...")
                                             n_salvos_esq = salvar_arquivos_op_lote(int(row['id']), prontos_esq, st.session_state.usuario_nome)
                                             progress_esq.empty()
+                                            _resetar_uploader(f"upload_esq_{row['id']}")
                                             st.toast(f"✅ {n_salvos_esq} arquivo(s) salvo(s)!")
                                             st.rerun()
                                 if arqs_esq:
@@ -7916,7 +7927,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 uploaded_list = st.file_uploader(
                                     "Anexar arquivo(s) (PDF, Excel, imagem):",
                                     type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg"],
-                                    key=f"upload_arq_{lote_id}",
+                                    key=_uploader_key(f"upload_arq_{lote_id}"),
                                     accept_multiple_files=True
                                 )
                                 if uploaded_list:
@@ -7929,6 +7940,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             progress_op.progress(i_op / len(uploaded_list), text=f"Processando {i_op}/{len(uploaded_list)}...")
                                         n_salvos = salvar_arquivos_op_lote(lote_id, prontos_op, st.session_state.usuario_nome)
                                         progress_op.empty()
+                                        _resetar_uploader(f"upload_arq_{lote_id}")
                                         st.toast(f"✅ {n_salvos} arquivo(s) salvo(s)!")
                                         st.rerun()
 
@@ -10324,7 +10336,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 with st.expander(f"📎 Anexos ({len(arqs_rd)})", expanded=False):
                     up_rd_list = st.file_uploader(
                         "Anexar romaneio(s) assinado(s) (foto ou PDF):",
-                        type=["pdf", "png", "jpg", "jpeg"], key=f"rd_up_{key_prefix}",
+                        type=["pdf", "png", "jpg", "jpeg"], key=_uploader_key(f"rd_up_{key_prefix}"),
                         accept_multiple_files=True
                     )
                     if up_rd_list:
@@ -10340,6 +10352,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     registrar_auditoria(st.session_state.usuario_nome, "ROMANEIO_DEVOLVIDO",
                                         f"Tipo: {tipo_origem} | ID: {origem_id} | Arquivo: {up_rd.name}")
                             if n_ok_rd:
+                                _resetar_uploader(f"rd_up_{key_prefix}")
                                 st.toast(f"✅ {n_ok_rd} romaneio(s) devolvido(s) anexado(s)!")
                                 st.rerun()
                     if arqs_rd:
@@ -11158,13 +11171,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             uploaded_kanban = st.file_uploader(
                                 "Anexar arquivo(s) — RC física, solicitação etc.:",
                                 type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "doc", "docx"],
-                                key=f"kanban_upload_{card_id}", accept_multiple_files=True
+                                key=_uploader_key(f"kanban_upload_{card_id}"), accept_multiple_files=True
                             )
                             if uploaded_kanban:
                                 if st.button(f"💾 Salvar {len(uploaded_kanban)} arquivo(s)", key=f"kanban_btn_salvar_anexo_{card_id}"):
                                     prontos_kanban = [(f.name, f.type or "", f.read()) for f in uploaded_kanban]
                                     n_salvos_kanban = salvar_anexos_kanban_lote(card_id, prontos_kanban, st.session_state.usuario_nome)
                                     _limpar_cache_kanban()
+                                    _resetar_uploader(f"kanban_upload_{card_id}")
                                     registrar_auditoria(st.session_state.usuario_nome, "KANBAN_ANEXAR_ARQUIVO",
                                         f"Quadro: {quadro_row['nome']} | {card['titulo']} | {n_salvos_kanban} arquivo(s)")
                                     st.toast(f"✅ {n_salvos_kanban} arquivo(s) salvo(s)!")
@@ -11328,7 +11342,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
                     doc_observacoes = st.text_area("Observações (opcional):", key="doc_observacoes")
                     doc_fotos = st.file_uploader("📷 Fotos (opcional):", type=["png", "jpg", "jpeg"],
-                                                  accept_multiple_files=True, key="doc_fotos_up")
+                                                  accept_multiple_files=True, key=_uploader_key("doc_fotos_up"))
 
                     if not doc_destinatario.strip():
                         st.warning("Informe o destinatário antes de emitir.")
@@ -11346,6 +11360,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             registrar_auditoria(st.session_state.usuario_nome, "DOCUMENTO_EMITIDO",
                                 f"{doc_tipo} #{documento_id} — Obra: {doc_obra} — Destinatário: {doc_destinatario}")
                             st.session_state.doc_itens = []
+                            _resetar_uploader("doc_fotos_up")
                             st.toast("Documento emitido! Baixe no Histórico.")
                             st.rerun()
 
