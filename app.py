@@ -6146,7 +6146,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             obras_tv = ["Todas as obras"] + (
                 list(df_banco_micro['Obra_Vinculada'].dropna().unique()) if not df_banco_micro.empty else []
             )
-            obra_tv = st.selectbox("Filtrar por obra:", obras_tv, key="sb_obra_tv")
+            # O filtro em si fica mais abaixo, perto da lista de lotes do dia -- aqui so
+            # le o valor ja salvo (mesmo padrao usado pro filtro global de obra da sidebar).
+            obra_tv = st.session_state.get("sb_obra_tv", "Todas as obras")
 
             df_prev = df_banco_micro[df_banco_micro['Escopo'] == 'ACM'].copy() if not df_banco_micro.empty else pd.DataFrame()
             if obra_tv != "Todas as obras" and not df_prev.empty:
@@ -6238,6 +6240,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     if "dia_clicado_tv" not in st.session_state:
                         st.session_state.dia_clicado_tv = hoje_projeto().date()
                     dia_sel   = st.session_state.dia_clicado_tv
+                    obra_tv = st.selectbox("Filtrar por obra:", obras_tv, key="sb_obra_tv")
                     st.subheader(f"Lotes em producao — {dia_sel.strftime('%d/%m/%Y')}")
                     lotes_sel = (
                         df_exp[df_exp['_dia'] == dia_sel].drop_duplicates(subset=['id'])
@@ -6808,7 +6811,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             obras_esq = ["Todas as obras"] + (
                 list(df_banco_micro['Obra_Vinculada'].dropna().unique()) if not df_banco_micro.empty else []
             )
-            obra_esq = st.selectbox("Filtrar por obra:", obras_esq, key="sb_obra_esq")
+            # O filtro em si fica mais abaixo, perto da lista de lotes do dia -- aqui so
+            # le o valor ja salvo (mesmo padrao usado pro filtro global de obra da sidebar).
+            obra_esq = st.session_state.get("sb_obra_esq", "Todas as obras")
 
             df_prev_esq = df_banco_micro[df_banco_micro['Escopo'] == 'Esquadria-Vidro'].copy() if not df_banco_micro.empty else pd.DataFrame()
             if not df_prev_esq.empty:
@@ -6896,6 +6901,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     if "esq_dia_clicado" not in st.session_state:
                         st.session_state.esq_dia_clicado = hoje_projeto().date()
                     dia_sel_esq = st.session_state.esq_dia_clicado
+                    obra_esq = st.selectbox("Filtrar por obra:", obras_esq, key="sb_obra_esq")
                     st.subheader(f"Lotes em producao — {dia_sel_esq.strftime('%d/%m/%Y')}")
                     lotes_sel_esq = df_exp_esq[df_exp_esq['_dia'] == dia_sel_esq].drop_duplicates(subset=['id'])
 
