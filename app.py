@@ -12205,6 +12205,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-08-18", "Kanban ganha níveis de prioridade (Urgente/Alto/Médio/Baixo) nos quadros do Departamento Técnico ACM e Esquadrias, com ordenação automática por prioridade."),
                 ("2026-08-18", "Kanban ganha filtro por número da RC; campo de novo cartão vira \"Número da RC\" no quadro Compras."),
                 ("2026-08-17", "Novo módulo Documentos, pra emitir termo de entrega de ferramenta/máquina com foto anexada."),
                 ("2026-08-17", "Painel de Produção (ACM/Esquadrias): lista de lotes do dia passa a ser agrupada por obra."),
@@ -12522,6 +12523,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
 **Regras importantes:**
 - No quadro chamado exatamente "Compras", o campo de título vira "Número da RC" e só aceita dígitos — o sistema salva como "RC 1234" automaticamente.
+- Nos quadros "Departamento Tecnico - ACM" e "Departamento Tecnico - Esquadrias", o cartão ganha um campo "Prioridade:" (🔴 Urgente / 🟠 Alto / 🟡 Médio / 🔵 Baixo), editável a qualquer momento dentro do cartão — e a lista passa a ordenar pela prioridade (mais urgente no topo) antes da data de criação.
 - O menu "Mover para:" nunca mostra a coluna onde o cartão já está — por isso, se o cartão já está em "Acompanhamento Entregas", por exemplo, essa opção não aparece na lista.
 - Histórico de movimentações do cartão só aparece pra Master; excluir cartão também é só Master.
 - Master pode restringir quais setores veem cada quadro, em "🔒 Quem pode ver este quadro".
