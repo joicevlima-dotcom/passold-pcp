@@ -12451,7 +12451,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 ]),
                 ("🗂️ Kanban", [
                     ("kanban", "🗂️ Kanban", """
-**Quem acessa:** Todos os setores — o setor "Compras" só visualiza, move cartão de coluna e comenta (não cria quadro/cartão, não mexe em coluna, não anexa arquivo).
+**Quem acessa:** Todos os setores.
 
 **Para que serve:** Quadros de acompanhamento por etapas — Compras, Projetos ou qualquer outro fluxo que o setor quiser montar.
 
