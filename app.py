@@ -1143,6 +1143,7 @@ def inicializar_banco_de_dados():
         """)
         cursor.execute("ALTER TABLE kanban_cards ADD COLUMN IF NOT EXISTS prazo DATE")
         cursor.execute("ALTER TABLE kanban_cards ADD COLUMN IF NOT EXISTS destinatario TEXT")
+        cursor.execute("ALTER TABLE kanban_cards ADD COLUMN IF NOT EXISTS prioridade TEXT")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS kanban_historico (
                 id SERIAL PRIMARY KEY,
@@ -1943,16 +1944,16 @@ def excluir_coluna(coluna_id: int):
         liberar_conexao(conn)
 
 def criar_card(quadro_id: int, coluna_id: int, titulo: str, descricao: str, obra: str,
-               numero_projeto: str, responsavel: str, destinatario: str, prazo, criado_por: str):
+               numero_projeto: str, responsavel: str, destinatario: str, prazo, criado_por: str, prioridade: str = None):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute(
             """INSERT INTO kanban_cards
-               (quadro_id, coluna_id, titulo, descricao, obra, numero_projeto, responsavel, destinatario, prazo, criado_por)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+               (quadro_id, coluna_id, titulo, descricao, obra, numero_projeto, responsavel, destinatario, prazo, criado_por, prioridade)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (quadro_id, coluna_id, titulo.strip(), (descricao or "").strip(),
-             obra or None, numero_projeto or None, (responsavel or "").strip(), (destinatario or "").strip(), prazo, criado_por)
+             obra or None, numero_projeto or None, (responsavel or "").strip(), (destinatario or "").strip(), prazo, criado_por, prioridade)
         )
         conn.commit()
         return True, ""
@@ -1992,6 +1993,19 @@ def mover_card(card_id: int, coluna_atual_nome: str, nova_coluna_id: int, nova_c
     except Exception as e:
         conn.rollback()
         return False, f"Erro ao mover cartão: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def atualizar_prioridade_card(card_id: int, prioridade: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE kanban_cards SET prioridade=%s, atualizado_em=NOW() WHERE id=%s", (prioridade, card_id))
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao atualizar prioridade: {e}"
     finally:
         liberar_conexao(conn)
 
@@ -10856,6 +10870,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             # comenta -- nao cria quadro/cartao, nao mexe em coluna, nao anexa arquivo.
             pode_editar_kanban = setor != "Compras"
 
+            # Niveis de prioridade -- so usados nos quadros do Departamento Tecnico (ACM/Esquadrias).
+            _KANBAN_PRIORIDADES = [("Urgente", "🔴"), ("Alto", "🟠"), ("Médio", "🟡"), ("Baixo", "🔵")]
+            _KANBAN_PRIORIDADE_EMOJI = dict(_KANBAN_PRIORIDADES)
+            _KANBAN_PRIORIDADE_RANK = {nome: i for i, (nome, _) in enumerate(_KANBAN_PRIORIDADES)}
+            _NOMES_QUADROS_PRIORIDADE = {"departamento tecnico - acm", "departamento tecnico - esquadrias"}
+
             df_quadros = carregar_kanban_quadros()
             if df_quadros.empty:
                 df_quadros_visiveis = df_quadros
@@ -10913,6 +10933,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             quadro_atual_id = int(st.session_state.kanban_quadro_atual)
             quadro_row = df_quadros_visiveis[df_quadros_visiveis['id'] == quadro_atual_id].iloc[0]
             eh_quadro_compras = quadro_row['nome'].strip().lower() == "compras"
+            eh_quadro_prioridade = quadro_row['nome'].strip().lower().replace("técnico", "tecnico") in _NOMES_QUADROS_PRIORIDADE
 
             if st.button("← Voltar aos quadros", key="kanban_voltar"):
                 st.session_state.kanban_quadro_atual = None
@@ -11077,6 +11098,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             nc_titulo = st.text_input("Número da RC:", key=f"kanban_card_titulo_{quadro_atual_id}", placeholder="Ex: 3092")
                         else:
                             nc_titulo = st.text_input("Título:", key=f"kanban_card_titulo_{quadro_atual_id}")
+                        if eh_quadro_prioridade:
+                            nc_prioridade = st.selectbox(
+                                "Prioridade:", [nome for nome, _ in _KANBAN_PRIORIDADES], index=2,
+                                format_func=lambda p: f"{_KANBAN_PRIORIDADE_EMOJI[p]} {p.upper()}",
+                                key=f"kanban_card_prioridade_{quadro_atual_id}"
+                            )
+                        else:
+                            nc_prioridade = None
                         nc_desc = st.text_area("Descrição:", key=f"kanban_card_desc_{quadro_atual_id}", height=68)
                         nc_projeto = st.selectbox("Projeto:", ["—"] + projetos_obra, key=f"kanban_card_projeto_{quadro_atual_id}")
                         nc_prazo = st.date_input("Prazo:", value=None, format="DD/MM/YYYY", key=f"kanban_card_prazo_{quadro_atual_id}")
@@ -11106,7 +11135,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     quadro_atual_id, nc_coluna_id, nc_titulo_final, nc_desc,
                                     nc_obra if nc_obra != "—" else None,
                                     nc_projeto if nc_projeto != "—" else None,
-                                    nc_resp, nc_dest, nc_prazo, st.session_state.usuario_nome
+                                    nc_resp, nc_dest, nc_prazo, st.session_state.usuario_nome, nc_prioridade
                                 )
                                 if ok_c:
                                     _limpar_cache_kanban()
@@ -11141,11 +11170,19 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             if df_cards_filtrado.empty:
                 st.caption("Nenhum cartão aqui.")
             else:
-                for _, card in df_cards_filtrado.sort_values('criado_em').iterrows():
+                if eh_quadro_prioridade:
+                    df_cards_filtrado = df_cards_filtrado.copy()
+                    df_cards_filtrado['_prio_rank'] = df_cards_filtrado['prioridade'].map(_KANBAN_PRIORIDADE_RANK).fillna(len(_KANBAN_PRIORIDADES))
+                    df_cards_ordenado = df_cards_filtrado.sort_values(['_prio_rank', 'criado_em'])
+                else:
+                    df_cards_ordenado = df_cards_filtrado.sort_values('criado_em')
+                for _, card in df_cards_ordenado.iterrows():
                     card_id = int(card['id'])
                     coluna_id = int(card['coluna_id'])
                     coluna_nome_card = mapa_coluna_nome.get(coluna_id, "—")
                     tags_label = []
+                    if eh_quadro_prioridade and card.get('prioridade'):
+                        tags_label.append(f"{_KANBAN_PRIORIDADE_EMOJI.get(card['prioridade'], '')} {card['prioridade'].upper()}")
                     if card.get('obra'):
                         obra_txt = str(card['obra'])
                         if card.get('numero_projeto'):
@@ -11163,6 +11200,27 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     label_extra = f" — {' · '.join(tags_label)}" if tags_label else ""
 
                     with st.expander(f"🗂️ {card['titulo']}  ·  {coluna_nome_card}{label_extra}", expanded=False, key=f"kanban_expander_{card_id}"):
+                        if eh_quadro_prioridade:
+                            prio_atual_card = card.get('prioridade') if card.get('prioridade') in _KANBAN_PRIORIDADE_RANK else "Médio"
+                            col_prio1, col_prio2 = st.columns([3, 1])
+                            nova_prio_sel = col_prio1.selectbox(
+                                "Prioridade:", [nome for nome, _ in _KANBAN_PRIORIDADES],
+                                index=_KANBAN_PRIORIDADE_RANK[prio_atual_card],
+                                format_func=lambda p: f"{_KANBAN_PRIORIDADE_EMOJI[p]} {p.upper()}",
+                                key=f"kanban_prioridade_sel_{card_id}"
+                            )
+                            with col_prio2:
+                                st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+                                if st.button("💾 Salvar", key=f"kanban_prioridade_btn_{card_id}"):
+                                    ok_p, msg_p = atualizar_prioridade_card(card_id, nova_prio_sel)
+                                    if ok_p:
+                                        _limpar_cache_kanban()
+                                        registrar_auditoria(st.session_state.usuario_nome, "KANBAN_ALTERAR_PRIORIDADE",
+                                            f"Quadro: {quadro_row['nome']} | {card['titulo']}: {card.get('prioridade') or '—'} → {nova_prio_sel}")
+                                        st.toast("Prioridade atualizada!")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg_p)
                         if card.get('obra'):
                             st.caption(f"🏗️ Obra: {card['obra']}")
                         if card.get('numero_projeto'):
