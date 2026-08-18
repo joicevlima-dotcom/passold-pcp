@@ -5649,6 +5649,9 @@ GRUPOS_NAV = {
     "⚙️  Sistema": {
         "Configuracoes": ("⚙️  Configurações", ["Master"]),
     },
+    "❓  Ajuda": {
+        "Manual": ("📖  Manual do Sistema", ["Master","Producao","Engenharia","Diretoria","Logistica","Almoxarifado","Medicao","PCP","Esquadria","Compras"]),
+    },
 }
 
 # ── Constrói lista de páginas disponíveis para este setor ────────────────────
@@ -12132,4 +12135,380 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     f"{escopo_prod} — {row_p['semana_label']}")
                                 st.toast("Lançamento excluído.")
                                 st.rerun()
+
+    # ==================================================
+    # MANUAL DO SISTEMA
+    # ==================================================
+    # Pra manter atualizado: quando uma tela mudar de forma relevante pro usuario,
+    # ajuste o topico correspondente abaixo e adicione uma linha nova no topo de
+    # MANUAL_CHANGELOG (formato "AAAA-MM-DD", "texto curto").
+    elif nome_aba == "Manual":
+        with aba_objeto:
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
+
+            MANUAL_CHANGELOG = [
+                ("2026-08-18", "Kanban ganha filtro por número da RC; campo de novo cartão vira \"Número da RC\" no quadro Compras."),
+                ("2026-08-17", "Novo módulo Documentos, pra emitir termo de entrega de ferramenta/máquina com foto anexada."),
+                ("2026-08-17", "Painel de Produção (ACM/Esquadrias): lista de lotes do dia passa a ser agrupada por obra."),
+                ("2026-08-17", "Kanban: anexos podem ser visualizados na tela sem precisar baixar; uploader de arquivo limpa sozinho depois de salvar em todo o sistema."),
+                ("2026-08-14", "Romaneios Devolvidos: as 5 abas passam a ser agrupadas por obra."),
+                ("2026-08-14", "Numeração de romaneios quando uma OP é enviada em várias partes (envio parcial)."),
+                ("2026-08-13", "Corrigido bug em que cartões/expanders fechavam sozinhos ao clicar em algo dentro deles."),
+                ("2026-08-12", "Novo módulo Kanban: quadros por setor (Compras, Projetos etc.), com anexos, prazo, comentários, histórico e relatório em Excel."),
+                ("2026-08-11", "Lista Mestra ganha modo \"Manual\" pra incluir vários itens de uma vez numa lista existente."),
+                ("2026-08-10", "Painéis TV (ACM/Esquadrias) atualizam sozinhos automaticamente a cada 30s; Logística reorganizada e agrupada por obra."),
+                ("2026-08-06", "ACM: sugestão automática da dificuldade da semana com base nos itens concluídos no período."),
+                ("2026-08-05", "Anexos de OP passam a carregar sob demanda (mais rápido); botão pra baixar todos os anexos de uma OP em .zip."),
+                ("2026-08-04", "Dashboard reorganizado: ranking clicável de OPs por obra e aviso de \"EM PARADA\" nos Painéis TV."),
+                ("2026-07-31", "Reverter Conclusão de OP passa a funcionar mesmo depois do despacho confirmado na Logística."),
+                ("2026-07-24", "Botão \"Reverter Conclusão\" pra desfazer OP finalizada por engano; meta de produtividade semanal passa a ser ponderada pela dificuldade do material."),
+                ("2026-07-20", "Lista Mestra ganha aba em Romaneios Devolvidos; relatório de envios por item."),
+            ]
+            with st.expander("🕘 Últimas atualizações do sistema", expanded=False):
+                for data_at, texto_at in MANUAL_CHANGELOG:
+                    st.markdown(f"**{data_at}** — {texto_at}")
+
+            st.markdown("---")
+            st.caption("Clique num tópico abaixo pra ver como aquela tela funciona.")
+
+            MANUAL_CONTEUDO = [
+                ("🏠 Visão Geral", [
+                    ("dashboard", "🏠 Dashboard", """
+**Quem acessa:** Todos os setores — é a página inicial do sistema.
+
+**Para que serve:** Resumo geral da operação em tempo real: quantas OPs estão pendentes, liberadas, concluídas, quantos lotes estão com prazo vencido e quantas obras ativas.
+
+**Passo a passo:**
+- Ao entrar no sistema, o Dashboard já abre com 5 cartões no topo: OPs aguardando liberação, liberadas em produção, concluídas, lotes com prazo vencido e obras ativas.
+- Se houver algo crítico, aparece a faixa "🚨 Alertas do Sistema" (lotes atrasados, OPs aguardando liberação); se estiver tudo em dia, aparece "✅ Tudo em ordem!".
+- Do lado esquerdo, "Status dos Lotes" mostra a barra de proporção de cada status.
+- Do lado direito, "OPs por Obra" lista as obras por quantidade de OPs — clique na seta "▸" ao lado de uma obra pra abrir o detalhe (Em produção x Concluído). Clique de novo pra fechar.
+
+**Regras importantes:**
+- Lotes marcados como "Em Parada" não entram na contagem de atrasados — o motivo da parada já explica o atraso.
+- "OPs por Obra" considera só os últimos 90 dias.
+"""),
+                ]),
+                ("🏭 Produção", [
+                    ("painel_acm", "📋 Painel da Produção — ACM", """
+**Quem acessa:** Master, Produção, Diretoria, Engenharia, PCP.
+
+**Para que serve:** Acompanhar em tempo real os lotes/OPs de ACM liberados pra fábrica, registrar parada, editar dados do lote e dar baixa quando as peças ficam prontas.
+
+**Passo a passo:**
+1. O expander "📋 Previsão de Entrada em Produção" mostra lotes planejados no Vincular Datas que ainda não foram liberados oficialmente — é só acompanhamento, agrupado por semana.
+2. Abaixo, o "Calendário de Produção" mostra só os lotes já liberados. Navegue entre meses com "Mes Anterior" / "Proximo Mes".
+3. Clique num dia com lotes no calendário pra ver os detalhes abaixo. Use "Filtrar por obra:" se quiser ver só uma obra.
+4. Cada lote aparece como um card com status (No prazo / Atrasado / Em parada / Envio parcial / Última semana). Produção e Master têm botões extras: "⏸ Parada" (registrar motivo), "▶ Retomar" e "✏️ Editar" (corrigir caixas, m², peso, datas).
+5. Quando o lote chega na última semana antes do prazo (ou já está em envio parcial), aparece o botão "✅ Pronto" — escolha "Envio Total" ou "Envio Parcial" (informando quantas unidades de cada peça estão prontas).
+6. Use o expander de anexos pra guardar arquivos do lote, e o bloco de comentários pra deixar recados.
+
+**Regras importantes:**
+- Só é possível marcar "Pronto" na última semana antes do prazo, ou se o lote já estiver em envio parcial.
+- Num envio parcial, o lote só vira "Concluído" quando TODAS as peças (não só as do envio atual) tiverem saldo zerado — senão fica "Parcialmente Concluído".
+- Se o lote está vinculado a uma frente do cronograma, a obra/projeto não pode ser trocada por aqui — precisa ser feito em "Vincular Datas".
+- Anexar arquivo é liberado pra Master, PCP, Engenharia e Produção; excluir anexo é só Master/PCP.
+"""),
+                    ("tv_acm", "📺 Painel TV — ACM", """
+**Quem acessa:** Master, Produção, Diretoria, Medição, PCP.
+
+**Para que serve:** Painel de leitura pensado pra ficar numa TV do chão de fábrica — mostra os lotes de ACM em 3 colunas (Em Produção, Pendente, Concluído) e atualiza sozinho a cada 30 segundos.
+
+**Passo a passo:**
+- É só abrir e deixar na tela — atualiza sozinho, sem precisar recarregar.
+- Os cards mostram a urgência por cor: vencido, urgente/crítico, atenção, no prazo.
+- Se o lote tem anexos, o expander "📂 Ver arquivos" permite baixar sem sair da tela.
+
+**Regras importantes:**
+- Não tem nenhuma ação de edição aqui — é só visualização.
+- Crítico = até 3 dias pro prazo; atenção = até 7 dias.
+- Lotes em parada mostram a tag "⛔ EM PARADA — {motivo}".
+"""),
+                    ("painel_esq", "📋 Painel da Produção — Esquadrias", """
+**Quem acessa:** Master, Esquadria, Produção, Diretoria, Engenharia, PCP.
+
+**Para que serve:** O mesmo que o Painel ACM, mas para lotes de Esquadria/Vidro — acompanhamento, parada, edição e baixa das peças, agora em unidades e kg (em vez de caixas e m²).
+
+**Passo a passo:** Igual ao Painel ACM (previsão → calendário → clicar no dia → agir sobre o lote), com duas diferenças:
+- O expander de anexos tem um botão extra "📦 Gerar ZIP" pra baixar todos os arquivos do lote de uma vez.
+- No "Envio Parcial", o botão de confirmar só libera depois de marcar pelo menos uma peça (no Painel ACM, clicar sem marcar nada mostra um erro em vez de já vir bloqueado).
+
+**Regras importantes:**
+- Mesma regra de "última semana" ou "já em parcial" pra liberar o botão "Pronto".
+- Mesma regra de que "Parcialmente Concluído" só vira "Concluído" quando todas as peças do lote (não só as do envio atual) zeram o saldo.
+- Restrição de setor idêntica ao Painel ACM (anexar: Master/PCP/Engenharia/Produção; excluir anexo: Master/PCP; ações de produção: Produção/Master).
+"""),
+                    ("tv_esq", "📺 Painel TV — Esquadrias", """
+**Quem acessa:** Master, Esquadria, Produção, Diretoria, Medição, PCP.
+
+**Para que serve:** Mesma ideia do Painel TV — ACM, só que pra lotes de Esquadria/Vidro (mostra peso em kg em vez de m²).
+
+**Passo a passo:** Igual ao TV — ACM: abre, atualiza sozinho a cada 30s, dá pra abrir "📂 Ver arquivos" em cada card.
+
+**Regras importantes:**
+- Os limiares de urgência são um pouco diferentes do TV — ACM: aqui "atenção" vale até 5 dias (no ACM é até 7), e o crítico usa a mesma cor vermelha do vencido.
+"""),
+                    ("liberar_ops", "🔓 Liberar OPs da Semana", """
+**Quem acessa:** Master, PCP.
+
+**Para que serve:** É a tela central de gestão de OPs — cadastrar lotes avulsos sem frente vinculada (ancoragem, corte de perfil etc.), lançar peças/romaneio de uma OP liberada, gerar a ficha da OP em Excel, cadastrar a lista de componentes de uma OP e liberar os lotes pendentes pra fábrica.
+
+**Passo a passo:**
+1. "➕ Liberação de OP" — pra materiais de apoio (ancoragem, prisília, corte de perfil): escolha Obra, Projeto e Tipo de Escopo, adicione os itens (descrição + quantidade) e clique "💾 Cadastrar Lote". Ele entra como Pendente.
+2. "📋 Lotes Pendentes" — lista o que está aguardando liberação; clique "✅ Liberar esta OP" pra gerar o número da OP e mandar pra fábrica.
+3. "✏️ Lançar Peças da OP" — escolha a OP liberada, confira o saldo da etapa vinculada, e lance as peças colando o romaneio ("📋 Colar Romaneio") ou digitando manualmente ("✏️ Manual"). Marque o status dos componentes (Aguardando Projetista / Componentes OK).
+4. No mesmo card, use "📄 Gerar Ordem de Produção" pra emitir a ficha da OP em Excel, e a seção de anexos pra guardar arquivos.
+5. "📦 Componentes por OP" — cadastre a lista de componentes necessários de cada OP (manual ou colando romaneio).
+
+**Regras importantes:**
+- Uma OP concluída fica somente-leitura; só Master vê o botão "↩️ Reverter Conclusão" pra desfazer uma conclusão feita por engano.
+- Dá pra tirar 2ª via de uma OP já concluída, ligando o toggle "Incluir OPs concluídas".
+- Excluir todos os componentes de uma OP pede confirmação em duas etapas.
+"""),
+                ]),
+                ("📐 Engenharia", [
+                    ("painel_eng", "📐 Painel de Engenharia", """
+**Quem acessa:** Master, Engenharia.
+
+**Para que serve:** Acompanhar prazo e status técnico de cada frente (Aguardando Medição In Loco → Medição Realizada → Projetos em Revisão → Projetos Liberados pro PCP → Arquivado) e gerenciar pedidos de mudança de prazo.
+
+**Passo a passo:**
+1. O expander "Frentes Críticas" já abre mostrando o que está vencido ou com 7 dias ou menos pro prazo — mude o status ali mesmo, no seletor + botão "Salvar".
+2. "Todas as Frentes" lista tudo, com filtro por Status e por Situação (Todas/Críticas/Liberadas).
+3. "Solicitações de Prazo": Engenharia ou Master pode pedir um novo prazo pra uma frente, com justificativa; Master aprova ou rejeita no mesmo expander.
+4. "Carga da Fábrica por Semana" mostra quanto já está liberado pra produção, por semana e por obra.
+
+**Regras importantes:**
+- Frentes cadastradas sem detalhamento (só projeto/escopo, sem EDT detalhado) não aparecem aqui — não há o que a Engenharia controlar nelas.
+- Só Engenharia/Master pedem prazo novo; só Master aprova ou rejeita.
+"""),
+                    ("visao_macro", "🗺️ Visão Macro", """
+**Quem acessa:** Master, Diretoria, Medição.
+
+**Para que serve:** Painel executivo consolidado — metragem total, número de frentes, prazo mais distante, carga semanal (Previsão / Em Produção / Concluídos) e um Gantt de ocupação da fábrica.
+
+**Passo a passo:**
+- Selecione a obra no filtro do menu lateral (ou deixe "Todas as Obras").
+- Cada bloco de carga semanal (Previsão, Em Produção, Concluídos) tem seu próprio filtro de obra, independente dos outros.
+- O Gantt no final mostra visualmente o período de produção x prazo de despacho de cada frente.
+
+**Regras importantes:**
+- Os filtros de obra de cada bloco (inclusive o do Gantt) são independentes entre si — mudar um não muda os outros.
+"""),
+                    ("cadastrar_obra", "🏗️ Cadastrar Obra", """
+**Quem acessa:** Master.
+
+**Para que serve:** Cadastrar obras, projetos vinculados a cada obra, e detalhar as frentes (etapas) do cronograma macro — é o ponto de partida antes de lançar qualquer OP.
+
+**Passo a passo:**
+1. "1. Obra e Projeto": escolha uma obra existente ou "+ Nova obra", informe o número do projeto e clique "➕ Adicionar Projeto". Dá pra editar o número de um projeto ou o nome de uma obra depois — isso atualiza em cascata frentes, lotes, OPs e romaneios já existentes.
+2. "2. Frente (opcional) dentro de um Projeto": escolha Obra, Projeto e Escopo. Se já souber os detalhes da etapa (subdivisão, metragem/peso, datas), preencha o expander "➕ Detalhar frente"; senão, deixe em branco — o projeto/escopo já fica pronto pra lançar OP mesmo sem detalhar.
+3. "Frentes Cadastradas" lista tudo, com opção de editar uma frente (sem mudar EDT/Obra/Subdivisão, pra não perder o vínculo com lotes já criados) ou excluir (com confirmação).
+
+**Regras importantes:**
+- Editar uma frente só avisa sobre lotes ainda Pendentes que ficaram fora do novo total ou da nova janela de datas — lotes já Liberados/Concluídos nunca são alterados automaticamente.
+- Excluir uma obra remove TODAS as frentes dela — ação sem volta, pede confirmação.
+"""),
+                    ("vincular_datas", "📅 Vincular Datas", """
+**Quem acessa:** Master.
+
+**Para que serve:** Fatiar uma frente do cronograma em lotes de produção, com datas de início, despacho e chegada calculadas automaticamente, e gerenciar os lotes já gerados.
+
+**Passo a passo:**
+1. Selecione a obra no filtro do menu lateral.
+2. Em "Nova Entrega": escolha a Frente (EDT), dê um nome pro lote, informe pavimentos/destino, material, complexidade, prazo de entrega na obra, dias de transporte, dias úteis de produção e quantidade (ou peso/metragem). O sistema já mostra o cronograma calculado antes de salvar.
+3. Clique "Gerar Lote".
+4. Em "Lotes Gerados", a tabela é editável direto na tela — as alterações salvam automaticamente. Pra remover um lote, use "Remover Lote".
+
+**Regras importantes:**
+- Se o lote calculado fica fora da janela de datas da frente, o sistema avisa e exige confirmação extra antes de gerar.
+- A frente é sempre a fonte da verdade da janela de datas — gerar um lote nunca reescreve as datas da frente.
+"""),
+                ]),
+                ("🚚 Operações", [
+                    ("logistica", "🚚 Logística", """
+**Quem acessa:** Master, Logística, Produção.
+
+**Para que serve:** Gerenciar despacho, transporte e envio dos lotes prontos — desde emitir o romaneio até confirmar a saída do caminhão.
+
+**Passo a passo:**
+1. "✅ OPs Prontas — Emitir Romaneio": preencha o endereço (e a quantidade de volumes, se Esquadrias) e clique "🖨️ Emitir Romaneio" — o sistema já dá baixa na OP automaticamente ao gerar o arquivo. Sem peças lançadas, dá pra usar "Dar baixa (OP antiga, já emitido)".
+2. "📋 Fila Prioritária": clique "Agendar" no lote desejado, informe data de envio, tipo de transporte, veículo e observações, e confirme.
+3. "🚛 Envios Agendados": quando o caminhão sai de fato, clique "Confirmar Despacho" (ou "Reagendar" se precisar mudar a data).
+4. "🗂️ Histórico de Despachos" mostra tudo que já saiu, com % de pontualidade.
+
+**Regras importantes:**
+- O romaneio inclui só as peças do último envio, não o histórico acumulado do lote.
+- Dá pra reverter uma baixa de romaneio feita errado, no expander "Romaneios já baixados".
+- Envio agendado pra depois do prazo aparece com aviso "Fora do prazo!" mesmo antes de despachar.
+"""),
+                    ("almoxarifado", "📦 Almoxarifado", """
+**Quem acessa:** Master, Almoxarifado, PCP.
+
+**Para que serve:** Conferir o que chegou (componentes de OP e insumos avulsos), marcar disponibilidade item a item e emitir o romaneio de conferência.
+
+**Passo a passo:**
+1. Use o toggle "❌ Ver só os Indisponíveis" pra um raio-x rápido do que está faltando.
+2. Aba "📋 Romaneios com Vínculo a OP": abra a OP desejada, marque o status de cada componente (Aguardando Conferência / Disponível / Parcial / Indisponível — parcial pede a quantidade enviada), adicione observação se precisar. Quando tudo estiver conferido, clique "🖨️ Gerar Romaneio" e depois "⬇️ Baixar Romaneio".
+3. Aba "📦 Romaneios de Insumos": pra material sem OP vinculada (parafuso, broca etc.), registre uma nova saída em "➕ Nova Saída de Insumos" (obra e projeto são obrigatórios), depois confira os itens da mesma forma que os componentes.
+
+**Regras importantes:**
+- Mudar o status ou a quantidade parcial já salva na hora — não tem botão "salvar" separado.
+- Excluir uma saída de insumos lançada errada só é permitido pra Master/Almoxarifado, com confirmação.
+"""),
+                    ("romaneio_manual", "📋 Romaneio Manual", """
+**Quem acessa:** Master, Almoxarifado, PCP.
+
+**Para que serve:** Registrar recebimento de material que chegou sem OP vinculada — por exemplo, material entregue direto por um terceiro.
+
+**Passo a passo:**
+1. Escolha Obra, Projeto e Data de recebimento.
+2. Se for envio pra terceiro, ligue "📦 Envio para terceiro?" e informe a empresa que vai receber.
+3. Informe a Etapa e adicione os itens (descrição, código, peso, unidade, quantidade) um a um.
+4. Clique "💾 Salvar Romaneio".
+5. No histórico, filtre por obra, abra o romaneio e baixe o Excel — ou exclua, se Master/Almoxarifado.
+
+**Regras importantes:**
+- O botão de salvar fica bloqueado sem projeto escolhido, ou (se terceirizado) sem o nome da empresa.
+"""),
+                    ("lista_mestra", "📑 Lista Mestra", """
+**Quem acessa:** Master, Almoxarifado, PCP.
+
+**Para que serve:** Controlar o envio parcial de listas de materiais/fixadores por etapa — cadastra a lista inteira uma vez e vai dando baixa conforme envia.
+
+**Passo a passo:**
+1. Em "➕ Cadastrar Lista Mestra": escolha Obra, Projeto e Título/Etapa, e cole os itens da planilha (aba "📋 Colar") ou digite manualmente (aba "✍️ Manual"). Clique "💾 Salvar Lista Mestra".
+2. Em "Listas Cadastradas", abra a lista pra ver a tabela de saldo por item (Qtd Total, Qtd Enviada, Saldo, Status).
+3. "📦 Registrar Envio Parcial": escolha data e destino, selecione os itens a enviar e informe a quantidade de cada um (não passa do saldo disponível), clique "✅ Registrar Envio".
+4. No histórico de envios da lista, baixe o romaneio daquele envio, ou estorne (Master/Almoxarifado) se foi lançado errado.
+
+**Regras importantes:**
+- Na aba Manual, os campos (Itens/Quantidades/Uso/Observações) se combinam por posição de linha — a 1ª linha de cada campo forma o 1º item.
+- Um item só pode ser excluído se ainda não teve nenhum envio registrado.
+"""),
+                    ("romaneios_devolvidos", "🗂️ Romaneios Devolvidos", """
+**Quem acessa:** Master, PCP.
+
+**Para que serve:** Controlar os romaneios que voltam assinados da obra/produção — anexar a foto/PDF de confirmação de cada tipo (OP, Componentes, Insumos, Romaneio Manual, Lista Mestra).
+
+**Passo a passo:**
+1. Escolha "Pendentes" ou "Todos" no filtro do topo.
+2. Escolha a aba certa pro tipo de romaneio (📋 OP/Peças, 🧩 Componentes, 📦 Insumos, 🗒️ Manual, 📑 Lista Mestra).
+3. Localize o item (agrupado por obra, se nenhuma obra estiver filtrada no menu lateral), abra "📎 Anexos", envie a foto/PDF assinado e clique "💾 Salvar".
+
+**Regras importantes:**
+- Um romaneio só aparece como "🟢 Devolvido assinado" depois que alguém anexa o comprovante — não existe um botão separado de "marcar como devolvido".
+- OP enviada em várias partes aparece como um card por envio parcial, cada um conferido separadamente.
+"""),
+                ]),
+                ("📊 Relatórios", [
+                    ("relatorio_geral", "📊 Relatório Geral", """
+**Quem acessa:** Master, Diretoria, PCP, Medição.
+
+**Para que serve:** Visão completa de todas as OPs ativas, com filtros, gráficos e exportação em Excel.
+
+**Passo a passo:**
+1. Filtre por Obra, Status e Escopo.
+2. Escolha qual data usar no filtro de período ("Entrada em Produção", "Data Limite" ou "Data de Conclusão") e o intervalo De/Até.
+3. Ligue "Ver concluídos" pra incluir itens já concluídos na lista; ligue "Incluir OPs em parada" pra trazer paradas mesmo fora do período de data.
+4. Confira os KPIs e gráficos do topo, e a tabela detalhada por OP mais abaixo (linhas vermelhas = prazo vencido).
+5. Baixe tudo em Excel no botão "Baixar relatório em Excel".
+6. O expander "OPs sem frente cadastradas" no final lista lotes avulsos, sem vínculo com o cronograma.
+
+**Regras importantes:**
+- Em OPs Parcialmente Concluídas, o m²/kg mostrado é o saldo pendente (não o total do lote) — exceto quando o filtro de Status é "Concluido".
+- Esquadrias é medido em kg; os demais escopos em m².
+"""),
+                    ("produtividade", "📈 Produtividade", """
+**Quem acessa:** Master, Diretoria, PCP, Medição.
+
+**Para que serve:** Acompanhar a produtividade semanal por colaborador, comparando o executado com uma meta que já leva em conta a dificuldade do material.
+
+**Passo a passo:**
+1. Escolha o Escopo (Esquadria-Vidro ou ACM).
+2. Em "➕ Lançar semana": informe o período (De/Até), quantidade de colaboradores, quantidade executada e a dificuldade média (1 a 5).
+3. Clique "💾 Salvar".
+4. Confira os KPIs (média mensal alcançada, meta base, semanas acima/abaixo da meta) e o gráfico Meta x Executado.
+
+**Regras importantes:**
+- Pra ACM, ao mudar o período o sistema já sugere automaticamente a dificuldade média com base nos itens realmente concluídos naquela semana — pode ajustar se necessário. Pra Esquadrias essa sugestão não existe.
+- A dificuldade reduz a meta proporcionalmente: 1 = meta cheia (100%), 2 = 90%, 3 = 80%, 4 = 70%, 5 = 50%.
+"""),
+                    ("sistema_medicao", "📏 Sistema de Medição", """
+**Quem acessa:** Master, Medição.
+
+**Para que serve:** Controlar contratos por m² (teto de valor), lançar os serviços/etapas medidos a cada período e acompanhar o saldo contratual restante.
+
+**Passo a passo:**
+1. Aba "1. Cadastrar Obra Base": informe nome, valor do m² teto e metragem geral, clique "Salvar Obra".
+2. Aba "2. Serviços & Etapas": escolha a obra e o período (formato MM/AAAA), adicione um ou mais serviços com suas subdivisões (m², % do serviço), clique "💾 Salvar Lançamentos".
+3. Aba "3. Relatório de Saldos": escolha obra e período pra ver a tabela detalhada e o total medido x contratado.
+4. Aba "4. Dashboards": gráfico de evolução das medições e saldo remanescente.
+
+**Regras importantes:**
+- O período precisa estar exatamente no formato MM/AAAA (ex: 06/2025).
+"""),
+                ]),
+                ("🗂️ Kanban", [
+                    ("kanban", "🗂️ Kanban", """
+**Quem acessa:** Todos os setores — o setor "Compras" só visualiza, move cartão de coluna e comenta (não cria quadro/cartão, não mexe em coluna, não anexa arquivo).
+
+**Para que serve:** Quadros de acompanhamento por etapas — Compras, Projetos ou qualquer outro fluxo que o setor quiser montar.
+
+**Passo a passo:**
+1. Na tela inicial (hub de quadros), clique "➕ Novo quadro" pra criar um quadro novo, ou "Abrir →" num quadro existente.
+2. Dentro do quadro: use "⚙️ Gerenciar colunas" pra criar/renomear/reordenar/excluir colunas.
+3. Em "➕ Novo cartão", preencha Obra, Coluna, Título (ou "Número da RC" se o quadro se chamar Compras), Descrição, Projeto, Prazo, Solicitante e Destinatário.
+4. Use os filtros ("Mostrar cartões de:", "Filtrar por obra:", "Filtrar por número da RC/título") pra achar cartões rápido.
+5. Abra um cartão pra ver detalhes, anexar arquivo, comentar, mover pra outra coluna ("Mover para:" + "➡️ Mover") ou, se Master, excluir.
+
+**Regras importantes:**
+- No quadro chamado exatamente "Compras", o campo de título vira "Número da RC" e só aceita dígitos — o sistema salva como "RC 1234" automaticamente.
+- O menu "Mover para:" nunca mostra a coluna onde o cartão já está — por isso, se o cartão já está em "Acompanhamento Entregas", por exemplo, essa opção não aparece na lista.
+- Histórico de movimentações do cartão só aparece pra Master; excluir cartão também é só Master.
+- Master pode restringir quais setores veem cada quadro, em "🔒 Quem pode ver este quadro".
+"""),
+                ]),
+                ("📁 Documentos", [
+                    ("documentos", "📁 Documentos", """
+**Quem acessa:** Todos os setores.
+
+**Para que serve:** Emitir termos de envio (ferramenta ou máquina) com lista de itens e fotos anexadas, e consultar o histórico de tudo que já foi emitido.
+
+**Passo a passo:**
+1. Aba "📝 Emitir Documento": escolha o modelo (Termo de Envio de Ferramenta/Máquina), Obra, Projeto, destinatário, setor/empresa do destinatário, responsável pela entrega e data de envio.
+2. Se houver previsão de devolução, ligue o toggle e informe a data.
+3. Adicione os itens (descrição, código/patrimônio, quantidade) um a um.
+4. Anexe fotos se quiser, e clique "💾 Emitir Documento".
+5. Na aba "🗂️ Histórico", filtre por modelo ou obra, abra o documento e baixe o Excel em "🖨️ Baixar".
+
+**Regras importantes:**
+- O botão de emitir só libera depois de escolher o projeto, informar o destinatário e adicionar pelo menos um item.
+- Excluir um documento do histórico é só pra Master.
+"""),
+                ]),
+                ("⚙️ Sistema", [
+                    ("configuracoes", "⚙️ Configurações", """
+**Quem acessa:** Master.
+
+**Para que serve:** Administração do sistema — usuários, senhas, log de auditoria e reset geral.
+
+**Passo a passo:**
+1. "Cadastrar Novo Usuário": informe login, nome, setor e senha (mínimo 8 caracteres, com 1 maiúscula e 1 número).
+2. Pra remover um usuário, selecione na lista e clique em excluir (a conta "master" nunca pode ser removida).
+3. "🔑 Redefinir senha de usuário": escolha o usuário, informe a nova senha duas vezes.
+4. "📋 Log de Auditoria": veja os últimos 200 registros de ações do sistema, com filtro por tipo de ação.
+5. "⚠️ Reset Geral": apaga TODOS os dados do sistema — só libera depois de digitar "CONFIRMAR" no campo.
+
+**Regras importantes:**
+- Reset Geral não tem volta — use com extremo cuidado.
+"""),
+                ]),
+            ]
+
+            for grupo_nome_manual, topicos_manual in MANUAL_CONTEUDO:
+                st.markdown(f"#### {grupo_nome_manual}")
+                for chave_topico_manual, titulo_topico_manual, corpo_topico_manual in topicos_manual:
+                    with st.expander(titulo_topico_manual, key=f"manual_exp_{chave_topico_manual}"):
+                        st.markdown(corpo_topico_manual)
 
