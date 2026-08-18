@@ -11067,9 +11067,13 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     # de um st.form so recalculam no submit (mesmo padrao de "Cadastrar Obra").
                     nc_obra = st.selectbox("Obra:", ["—"] + obras_disponiveis, key=f"kanban_card_obra_{quadro_atual_id}")
                     projetos_obra = sorted(df_projetos[df_projetos['Obra'] == nc_obra]['Numero_Projeto'].unique().tolist()) if nc_obra != "—" and not df_projetos.empty else []
+                    nc_eh_quadro_compras = quadro_row['nome'].strip().lower() == "compras"
                     with st.form(f"kanban_form_novo_card_{quadro_atual_id}", clear_on_submit=True):
                         nc_coluna_nome = st.selectbox("Coluna:", df_colunas['nome'].tolist(), key=f"kanban_card_coluna_{quadro_atual_id}")
-                        nc_titulo = st.text_input("Título:", key=f"kanban_card_titulo_{quadro_atual_id}")
+                        if nc_eh_quadro_compras:
+                            nc_titulo = st.text_input("Número da RC:", key=f"kanban_card_titulo_{quadro_atual_id}", placeholder="Ex: 3092")
+                        else:
+                            nc_titulo = st.text_input("Título:", key=f"kanban_card_titulo_{quadro_atual_id}")
                         nc_desc = st.text_area("Descrição:", key=f"kanban_card_desc_{quadro_atual_id}", height=68)
                         nc_projeto = st.selectbox("Projeto:", ["—"] + projetos_obra, key=f"kanban_card_projeto_{quadro_atual_id}")
                         nc_prazo = st.date_input("Prazo:", value=None, format="DD/MM/YYYY", key=f"kanban_card_prazo_{quadro_atual_id}")
@@ -11077,7 +11081,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         nc_dest = st.text_input("Destinatário:", key=f"kanban_card_dest_{quadro_atual_id}")
                         if st.form_submit_button("Adicionar"):
                             if not nc_titulo.strip():
-                                st.error("Informe o título.")
+                                st.error("Informe o número da RC." if nc_eh_quadro_compras else "Informe o título.")
+                            elif nc_eh_quadro_compras and not nc_titulo.strip().isdigit():
+                                st.error("Informe somente o número da RC (sem letras).")
                             elif not nc_desc.strip():
                                 st.error("Informe a descrição.")
                             elif nc_obra == "—":
@@ -11092,8 +11098,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.error("Informe o destinatário.")
                             else:
                                 nc_coluna_id = int(df_colunas[df_colunas['nome'] == nc_coluna_nome]['id'].iloc[0])
+                                nc_titulo_final = f"RC {nc_titulo.strip()}" if nc_eh_quadro_compras else nc_titulo.strip()
                                 ok_c, msg_c = criar_card(
-                                    quadro_atual_id, nc_coluna_id, nc_titulo, nc_desc,
+                                    quadro_atual_id, nc_coluna_id, nc_titulo_final, nc_desc,
                                     nc_obra if nc_obra != "—" else None,
                                     nc_projeto if nc_projeto != "—" else None,
                                     nc_resp, nc_dest, nc_prazo, st.session_state.usuario_nome
@@ -11101,7 +11108,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if ok_c:
                                     _limpar_cache_kanban()
                                     registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_CARTAO",
-                                        f"Quadro: {quadro_row['nome']} | Coluna: {nc_coluna_nome} | {nc_titulo.strip()}")
+                                        f"Quadro: {quadro_row['nome']} | Coluna: {nc_coluna_nome} | {nc_titulo_final}")
                                     st.toast("Cartão criado!")
                                     st.rerun()
                                 else:
