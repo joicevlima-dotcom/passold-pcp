@@ -10909,6 +10909,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             # ── Um quadro específico está aberto ──────────────────────────
             quadro_atual_id = int(st.session_state.kanban_quadro_atual)
             quadro_row = df_quadros_visiveis[df_quadros_visiveis['id'] == quadro_atual_id].iloc[0]
+            eh_quadro_compras = quadro_row['nome'].strip().lower() == "compras"
 
             if st.button("← Voltar aos quadros", key="kanban_voltar"):
                 st.session_state.kanban_quadro_atual = None
@@ -11067,10 +11068,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     # de um st.form so recalculam no submit (mesmo padrao de "Cadastrar Obra").
                     nc_obra = st.selectbox("Obra:", ["—"] + obras_disponiveis, key=f"kanban_card_obra_{quadro_atual_id}")
                     projetos_obra = sorted(df_projetos[df_projetos['Obra'] == nc_obra]['Numero_Projeto'].unique().tolist()) if nc_obra != "—" and not df_projetos.empty else []
-                    nc_eh_quadro_compras = quadro_row['nome'].strip().lower() == "compras"
                     with st.form(f"kanban_form_novo_card_{quadro_atual_id}", clear_on_submit=True):
                         nc_coluna_nome = st.selectbox("Coluna:", df_colunas['nome'].tolist(), key=f"kanban_card_coluna_{quadro_atual_id}")
-                        if nc_eh_quadro_compras:
+                        if eh_quadro_compras:
                             nc_titulo = st.text_input("Número da RC:", key=f"kanban_card_titulo_{quadro_atual_id}", placeholder="Ex: 3092")
                         else:
                             nc_titulo = st.text_input("Título:", key=f"kanban_card_titulo_{quadro_atual_id}")
@@ -11081,8 +11081,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         nc_dest = st.text_input("Destinatário:", key=f"kanban_card_dest_{quadro_atual_id}")
                         if st.form_submit_button("Adicionar"):
                             if not nc_titulo.strip():
-                                st.error("Informe o número da RC." if nc_eh_quadro_compras else "Informe o título.")
-                            elif nc_eh_quadro_compras and not nc_titulo.strip().isdigit():
+                                st.error("Informe o número da RC." if eh_quadro_compras else "Informe o título.")
+                            elif eh_quadro_compras and not nc_titulo.strip().isdigit():
                                 st.error("Informe somente o número da RC (sem letras).")
                             elif not nc_desc.strip():
                                 st.error("Informe a descrição.")
@@ -11098,7 +11098,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.error("Informe o destinatário.")
                             else:
                                 nc_coluna_id = int(df_colunas[df_colunas['nome'] == nc_coluna_nome]['id'].iloc[0])
-                                nc_titulo_final = f"RC {nc_titulo.strip()}" if nc_eh_quadro_compras else nc_titulo.strip()
+                                nc_titulo_final = f"RC {nc_titulo.strip()}" if eh_quadro_compras else nc_titulo.strip()
                                 ok_c, msg_c = criar_card(
                                     quadro_atual_id, nc_coluna_id, nc_titulo_final, nc_desc,
                                     nc_obra if nc_obra != "—" else None,
@@ -11119,7 +11119,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 horizontal=True, key=f"kanban_filtro_coluna_{quadro_atual_id}"
             )
             obras_nos_cards = sorted(df_cards['obra'].dropna().unique().tolist()) if not df_cards.empty else []
-            filtro_obra = st.selectbox("Filtrar por obra:", ["Todas"] + obras_nos_cards, key=f"kanban_filtro_obra_{quadro_atual_id}")
+            col_filt_obra, col_filt_titulo = st.columns(2)
+            filtro_obra = col_filt_obra.selectbox("Filtrar por obra:", ["Todas"] + obras_nos_cards, key=f"kanban_filtro_obra_{quadro_atual_id}")
+            filtro_titulo = col_filt_titulo.text_input(
+                "Filtrar por número da RC:" if eh_quadro_compras else "Filtrar por título:",
+                key=f"kanban_filtro_titulo_{quadro_atual_id}", placeholder="Ex: 5025" if eh_quadro_compras else ""
+            )
 
             df_cards_filtrado = df_cards
             if filtro_coluna != "Todos" and not df_cards_filtrado.empty:
@@ -11127,6 +11132,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 df_cards_filtrado = df_cards_filtrado[df_cards_filtrado['coluna_id'].isin(ids_coluna_filtro)]
             if filtro_obra != "Todas" and not df_cards_filtrado.empty:
                 df_cards_filtrado = df_cards_filtrado[df_cards_filtrado['obra'] == filtro_obra]
+            if filtro_titulo.strip() and not df_cards_filtrado.empty:
+                df_cards_filtrado = df_cards_filtrado[df_cards_filtrado['titulo'].str.contains(filtro_titulo.strip(), case=False, na=False)]
 
             if df_cards_filtrado.empty:
                 st.caption("Nenhum cartão aqui.")
