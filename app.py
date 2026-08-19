@@ -3706,6 +3706,40 @@ def parse_lista_mestra(texto: str) -> list:
         itens.append({'item': item, 'qtd_total': qtd, 'uso': uso, 'observacoes': observacoes})
     return itens
 
+def parse_lista_romaneio_manual(texto: str) -> list:
+    """Interpreta lista colada pro Romaneio Manual (uma linha por item). Ao colar direto do
+    Excel cada celula vem separada por TAB; sem TAB, cai pro fallback de 2+ espacos.
+    Ordem esperada: Descricao, Quantidade, Cod (opcional), Peso kg (opcional), Unidade (opcional).
+    Linhas sem descricao sao ignoradas; sem quantidade valida assume 1."""
+    import re
+    itens = []
+    for linha in texto.splitlines():
+        linha = linha.rstrip()
+        if not linha.strip():
+            continue
+        partes = linha.split('\t')
+        if len(partes) < 2:
+            partes = re.split(r'\s{2,}', linha.strip())
+        descricao = partes[0].strip()
+        if not descricao:
+            continue
+        qtd = 1.0
+        if len(partes) > 1 and partes[1].strip():
+            try:
+                qtd = float(partes[1].strip().replace(',', '.'))
+            except ValueError:
+                qtd = 1.0
+        cod = partes[2].strip() if len(partes) > 2 else ''
+        peso = 0.0
+        if len(partes) > 3 and partes[3].strip():
+            try:
+                peso = float(partes[3].strip().replace(',', '.'))
+            except ValueError:
+                peso = 0.0
+        unidade = partes[4].strip().upper() if len(partes) > 4 and partes[4].strip() else 'UND'
+        itens.append({'descricao': descricao, 'quantidade': qtd, 'cod': cod, 'peso_kg': peso, 'unidade': unidade})
+    return itens
+
 @st.cache_data(ttl=30)
 def carregar_listas_mestras():
     conn = conectar_banco()
@@ -9869,26 +9903,55 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 rom_etapa = st.text_input("Etapa:", key="rom_etapa", placeholder="Ex: 49º Pavimento - Estrutura")
 
                 st.markdown("**Adicionar item ao romaneio:**")
-                ri1, ri2, ri3, ri4, ri5 = st.columns([4, 2, 2, 2, 2])
-                with ri1:
-                    rom_desc = st.text_input("Descrição do material:", key="rom_desc",
-                                              placeholder="Ex: Perfil de alumínio natural 6m")
-                with ri2:
-                    rom_cod = st.text_input("Cod:", key="rom_cod", placeholder="Ex: QUADRO TIPO-01")
-                with ri3:
-                    rom_peso = st.number_input("Peso (kg):", min_value=0.0, value=0.0, step=0.1, key="rom_peso")
-                with ri4:
-                    rom_unidade = st.selectbox("Und Medida:", ["UND", "KG", "M", "M²", "CX", "PÇ", "ROLO"], key="rom_unidade")
-                with ri5:
-                    rom_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="rom_qtd")
-                if st.button("➕ Adicionar", key="btn_add_rom_item"):
-                    if not rom_desc.strip():
-                        st.error("Informe a descrição do material antes de adicionar.")
-                    else:
-                        st.session_state.rom_itens.append({
-                            "descricao": rom_desc.strip(), "quantidade": rom_qtd,
-                            "cod": rom_cod.strip(), "peso_kg": rom_peso, "unidade": rom_unidade
-                        })
+                tab_manual_rom, tab_colar_rom = st.tabs(["✏️ Manual", "📋 Colar Lista"])
+
+                with tab_manual_rom:
+                    ri1, ri2, ri3, ri4, ri5 = st.columns([4, 2, 2, 2, 2])
+                    with ri1:
+                        rom_desc = st.text_input("Descrição do material:", key="rom_desc",
+                                                  placeholder="Ex: Perfil de alumínio natural 6m")
+                    with ri2:
+                        rom_cod = st.text_input("Cod:", key="rom_cod", placeholder="Ex: QUADRO TIPO-01")
+                    with ri3:
+                        rom_peso = st.number_input("Peso (kg):", min_value=0.0, value=0.0, step=0.1, key="rom_peso")
+                    with ri4:
+                        rom_unidade = st.selectbox("Und Medida:", ["UND", "KG", "M", "M²", "CX", "PÇ", "ROLO"], key="rom_unidade")
+                    with ri5:
+                        rom_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="rom_qtd")
+                    if st.button("➕ Adicionar", key="btn_add_rom_item"):
+                        if not rom_desc.strip():
+                            st.error("Informe a descrição do material antes de adicionar.")
+                        else:
+                            st.session_state.rom_itens.append({
+                                "descricao": rom_desc.strip(), "quantidade": rom_qtd,
+                                "cod": rom_cod.strip(), "peso_kg": rom_peso, "unidade": rom_unidade
+                            })
+                            st.rerun()
+
+                with tab_colar_rom:
+                    st.caption("Cole a lista — um item por linha, direto do Excel (cada célula separada por TAB). "
+                               "Ordem: Descrição, Quantidade, Cod (opcional), Peso kg (opcional), Unidade (opcional).")
+                    rom_texto_colar = st.text_area(
+                        "Itens:", height=180, key="rom_texto_colar",
+                        placeholder="Perfil de alumínio natural 6m\t10\tQUADRO TIPO-01\t2,5\tUND\nChapa ACM branca\t5"
+                    )
+                    itens_preview_rom = parse_lista_romaneio_manual(rom_texto_colar) if rom_texto_colar.strip() else []
+                    if rom_texto_colar.strip():
+                        if itens_preview_rom:
+                            st.caption(f"{len(itens_preview_rom)} item(ns) reconhecido(s):")
+                            st.dataframe(
+                                pd.DataFrame(itens_preview_rom).rename(columns={
+                                    "descricao": "Descrição", "quantidade": "Quantidade",
+                                    "cod": "Cod", "peso_kg": "Peso (kg)", "unidade": "Unidade"
+                                })[["Descrição", "Quantidade", "Cod", "Peso (kg)", "Unidade"]],
+                                hide_index=True, use_container_width=True
+                            )
+                        else:
+                            st.warning("Nenhum item reconhecido — confira se colou ao menos a descrição em cada linha.")
+                    if st.button("➕ Adicionar todos", key="btn_add_rom_lista", disabled=not itens_preview_rom):
+                        st.session_state.rom_itens.extend(itens_preview_rom)
+                        st.session_state.pop("rom_texto_colar", None)
+                        st.toast(f"{len(itens_preview_rom)} item(ns) adicionado(s)!")
                         st.rerun()
 
                 if st.session_state.rom_itens:
