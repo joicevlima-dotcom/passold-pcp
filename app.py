@@ -3706,40 +3706,6 @@ def parse_lista_mestra(texto: str) -> list:
         itens.append({'item': item, 'qtd_total': qtd, 'uso': uso, 'observacoes': observacoes})
     return itens
 
-def parse_lista_romaneio_manual(texto: str) -> list:
-    """Interpreta lista colada pro Romaneio Manual (uma linha por item). Ao colar direto do
-    Excel cada celula vem separada por TAB; sem TAB, cai pro fallback de 2+ espacos.
-    Ordem esperada: Descricao, Quantidade, Cod (opcional), Peso kg (opcional), Unidade (opcional).
-    Linhas sem descricao sao ignoradas; sem quantidade valida assume 1."""
-    import re
-    itens = []
-    for linha in texto.splitlines():
-        linha = linha.rstrip()
-        if not linha.strip():
-            continue
-        partes = linha.split('\t')
-        if len(partes) < 2:
-            partes = re.split(r'\s{2,}', linha.strip())
-        descricao = partes[0].strip()
-        if not descricao:
-            continue
-        qtd = 1.0
-        if len(partes) > 1 and partes[1].strip():
-            try:
-                qtd = float(partes[1].strip().replace(',', '.'))
-            except ValueError:
-                qtd = 1.0
-        cod = partes[2].strip() if len(partes) > 2 else ''
-        peso = 0.0
-        if len(partes) > 3 and partes[3].strip():
-            try:
-                peso = float(partes[3].strip().replace(',', '.'))
-            except ValueError:
-                peso = 0.0
-        unidade = partes[4].strip().upper() if len(partes) > 4 and partes[4].strip() else 'UND'
-        itens.append({'descricao': descricao, 'quantidade': qtd, 'cod': cod, 'peso_kg': peso, 'unidade': unidade})
-    return itens
-
 @st.cache_data(ttl=30)
 def carregar_listas_mestras():
     conn = conectar_banco()
@@ -9929,28 +9895,61 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             st.rerun()
 
                 with tab_colar_rom:
-                    st.caption("Cole a lista — um item por linha, direto do Excel (cada célula separada por TAB). "
-                               "Ordem: Descrição, Quantidade, Cod (opcional), Peso kg (opcional), Unidade (opcional).")
-                    rom_texto_colar = st.text_area(
-                        "Itens:", height=180, key="rom_texto_colar",
-                        placeholder="Perfil de alumínio natural 6m\t10\tQUADRO TIPO-01\t2,5\tUND\nChapa ACM branca\t5"
-                    )
-                    itens_preview_rom = parse_lista_romaneio_manual(rom_texto_colar) if rom_texto_colar.strip() else []
-                    if rom_texto_colar.strip():
-                        if itens_preview_rom:
-                            st.caption(f"{len(itens_preview_rom)} item(ns) reconhecido(s):")
-                            st.dataframe(
-                                pd.DataFrame(itens_preview_rom).rename(columns={
-                                    "descricao": "Descrição", "quantidade": "Quantidade",
-                                    "cod": "Cod", "peso_kg": "Peso (kg)", "unidade": "Unidade"
-                                })[["Descrição", "Quantidade", "Cod", "Peso (kg)", "Unidade"]],
-                                hide_index=True, use_container_width=True
-                            )
-                        else:
-                            st.warning("Nenhum item reconhecido — confira se colou ao menos a descrição em cada linha.")
+                    st.caption("Cole os dados abaixo — um item por linha em cada campo (a 1ª linha de cada campo forma o 1º item, e assim por diante).")
+                    rc1, rc2, rc3, rc4, rc5 = st.columns(5)
+                    with rc1:
+                        rom_descs_txt = st.text_area("Descrições:", height=180, key="rom_descs_colar",
+                                                      placeholder="Perfil de alumínio natural 6m\nChapa ACM branca")
+                    with rc2:
+                        rom_cods_txt = st.text_area("Cod (opcional):", height=180, key="rom_cods_colar",
+                                                     placeholder="QUADRO TIPO-01")
+                    with rc3:
+                        rom_pesos_txt = st.text_area("Peso kg (opcional):", height=180, key="rom_pesos_colar",
+                                                      placeholder="2,5")
+                    with rc4:
+                        rom_unids_txt = st.text_area("Unidade (opcional):", height=180, key="rom_unids_colar",
+                                                      placeholder="UND")
+                    with rc5:
+                        rom_qtds_txt = st.text_area("Quantidade:", height=180, key="rom_qtds_colar",
+                                                     placeholder="10\n5")
+
+                    descs_colar = [l.strip() for l in rom_descs_txt.strip().split('\n') if l.strip()] if rom_descs_txt.strip() else []
+                    cods_colar  = [l.strip() for l in rom_cods_txt.strip().split('\n')] if rom_cods_txt.strip() else []
+                    pesos_colar = [l.strip().replace(',', '.') for l in rom_pesos_txt.strip().split('\n')] if rom_pesos_txt.strip() else []
+                    unids_colar = [l.strip().upper() for l in rom_unids_txt.strip().split('\n')] if rom_unids_txt.strip() else []
+                    qtds_colar  = [l.strip().replace(',', '.') for l in rom_qtds_txt.strip().split('\n')] if rom_qtds_txt.strip() else []
+
+                    itens_preview_rom = []
+                    for i_rc, desc_rc in enumerate(descs_colar):
+                        try:
+                            qtd_rc = float(qtds_colar[i_rc]) if i_rc < len(qtds_colar) and qtds_colar[i_rc] else 1.0
+                        except ValueError:
+                            qtd_rc = 1.0
+                        try:
+                            peso_rc = float(pesos_colar[i_rc]) if i_rc < len(pesos_colar) and pesos_colar[i_rc] else 0.0
+                        except ValueError:
+                            peso_rc = 0.0
+                        itens_preview_rom.append({
+                            "descricao": desc_rc,
+                            "quantidade": qtd_rc,
+                            "cod": cods_colar[i_rc] if i_rc < len(cods_colar) else '',
+                            "peso_kg": peso_rc,
+                            "unidade": unids_colar[i_rc] if i_rc < len(unids_colar) and unids_colar[i_rc] else 'UND',
+                        })
+
+                    if descs_colar:
+                        st.caption(f"{len(itens_preview_rom)} item(ns) reconhecido(s):")
+                        st.dataframe(
+                            pd.DataFrame(itens_preview_rom).rename(columns={
+                                "descricao": "Descrição", "quantidade": "Quantidade",
+                                "cod": "Cod", "peso_kg": "Peso (kg)", "unidade": "Unidade"
+                            })[["Descrição", "Quantidade", "Cod", "Peso (kg)", "Unidade"]],
+                            hide_index=True, use_container_width=True
+                        )
                     if st.button("➕ Adicionar todos", key="btn_add_rom_lista", disabled=not itens_preview_rom):
                         st.session_state.rom_itens.extend(itens_preview_rom)
-                        st.session_state.pop("rom_texto_colar", None)
+                        for _k_rc in ["rom_descs_colar", "rom_cods_colar", "rom_pesos_colar", "rom_unids_colar", "rom_qtds_colar"]:
+                            st.session_state.pop(_k_rc, None)
                         st.toast(f"{len(itens_preview_rom)} item(ns) adicionado(s)!")
                         st.rerun()
 
@@ -12268,7 +12267,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
-                ("2026-08-19", "Romaneio Manual ganha aba \"Colar Lista\" pra adicionar vários itens de uma vez, direto do Excel."),
+                ("2026-08-19", "Romaneio Manual ganha aba \"Colar Lista\" pra adicionar vários itens de uma vez (campos lado a lado, um item por linha)."),
                 ("2026-08-18", "Kanban ganha níveis de prioridade (Urgente/Alto/Médio/Baixo) nos quadros do Departamento Técnico ACM e Esquadrias, com ordenação automática por prioridade."),
                 ("2026-08-18", "Kanban ganha filtro por número da RC; campo de novo cartão vira \"Número da RC\" no quadro Compras."),
                 ("2026-08-17", "Novo módulo Documentos, pra emitir termo de entrega de ferramenta/máquina com foto anexada."),
@@ -12493,7 +12492,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
 **Regras importantes:**
 - O botão de salvar fica bloqueado sem projeto escolhido, ou (se terceirizado) sem o nome da empresa.
-- Na aba "📋 Colar Lista", a ordem das colunas coladas é: Descrição, Quantidade, Cod (opcional), Peso kg (opcional), Unidade (opcional).
+- Na aba "📋 Colar Lista", cada campo (Descrições/Cod/Peso/Unidade/Quantidade) é colado separado, um item por linha — os campos se combinam pela posição da linha (a 1ª linha de cada campo forma o 1º item). Só Descrições é obrigatório.
 """),
                     ("lista_mestra", "📑 Lista Mestra", """
 **Quem acessa:** Master, Almoxarifado, PCP.
