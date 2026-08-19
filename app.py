@@ -12268,6 +12268,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-08-19", "Romaneio Manual ganha aba \"Colar Lista\" pra adicionar vários itens de uma vez, direto do Excel."),
                 ("2026-08-18", "Kanban ganha níveis de prioridade (Urgente/Alto/Médio/Baixo) nos quadros do Departamento Técnico ACM e Esquadrias, com ordenação automática por prioridade."),
                 ("2026-08-18", "Kanban ganha filtro por número da RC; campo de novo cartão vira \"Número da RC\" no quadro Compras."),
                 ("2026-08-17", "Novo módulo Documentos, pra emitir termo de entrega de ferramenta/máquina com foto anexada."),
@@ -12486,12 +12487,13 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 **Passo a passo:**
 1. Escolha Obra, Projeto e Data de recebimento.
 2. Se for envio pra terceiro, ligue "📦 Envio para terceiro?" e informe a empresa que vai receber.
-3. Informe a Etapa e adicione os itens (descrição, código, peso, unidade, quantidade) um a um.
+3. Informe a Etapa e adicione os itens: na aba "✏️ Manual" um a um (descrição, código, peso, unidade, quantidade), ou na aba "📋 Colar Lista" cole vários de uma vez direto do Excel e clique "➕ Adicionar todos".
 4. Clique "💾 Salvar Romaneio".
 5. No histórico, filtre por obra, abra o romaneio e baixe o Excel — ou exclua, se Master/Almoxarifado.
 
 **Regras importantes:**
 - O botão de salvar fica bloqueado sem projeto escolhido, ou (se terceirizado) sem o nome da empresa.
+- Na aba "📋 Colar Lista", a ordem das colunas coladas é: Descrição, Quantidade, Cod (opcional), Peso kg (opcional), Unidade (opcional).
 """),
                     ("lista_mestra", "📑 Lista Mestra", """
 **Quem acessa:** Master, Almoxarifado, PCP.
