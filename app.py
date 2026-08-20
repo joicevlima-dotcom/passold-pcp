@@ -11725,402 +11725,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
             df_banco_micro_rel = carregar_micro_completo()
 
-            # ── Filtros ──────────────────────────────────────────
-            rel_f1, rel_f2, rel_f3 = st.columns([2, 2, 2])
-            obras_rel = ["Todas"] + sorted(df_banco_micro_rel['Obra_Vinculada'].dropna().unique().tolist()) if not df_banco_micro_rel.empty else ["Todas"]
-            with rel_f1:
-                filtro_obra_rel = st.selectbox("Obra:", obras_rel, key="rel_obra")
-            with rel_f2:
-                status_opcoes = ["Todos", "Pendente", "Liberado para Fabrica", "Parcialmente Concluido", "Concluido"]
-                filtro_status_rel = st.selectbox("Status:", status_opcoes, key="rel_status")
-            with rel_f3:
-                escopo_labels_rel = {"ACM": "ACM", "Esquadrias": "Esquadria-Vidro", "Terceirizada": "Terceirizada"}
-                filtro_escopo_rel = st.selectbox("Escopo:", ["Todos"] + list(escopo_labels_rel.keys()), key="rel_escopo")
-
-            rel_f4, rel_f5, rel_f6 = st.columns([2, 2, 2])
-            with rel_f4:
-                rel_campo_data = st.selectbox(
-                    "Filtrar data por:", ["Entrada em Produção", "Data Limite", "Data de Conclusão"],
-                    key="rel_campo_data",
-                    help="Entrada em Produção e Data Limite são datas PLANEJADAS (definidas ao cadastrar o lote). "
-                         "Data de Conclusão é a data REAL em que o item foi marcado como Concluído."
-                )
-            with rel_f5:
-                rel_dt_ini = st.date_input("De:", value=None, format="DD/MM/YYYY", key="rel_dt_ini")
-            with rel_f6:
-                rel_dt_fim = st.date_input("Até:", value=None, format="DD/MM/YYYY", key="rel_dt_fim")
-
-            rel_tg1, rel_tg2 = st.columns([1, 2])
-            with rel_tg1:
-                mostrar_concluidos = st.toggle("Ver concluídos", value=False, key="rel_concl")
-            with rel_tg2:
-                incluir_paradas_rel = st.toggle(
-                    "⛔ Incluir OPs em parada (mesmo fora do período)", value=False, key="rel_incluir_paradas",
-                    help="Traz também as OPs marcadas como 'Em Parada', ignorando o filtro de data De/Até acima "
-                         "(mas ainda respeitando os filtros de Obra, Status e Escopo)."
-                )
-            ignorar_periodo_producao_rel = st.toggle(
-                "🏭 Em produção: mostrar tudo (ignora o período de Entrada em Produção)", value=False, key="rel_ignorar_periodo_producao",
-                help="Traz TODAS as OPs ainda não concluídas (Liberado para Fábrica / Parcialmente Concluído), "
-                     "mesmo as que entraram em produção antes do período De/Até selecionado — só respeita "
-                     "os filtros de Obra, Status e Escopo. Ideal pro relatório semanal de 'o que ainda está "
-                     "em produção': sem isso, o filtro de data esconde OPs mais antigas que ainda não saíram."
-            )
-
-            # ── Montar dataframe filtrado ────────────────────────
-            df_rel = df_banco_micro_rel.copy() if not df_banco_micro_rel.empty else pd.DataFrame()
-
-            if not df_rel.empty:
-                # Filtrar por Data de Conclusão só faz sentido pra itens Concluídos —
-                # nesse caso, não esconde os concluídos mesmo com o toggle desligado.
-                if not mostrar_concluidos and filtro_status_rel != "Concluido" and rel_campo_data != "Data de Conclusão":
-                    df_rel = df_rel[df_rel['Status_Item'] != 'Concluido']
-                if filtro_obra_rel != "Todas":
-                    df_rel = df_rel[df_rel['Obra_Vinculada'] == filtro_obra_rel]
-                if filtro_status_rel != "Todos":
-                    df_rel = df_rel[df_rel['Status_Item'] == filtro_status_rel]
-                if filtro_escopo_rel != "Todos":
-                    df_rel = df_rel[df_rel['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
-                col_data_map = {
-                    "Entrada em Produção": "Data_Producao_Programada",
-                    "Data Limite": "Data_Limite_Obra",
-                    "Data de Conclusão": "Concluido_Em",
-                }
-                col_dt_filtro = col_data_map[rel_campo_data]
-                df_rel[col_dt_filtro] = pd.to_datetime(df_rel[col_dt_filtro], errors='coerce')
-                if rel_dt_ini:
-                    df_rel = df_rel[df_rel[col_dt_filtro] >= pd.Timestamp(rel_dt_ini)]
-                if rel_dt_fim:
-                    # Concluido_Em tem horário (não é só data) — usa < dia seguinte pra
-                    # incluir qualquer conclusão registrada durante o próprio dia "Até".
-                    if col_dt_filtro == 'Concluido_Em':
-                        df_rel = df_rel[df_rel[col_dt_filtro] < pd.Timestamp(rel_dt_fim) + timedelta(days=1)]
-                    else:
-                        df_rel = df_rel[df_rel[col_dt_filtro] <= pd.Timestamp(rel_dt_fim)]
-
-            # OPs em parada ficam escondidas quando estão fora do período De/Até — mas o
-            # motivo de estarem "paradas" muitas vezes é justamente ter saído do prazo
-            # planejado. Com o toggle ligado, busca de novo (sem filtro de data) e junta.
-            if incluir_paradas_rel and not df_banco_micro_rel.empty and 'Em_Parada' in df_banco_micro_rel.columns:
-                df_paradas_extra = df_banco_micro_rel[df_banco_micro_rel['Em_Parada'] == True].copy()
-                if filtro_obra_rel != "Todas":
-                    df_paradas_extra = df_paradas_extra[df_paradas_extra['Obra_Vinculada'] == filtro_obra_rel]
-                if filtro_status_rel != "Todos":
-                    df_paradas_extra = df_paradas_extra[df_paradas_extra['Status_Item'] == filtro_status_rel]
-                if filtro_escopo_rel != "Todos":
-                    df_paradas_extra = df_paradas_extra[df_paradas_extra['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
-                if not mostrar_concluidos and filtro_status_rel != "Concluido":
-                    df_paradas_extra = df_paradas_extra[df_paradas_extra['Status_Item'] != 'Concluido']
-                if not df_paradas_extra.empty:
-                    df_rel = pd.concat([df_rel, df_paradas_extra], ignore_index=True).drop_duplicates(subset='id', keep='first')
-
-            # "Em produção" e um retrato do que esta em aberto AGORA, nao um evento datado —
-            # filtrar pela data de Entrada em Producao esconde OPs mais antigas que ainda nao
-            # foram concluidas. Com o toggle ligado, busca de novo (sem filtro de data) todo
-            # item ainda nao concluido e junta.
-            if ignorar_periodo_producao_rel and not df_banco_micro_rel.empty:
-                df_producao_extra = df_banco_micro_rel[df_banco_micro_rel['Status_Item'] != 'Concluido'].copy()
-                if filtro_obra_rel != "Todas":
-                    df_producao_extra = df_producao_extra[df_producao_extra['Obra_Vinculada'] == filtro_obra_rel]
-                if filtro_status_rel not in ("Todos", "Concluido"):
-                    df_producao_extra = df_producao_extra[df_producao_extra['Status_Item'] == filtro_status_rel]
-                if filtro_escopo_rel != "Todos":
-                    df_producao_extra = df_producao_extra[df_producao_extra['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
-                if not df_producao_extra.empty:
-                    df_rel = pd.concat([df_rel, df_producao_extra], ignore_index=True).drop_duplicates(subset='id', keep='first')
-
-            # OPs Parcialmente Concluidas ja tiveram parte do material enviada — sem descontar isso,
-            # o relatorio contaria o tamanho cheio da OP como se nada tivesse saido ainda. Troca
-            # M2_Item/Peso_Kg pelo SALDO PENDENTE (o que ainda falta produzir/enviar), usando a
-            # proporcao de pecas com saldo (op_pecas) sobre o valor real medido daquele lote.
-            # Excecao: quando o filtro de Status esta especificamente em "Concluido", o usuario
-            # quer ver o total EXECUTADO daquele periodo (nao faz sentido mostrar saldo=0 pra um
-            # relatorio que so tem itens concluidos) — nesse caso usa o valor real medido cheio.
-            # So trata como "total executado" quando o status filtrado e realmente so
-            # Concluido -- com Status="Todos" + Data de Conclusao, o filtro de data ja so
-            # deixa passar concluidos; com qualquer OUTRO status explicito (Pendente etc.),
-            # nao faz sentido rotular como executado o que e saldo pendente desse status.
-            filtro_apenas_concluidos_rel = (
-                filtro_status_rel == "Concluido"
-                or (rel_campo_data == "Data de Conclusão" and filtro_status_rel == "Todos")
-            )
-
-            def _saldo_pendente_rel(row, col_original, col_real):
-                base = row.get(col_real)
-                base = float(base) if pd.notna(base) and base and base > 0 else float(_nn(row.get(col_original), 0))
-                if row['Status_Item'] == 'Concluido':
-                    return base if filtro_apenas_concluidos_rel else 0.0
-                qtd_total_p = row.get('qtd_total')
-                if pd.notna(qtd_total_p) and qtd_total_p > 0:
-                    frac_pendente = float(_nn(row.get('saldo'), 0)) / float(qtd_total_p)
-                    return base * frac_pendente
-                return base
-
-            if not df_rel.empty:
-                df_pecas_saldo_rel = carregar_saldo_pecas_por_lote()
-                df_rel = df_rel.merge(df_pecas_saldo_rel, left_on='id', right_on='lote_id', how='left')
-                df_rel['M2_Item'] = df_rel.apply(lambda r: _saldo_pendente_rel(r, 'M2_Item', 'm2_op_real'), axis=1)
-                df_rel['Peso_Kg'] = df_rel.apply(lambda r: _saldo_pendente_rel(r, 'Peso_Kg', 'peso_op_real'), axis=1)
-
-            # Esquadria-Vidro e medido em kg, nao em m2 — troca a coluna/unidade de referencia
-            # do relatorio quando o filtro de escopo estiver em Esquadrias.
-            escopo_esquadrias_rel = (filtro_escopo_rel == "Esquadrias")
-            col_medida_rel   = 'Peso_Kg' if escopo_esquadrias_rel else 'M2_Item'
-            label_medida_rel = 'kg' if escopo_esquadrias_rel else 'm²'
-            label_kpi_medida_rel = f'Total {label_medida_rel}' if filtro_apenas_concluidos_rel else f'Saldo {label_medida_rel}'
-
-            # ── KPIs ─────────────────────────────────────────────
-            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-            if not df_rel.empty:
-                total_ops     = df_rel['Num_OP'].nunique()
-                total_medida  = df_rel[col_medida_rel].sum()
-                total_cx      = df_rel['Qtd_Caixas'].sum()
-                ops_atrasadas = df_rel[
-                    (pd.to_datetime(df_rel['Data_Limite_Obra'], errors='coerce') < hoje_projeto()) &
-                    (~df_rel['Status_Item'].isin(['Concluido']))
-                ]['Num_OP'].nunique()
-                enviadas_parcial = df_rel[df_rel['Status_Item'].str.contains('Parcial|parcial', na=False)]['Num_OP'].nunique()
-
-                k1, k2, k3, k4, k5 = st.columns(5)
-                k1.metric("Total de OPs", total_ops)
-                help_medida_rel = ("Total executado nesse período." if filtro_apenas_concluidos_rel
-                                    else "O que ainda falta produzir/enviar — desconta o que já saiu em OPs parcialmente enviadas.")
-                k2.metric(label_kpi_medida_rel, f"{total_medida:,.1f}", help=help_medida_rel)
-                k3.metric("Total Caixas", int(total_cx))
-                k4.metric("OPs Atrasadas", ops_atrasadas, delta=f"-{ops_atrasadas}" if ops_atrasadas > 0 else None, delta_color="inverse")
-                k5.metric("Envio Parcial", enviadas_parcial)
-            else:
-                st.info("Nenhum dado disponível para os filtros selecionados.")
-
-            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-
-            if not df_rel.empty:
-                # ── Gráfico: medida por obra (m² ou kg, conforme o escopo) ──
-                col_g1, col_g2 = st.columns(2)
-                with col_g1:
-                    df_m2_obra = df_rel.groupby('Obra_Vinculada')[col_medida_rel].sum().reset_index()
-                    df_m2_obra.columns = ['Obra', label_medida_rel]
-                    df_m2_obra = df_m2_obra.sort_values(label_medida_rel, ascending=False)
-                    titulo_grafico_medida = (f'Total {label_medida_rel} Executado por Obra' if filtro_apenas_concluidos_rel
-                                              else f'Saldo {label_medida_rel} Pendente por Obra')
-                    fig_m2 = px.bar(
-                        df_m2_obra, x='Obra', y=label_medida_rel,
-                        title=titulo_grafico_medida,
-                        color=label_medida_rel,
-                        color_continuous_scale=[[0,'#334155'],[1,'#1A56DB']],
-                        text_auto='.1f'
-                    )
-                    fig_m2.update_layout(
-                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                        font_family='Inter', title_font_size=14, showlegend=False,
-                        coloraxis_showscale=False,
-                        margin=dict(l=10,r=10,t=40,b=10),
-                        xaxis=dict(tickfont=dict(size=11)),
-                    )
-                    fig_m2.update_traces(textfont_size=11, textposition='outside')
-                    st.plotly_chart(fig_m2, use_container_width=True)
-
-                with col_g2:
-                    df_status_cnt = df_rel.groupby('Status_Item')['Num_OP'].nunique().reset_index()
-                    df_status_cnt.columns = ['Status', 'OPs']
-                    cores_status = {
-                        'Liberado para Fabrica': '#334155',
-                        'Aguardando Expedicao': '#D97706',
-                        'Enviado Parcial': '#1A56DB',
-                        'Concluido': '#059669',
-                    }
-                    fig_status = px.pie(
-                        df_status_cnt, names='Status', values='OPs',
-                        title='Distribuição por Status',
-                        color='Status',
-                        color_discrete_map=cores_status,
-                        hole=0.45
-                    )
-                    fig_status.update_layout(
-                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                        font_family='Inter', title_font_size=14,
-                        margin=dict(l=10,r=10,t=40,b=10),
-                        legend=dict(font=dict(size=11))
-                    )
-                    fig_status.update_traces(textinfo='value+percent', textfont_size=11)
-                    st.plotly_chart(fig_status, use_container_width=True)
-
-                # ── Tabela detalhada ──────────────────────────────
-                st.markdown("---")
-                st.markdown("#### Detalhamento por OP")
-
-                def badge_status(s):
-                    cores = {
-                        'Liberado para Fabrica': ('background:#EFF6FF;color:#1D4ED8', 'Lib. Fábrica'),
-                        'Aguardando Expedicao':  ('background:#FEF3C7;color:#92400E', 'Ag. Expedição'),
-                        'Enviado Parcial':       ('background:#EFF6FF;color:#1447C0', 'Env. Parcial'),
-                        'Concluido':             ('background:#ECFDF5;color:#065F46', 'Concluído'),
-                    }
-                    estilo, label = cores.get(s, ('background:#F1F5F9;color:#334155', s))
-                    return f'<span style="{estilo};padding:3px 9px;border-radius:5px;font-size:11px;font-weight:700">{label}</span>'
-
-                hoje_ts = pd.Timestamp.now().normalize()
-                cols_show = ['Obra_Vinculada','Num_OP','Tipo_Material','EDT_Vinculado',
-                             'Qtd_Caixas',col_medida_rel,'Data_Producao_Programada','Data_Limite_Obra','Concluido_Em','Status_Item',
-                             'Em_Parada','Motivo_Parada']
-                cols_show_exist = [c for c in cols_show if c in df_rel.columns]
-                df_tabela = df_rel[cols_show_exist].copy()
-                col_saldo_label = f'{label_medida_rel} (total)' if filtro_apenas_concluidos_rel else f'{label_medida_rel} (saldo)'
-                col_names = ['Obra','OP','Material','EDT/Lote','Caixas',col_saldo_label,'Ini Prod.','Limite']
-                if 'Concluido_Em' in df_tabela.columns:
-                    col_names = col_names + ['Conclusão']
-                col_names = col_names + ['Status']
-                if 'Em_Parada' in df_tabela.columns:
-                    df_tabela['Situacao'] = df_tabela.apply(
-                        lambda r: f"⛔ PARADA — {r.get('Motivo_Parada','')}" if r.get('Em_Parada') else '', axis=1
-                    )
-                    df_tabela = df_tabela.drop(columns=['Em_Parada','Motivo_Parada'], errors='ignore')
-                    col_names = col_names + ['Situacao']
-                df_tabela.columns = col_names
-
-                # % de representação sobre o total filtrado
-                col_pct = f'% {label_medida_rel}'
-                total_medida_rel = df_tabela[col_saldo_label].sum()
-                total_cx_rel  = df_tabela['Caixas'].sum()
-                if total_medida_rel > 0:
-                    df_tabela[col_pct] = (df_tabela[col_saldo_label] / total_medida_rel * 100).round(1)
-                    base_pct = col_saldo_label
-                elif total_cx_rel > 0:
-                    df_tabela[col_pct] = (df_tabela['Caixas'] / total_cx_rel * 100).round(1)
-                    base_pct = 'Caixas'
-                else:
-                    df_tabela[col_pct] = 0.0
-                    base_pct = col_saldo_label
-
-                for col_dt in ['Ini Prod.','Limite']:
-                    df_tabela[col_dt] = pd.to_datetime(df_tabela[col_dt], errors='coerce').dt.strftime('%d/%m/%Y')
-                if 'Conclusão' in df_tabela.columns:
-                    conclusao_dt = pd.to_datetime(df_tabela['Conclusão'], errors='coerce')
-                    df_tabela['Conclusão'] = conclusao_dt.dt.strftime('%d/%m/%Y %H:%M')
-                    df_tabela.loc[conclusao_dt.isna(), 'Conclusão'] = '—'
-
-                # Highlight atraso
-                def highlight_row(row):
-                    limite = pd.to_datetime(row['Limite'], format='%d/%m/%Y', errors='coerce')
-                    if pd.notna(limite) and limite < hoje_ts and row['Status'] not in ['Concluído']:
-                        return ['background-color:#FEF2F2'] * len(row)
-                    return [''] * len(row)
-
-                styled = df_tabela.style.apply(highlight_row, axis=1).format({col_saldo_label: '{:.2f}', col_pct: '{:.1f}%'})
-                st.dataframe(styled, hide_index=True, use_container_width=True, height=420)
-
-                st.caption(f"Total de {len(df_tabela)} registros | % calculada sobre {base_pct} do total filtrado | Linhas em vermelho = prazo vencido")
-
-                # ── Exportar Excel formatado ───────────────────────
-                import io
-                from openpyxl import Workbook
-                from openpyxl.styles import (PatternFill, Font, Alignment,
-                                              Border, Side, GradientFill)
-                from openpyxl.utils import get_column_letter
-
-                def gerar_excel_relatorio(df_exp, titulo_filtro="Todas as Obras"):
-                    wb = Workbook()
-                    ws = wb.active
-                    ws.title = "Relatório de Produção"
-
-                    # Paleta
-                    cor_header_dark = "0F172A"
-                    cor_header_accent = "1A56DB"
-                    cor_sub = "1E293B"
-                    cor_linha_par = "F8FAFC"
-                    cor_linha_impar = "FFFFFF"
-                    cor_atrasado = "FEE2E2"
-                    cor_texto_branco = "FFFFFF"
-                    cor_texto_escuro = "1E293B"
-
-                    thin = Side(style='thin', color="E2E8F0")
-                    borda = Border(left=thin, right=thin, top=thin, bottom=thin)
-
-                    # ── Linha 1: título geral ────────────────────
-                    ws.merge_cells("A1:J1")
-                    ws["A1"] = "PASSOLD — SISTEMAS DE FACHADAS"
-                    ws["A1"].font = Font(name="Calibri", bold=True, size=16, color=cor_texto_branco)
-                    ws["A1"].fill = PatternFill("solid", fgColor=cor_header_dark)
-                    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
-                    ws.row_dimensions[1].height = 32
-
-                    # ── Linha 2: subtítulo ───────────────────────
-                    ws.merge_cells("A2:J2")
-                    ws["A2"] = f"Relatório Geral de Produção  |  Obra: {titulo_filtro}  |  Gerado em: {datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M')}"
-                    ws["A2"].font = Font(name="Calibri", size=10, color="94A3B8", italic=True)
-                    ws["A2"].fill = PatternFill("solid", fgColor=cor_sub)
-                    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
-                    ws.row_dimensions[2].height = 20
-
-                    # ── Linha 3: espaço ──────────────────────────
-                    ws.row_dimensions[3].height = 6
-
-                    # ── Linha 4: cabeçalho das colunas ──────────
-                    cabecalhos = list(df_exp.columns)
-                    for col_idx, cab in enumerate(cabecalhos, start=1):
-                        cell = ws.cell(row=4, column=col_idx, value=cab.upper())
-                        cell.font = Font(name="Calibri", bold=True, size=10, color=cor_texto_branco)
-                        cell.fill = PatternFill("solid", fgColor=cor_header_accent)
-                        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-                        cell.border = borda
-                    ws.row_dimensions[4].height = 22
-
-                    # ── Linhas de dados ──────────────────────────
-                    hoje_str = datetime.now(FUSO_BR).strftime('%d/%m/%Y')
-                    # Busca a posição de 'Limite'/'Status' pelo nome, nao por indice fixo --
-                    # a coluna 'Conclusão' (opcional) desloca tudo que vem depois dela.
-                    idx_limite = cabecalhos.index('Limite') if 'Limite' in cabecalhos else None
-                    idx_status = cabecalhos.index('Status') if 'Status' in cabecalhos else None
-                    for row_idx, row_data in enumerate(df_exp.itertuples(index=False), start=5):
-                        is_par = (row_idx % 2 == 0)
-                        limite_val = str(row_data[idx_limite]) if idx_limite is not None else ""
-                        status_val = str(row_data[idx_status]) if idx_status is not None else ""
-                        atrasado = False
-                        try:
-                            lim_dt = datetime.strptime(limite_val, '%d/%m/%Y')
-                            atrasado = lim_dt < hoje_projeto() and status_val not in ['Concluído', 'Concluido']
-                        except Exception:
-                            pass
-
-                        bg = cor_atrasado if atrasado else (cor_linha_par if is_par else cor_linha_impar)
-                        for col_idx, valor in enumerate(row_data, start=1):
-                            cell = ws.cell(row=row_idx, column=col_idx, value=valor)
-                            cell.font = Font(name="Calibri", size=10, color=cor_texto_escuro)
-                            cell.fill = PatternFill("solid", fgColor=bg)
-                            cell.alignment = Alignment(horizontal="center", vertical="center")
-                            cell.border = borda
-                        ws.row_dimensions[row_idx].height = 18
-
-                    # ── Larguras automáticas ──────────────────────
-                    larguras = [14, 20, 18, 18, 10, 10, 14, 14, 20, 12]
-                    for i, larg in enumerate(larguras, start=1):
-                        ws.column_dimensions[get_column_letter(i)].width = larg
-
-                    # ── Linha de rodapé ───────────────────────────
-                    ultima = ws.max_row + 2
-                    ws.merge_cells(f"A{ultima}:J{ultima}")
-                    ws[f"A{ultima}"] = f"Total de {len(df_exp)} registros  |  Linhas em vermelho = prazo vencido"
-                    ws[f"A{ultima}"].font = Font(name="Calibri", size=9, italic=True, color="64748B")
-                    ws[f"A{ultima}"].alignment = Alignment(horizontal="right")
-
-                    buf = io.BytesIO()
-                    wb.save(buf)
-                    buf.seek(0)
-                    return buf.getvalue()
-
-                titulo_filtro_excel = filtro_obra_rel if filtro_obra_rel != "Todas" else "Todas as Obras"
-                excel_bytes = gerar_excel_relatorio(df_tabela, titulo_filtro_excel)
-                st.download_button(
-                    label="Baixar relatório em Excel",
-                    data=excel_bytes,
-                    file_name=f"relatorio_producao_{datetime.now(FUSO_BR).strftime('%Y%m%d_%H%M')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_rel_xlsx"
-                )
+            import io
+            from openpyxl import Workbook
+            from openpyxl.styles import (PatternFill, Font, Alignment,
+                                          Border, Side, GradientFill)
+            from openpyxl.utils import get_column_letter
 
             # ── Relatório Semanal (Concluído + Parcial + Em Produção, num Excel só) ──
             st.markdown("---")
-            with st.expander("📅 Relatório Semanal — Concluído + Parcial + Em Produção", expanded=False):
+            with st.expander("📅 Relatório Semanal — Concluído + Parcial + Em Produção", expanded=True, key="rel_semanal_expander"):
                 st.caption(
                     "Gera um Excel único com 3 seções — Concluído no período escolhido, Parcial (situação "
                     "atual) e Em Produção (situação atual, sem filtro de data — traz tudo que ainda não saiu, "
@@ -12353,29 +11966,419 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         key="dl_rel_semanal_xlsx"
                     )
 
-            # ── Seção: OPs sem frente ─────────────────────────────
-            st.markdown("---")
-            with st.expander("OPs sem frente cadastradas", expanded=False):
-                df_avulsas = df_banco_micro_rel[df_banco_micro_rel['EDT_Vinculado'].str.startswith('AVULSO', na=False)].copy() if not df_banco_micro_rel.empty else pd.DataFrame()
-                if filtro_obra_rel != "Todas" and not df_avulsas.empty:
-                    df_avulsas = df_avulsas[df_avulsas['Obra_Vinculada'] == filtro_obra_rel]
-                if filtro_escopo_rel != "Todos" and not df_avulsas.empty and 'Escopo' in df_avulsas.columns:
-                    df_avulsas = df_avulsas[df_avulsas['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
-                if df_avulsas.empty:
-                    st.info("Nenhuma OP sem frente encontrada.")
+            with st.expander("🔍 Relatório Geral clássico — filtros avançados, KPIs e gráficos", expanded=False, key="rel_geral_classico_expander"):
+                st.caption("Filtros por Obra/Status/Escopo/data, KPIs, gráficos e exportação avulsa — para investigação pontual (não é o relatório semanal de cima).")
+                # ── Filtros ──────────────────────────────────────────
+                rel_f1, rel_f2, rel_f3 = st.columns([2, 2, 2])
+                obras_rel = ["Todas"] + sorted(df_banco_micro_rel['Obra_Vinculada'].dropna().unique().tolist()) if not df_banco_micro_rel.empty else ["Todas"]
+                with rel_f1:
+                    filtro_obra_rel = st.selectbox("Obra:", obras_rel, key="rel_obra")
+                with rel_f2:
+                    status_opcoes = ["Todos", "Pendente", "Liberado para Fabrica", "Parcialmente Concluido", "Concluido"]
+                    filtro_status_rel = st.selectbox("Status:", status_opcoes, key="rel_status")
+                with rel_f3:
+                    escopo_labels_rel = {"ACM": "ACM", "Esquadrias": "Esquadria-Vidro", "Terceirizada": "Terceirizada"}
+                    filtro_escopo_rel = st.selectbox("Escopo:", ["Todos"] + list(escopo_labels_rel.keys()), key="rel_escopo")
+
+                rel_f4, rel_f5, rel_f6 = st.columns([2, 2, 2])
+                with rel_f4:
+                    rel_campo_data = st.selectbox(
+                        "Filtrar data por:", ["Entrada em Produção", "Data Limite", "Data de Conclusão"],
+                        key="rel_campo_data",
+                        help="Entrada em Produção e Data Limite são datas PLANEJADAS (definidas ao cadastrar o lote). "
+                             "Data de Conclusão é a data REAL em que o item foi marcado como Concluído."
+                    )
+                with rel_f5:
+                    rel_dt_ini = st.date_input("De:", value=None, format="DD/MM/YYYY", key="rel_dt_ini")
+                with rel_f6:
+                    rel_dt_fim = st.date_input("Até:", value=None, format="DD/MM/YYYY", key="rel_dt_fim")
+
+                rel_tg1, rel_tg2 = st.columns([1, 2])
+                with rel_tg1:
+                    mostrar_concluidos = st.toggle("Ver concluídos", value=False, key="rel_concl")
+                with rel_tg2:
+                    incluir_paradas_rel = st.toggle(
+                        "⛔ Incluir OPs em parada (mesmo fora do período)", value=False, key="rel_incluir_paradas",
+                        help="Traz também as OPs marcadas como 'Em Parada', ignorando o filtro de data De/Até acima "
+                             "(mas ainda respeitando os filtros de Obra, Status e Escopo)."
+                    )
+                ignorar_periodo_producao_rel = st.toggle(
+                    "🏭 Em produção: mostrar tudo (ignora o período de Entrada em Produção)", value=False, key="rel_ignorar_periodo_producao",
+                    help="Traz TODAS as OPs ainda não concluídas (Liberado para Fábrica / Parcialmente Concluído), "
+                         "mesmo as que entraram em produção antes do período De/Até selecionado — só respeita "
+                         "os filtros de Obra, Status e Escopo. Ideal pro relatório semanal de 'o que ainda está "
+                         "em produção': sem isso, o filtro de data esconde OPs mais antigas que ainda não saíram."
+                )
+
+                # ── Montar dataframe filtrado ────────────────────────
+                df_rel = df_banco_micro_rel.copy() if not df_banco_micro_rel.empty else pd.DataFrame()
+
+                if not df_rel.empty:
+                    # Filtrar por Data de Conclusão só faz sentido pra itens Concluídos —
+                    # nesse caso, não esconde os concluídos mesmo com o toggle desligado.
+                    if not mostrar_concluidos and filtro_status_rel != "Concluido" and rel_campo_data != "Data de Conclusão":
+                        df_rel = df_rel[df_rel['Status_Item'] != 'Concluido']
+                    if filtro_obra_rel != "Todas":
+                        df_rel = df_rel[df_rel['Obra_Vinculada'] == filtro_obra_rel]
+                    if filtro_status_rel != "Todos":
+                        df_rel = df_rel[df_rel['Status_Item'] == filtro_status_rel]
+                    if filtro_escopo_rel != "Todos":
+                        df_rel = df_rel[df_rel['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
+                    col_data_map = {
+                        "Entrada em Produção": "Data_Producao_Programada",
+                        "Data Limite": "Data_Limite_Obra",
+                        "Data de Conclusão": "Concluido_Em",
+                    }
+                    col_dt_filtro = col_data_map[rel_campo_data]
+                    df_rel[col_dt_filtro] = pd.to_datetime(df_rel[col_dt_filtro], errors='coerce')
+                    if rel_dt_ini:
+                        df_rel = df_rel[df_rel[col_dt_filtro] >= pd.Timestamp(rel_dt_ini)]
+                    if rel_dt_fim:
+                        # Concluido_Em tem horário (não é só data) — usa < dia seguinte pra
+                        # incluir qualquer conclusão registrada durante o próprio dia "Até".
+                        if col_dt_filtro == 'Concluido_Em':
+                            df_rel = df_rel[df_rel[col_dt_filtro] < pd.Timestamp(rel_dt_fim) + timedelta(days=1)]
+                        else:
+                            df_rel = df_rel[df_rel[col_dt_filtro] <= pd.Timestamp(rel_dt_fim)]
+
+                # OPs em parada ficam escondidas quando estão fora do período De/Até — mas o
+                # motivo de estarem "paradas" muitas vezes é justamente ter saído do prazo
+                # planejado. Com o toggle ligado, busca de novo (sem filtro de data) e junta.
+                if incluir_paradas_rel and not df_banco_micro_rel.empty and 'Em_Parada' in df_banco_micro_rel.columns:
+                    df_paradas_extra = df_banco_micro_rel[df_banco_micro_rel['Em_Parada'] == True].copy()
+                    if filtro_obra_rel != "Todas":
+                        df_paradas_extra = df_paradas_extra[df_paradas_extra['Obra_Vinculada'] == filtro_obra_rel]
+                    if filtro_status_rel != "Todos":
+                        df_paradas_extra = df_paradas_extra[df_paradas_extra['Status_Item'] == filtro_status_rel]
+                    if filtro_escopo_rel != "Todos":
+                        df_paradas_extra = df_paradas_extra[df_paradas_extra['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
+                    if not mostrar_concluidos and filtro_status_rel != "Concluido":
+                        df_paradas_extra = df_paradas_extra[df_paradas_extra['Status_Item'] != 'Concluido']
+                    if not df_paradas_extra.empty:
+                        df_rel = pd.concat([df_rel, df_paradas_extra], ignore_index=True).drop_duplicates(subset='id', keep='first')
+
+                # "Em produção" e um retrato do que esta em aberto AGORA, nao um evento datado —
+                # filtrar pela data de Entrada em Producao esconde OPs mais antigas que ainda nao
+                # foram concluidas. Com o toggle ligado, busca de novo (sem filtro de data) todo
+                # item ainda nao concluido e junta.
+                if ignorar_periodo_producao_rel and not df_banco_micro_rel.empty:
+                    df_producao_extra = df_banco_micro_rel[df_banco_micro_rel['Status_Item'] != 'Concluido'].copy()
+                    if filtro_obra_rel != "Todas":
+                        df_producao_extra = df_producao_extra[df_producao_extra['Obra_Vinculada'] == filtro_obra_rel]
+                    if filtro_status_rel not in ("Todos", "Concluido"):
+                        df_producao_extra = df_producao_extra[df_producao_extra['Status_Item'] == filtro_status_rel]
+                    if filtro_escopo_rel != "Todos":
+                        df_producao_extra = df_producao_extra[df_producao_extra['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
+                    if not df_producao_extra.empty:
+                        df_rel = pd.concat([df_rel, df_producao_extra], ignore_index=True).drop_duplicates(subset='id', keep='first')
+
+                # OPs Parcialmente Concluidas ja tiveram parte do material enviada — sem descontar isso,
+                # o relatorio contaria o tamanho cheio da OP como se nada tivesse saido ainda. Troca
+                # M2_Item/Peso_Kg pelo SALDO PENDENTE (o que ainda falta produzir/enviar), usando a
+                # proporcao de pecas com saldo (op_pecas) sobre o valor real medido daquele lote.
+                # Excecao: quando o filtro de Status esta especificamente em "Concluido", o usuario
+                # quer ver o total EXECUTADO daquele periodo (nao faz sentido mostrar saldo=0 pra um
+                # relatorio que so tem itens concluidos) — nesse caso usa o valor real medido cheio.
+                # So trata como "total executado" quando o status filtrado e realmente so
+                # Concluido -- com Status="Todos" + Data de Conclusao, o filtro de data ja so
+                # deixa passar concluidos; com qualquer OUTRO status explicito (Pendente etc.),
+                # nao faz sentido rotular como executado o que e saldo pendente desse status.
+                filtro_apenas_concluidos_rel = (
+                    filtro_status_rel == "Concluido"
+                    or (rel_campo_data == "Data de Conclusão" and filtro_status_rel == "Todos")
+                )
+
+                def _saldo_pendente_rel(row, col_original, col_real):
+                    base = row.get(col_real)
+                    base = float(base) if pd.notna(base) and base and base > 0 else float(_nn(row.get(col_original), 0))
+                    if row['Status_Item'] == 'Concluido':
+                        return base if filtro_apenas_concluidos_rel else 0.0
+                    qtd_total_p = row.get('qtd_total')
+                    if pd.notna(qtd_total_p) and qtd_total_p > 0:
+                        frac_pendente = float(_nn(row.get('saldo'), 0)) / float(qtd_total_p)
+                        return base * frac_pendente
+                    return base
+
+                if not df_rel.empty:
+                    df_pecas_saldo_rel = carregar_saldo_pecas_por_lote()
+                    df_rel = df_rel.merge(df_pecas_saldo_rel, left_on='id', right_on='lote_id', how='left')
+                    df_rel['M2_Item'] = df_rel.apply(lambda r: _saldo_pendente_rel(r, 'M2_Item', 'm2_op_real'), axis=1)
+                    df_rel['Peso_Kg'] = df_rel.apply(lambda r: _saldo_pendente_rel(r, 'Peso_Kg', 'peso_op_real'), axis=1)
+
+                # Esquadria-Vidro e medido em kg, nao em m2 — troca a coluna/unidade de referencia
+                # do relatorio quando o filtro de escopo estiver em Esquadrias.
+                escopo_esquadrias_rel = (filtro_escopo_rel == "Esquadrias")
+                col_medida_rel   = 'Peso_Kg' if escopo_esquadrias_rel else 'M2_Item'
+                label_medida_rel = 'kg' if escopo_esquadrias_rel else 'm²'
+                label_kpi_medida_rel = f'Total {label_medida_rel}' if filtro_apenas_concluidos_rel else f'Saldo {label_medida_rel}'
+
+                # ── KPIs ─────────────────────────────────────────────
+                st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+                if not df_rel.empty:
+                    total_ops     = df_rel['Num_OP'].nunique()
+                    total_medida  = df_rel[col_medida_rel].sum()
+                    total_cx      = df_rel['Qtd_Caixas'].sum()
+                    ops_atrasadas = df_rel[
+                        (pd.to_datetime(df_rel['Data_Limite_Obra'], errors='coerce') < hoje_projeto()) &
+                        (~df_rel['Status_Item'].isin(['Concluido']))
+                    ]['Num_OP'].nunique()
+                    enviadas_parcial = df_rel[df_rel['Status_Item'].str.contains('Parcial|parcial', na=False)]['Num_OP'].nunique()
+
+                    k1, k2, k3, k4, k5 = st.columns(5)
+                    k1.metric("Total de OPs", total_ops)
+                    help_medida_rel = ("Total executado nesse período." if filtro_apenas_concluidos_rel
+                                        else "O que ainda falta produzir/enviar — desconta o que já saiu em OPs parcialmente enviadas.")
+                    k2.metric(label_kpi_medida_rel, f"{total_medida:,.1f}", help=help_medida_rel)
+                    k3.metric("Total Caixas", int(total_cx))
+                    k4.metric("OPs Atrasadas", ops_atrasadas, delta=f"-{ops_atrasadas}" if ops_atrasadas > 0 else None, delta_color="inverse")
+                    k5.metric("Envio Parcial", enviadas_parcial)
                 else:
-                    df_avulsas = df_avulsas.merge(carregar_saldo_pecas_por_lote(), left_on='id', right_on='lote_id', how='left')
-                    df_avulsas['M2_Item'] = df_avulsas.apply(lambda r: _saldo_pendente_rel(r, 'M2_Item', 'm2_op_real'), axis=1)
-                    df_avulsas['Peso_Kg'] = df_avulsas.apply(lambda r: _saldo_pendente_rel(r, 'Peso_Kg', 'peso_op_real'), axis=1)
-                    cols_av = ['Obra_Vinculada','Num_OP','Tipo_Material','Qtd_Caixas',col_medida_rel,
-                               'Data_Producao_Programada','Data_Limite_Obra','Status_Item','Romaneio_Chapas']
-                    df_avulsas = df_avulsas[cols_av].copy()
-                    col_saldo_label_av = f'{label_medida_rel} (total)' if filtro_apenas_concluidos_rel else f'{label_medida_rel} (saldo)'
-                    df_avulsas.columns = ['Obra','OP','Material','Caixas',col_saldo_label_av,'Ini Prod.','Limite','Status','Detalhes']
+                    st.info("Nenhum dado disponível para os filtros selecionados.")
+
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+                if not df_rel.empty:
+                    # ── Gráfico: medida por obra (m² ou kg, conforme o escopo) ──
+                    col_g1, col_g2 = st.columns(2)
+                    with col_g1:
+                        df_m2_obra = df_rel.groupby('Obra_Vinculada')[col_medida_rel].sum().reset_index()
+                        df_m2_obra.columns = ['Obra', label_medida_rel]
+                        df_m2_obra = df_m2_obra.sort_values(label_medida_rel, ascending=False)
+                        titulo_grafico_medida = (f'Total {label_medida_rel} Executado por Obra' if filtro_apenas_concluidos_rel
+                                                  else f'Saldo {label_medida_rel} Pendente por Obra')
+                        fig_m2 = px.bar(
+                            df_m2_obra, x='Obra', y=label_medida_rel,
+                            title=titulo_grafico_medida,
+                            color=label_medida_rel,
+                            color_continuous_scale=[[0,'#334155'],[1,'#1A56DB']],
+                            text_auto='.1f'
+                        )
+                        fig_m2.update_layout(
+                            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                            font_family='Inter', title_font_size=14, showlegend=False,
+                            coloraxis_showscale=False,
+                            margin=dict(l=10,r=10,t=40,b=10),
+                            xaxis=dict(tickfont=dict(size=11)),
+                        )
+                        fig_m2.update_traces(textfont_size=11, textposition='outside')
+                        st.plotly_chart(fig_m2, use_container_width=True)
+
+                    with col_g2:
+                        df_status_cnt = df_rel.groupby('Status_Item')['Num_OP'].nunique().reset_index()
+                        df_status_cnt.columns = ['Status', 'OPs']
+                        cores_status = {
+                            'Liberado para Fabrica': '#334155',
+                            'Aguardando Expedicao': '#D97706',
+                            'Enviado Parcial': '#1A56DB',
+                            'Concluido': '#059669',
+                        }
+                        fig_status = px.pie(
+                            df_status_cnt, names='Status', values='OPs',
+                            title='Distribuição por Status',
+                            color='Status',
+                            color_discrete_map=cores_status,
+                            hole=0.45
+                        )
+                        fig_status.update_layout(
+                            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                            font_family='Inter', title_font_size=14,
+                            margin=dict(l=10,r=10,t=40,b=10),
+                            legend=dict(font=dict(size=11))
+                        )
+                        fig_status.update_traces(textinfo='value+percent', textfont_size=11)
+                        st.plotly_chart(fig_status, use_container_width=True)
+
+                    # ── Tabela detalhada ──────────────────────────────
+                    st.markdown("---")
+                    st.markdown("#### Detalhamento por OP")
+
+                    def badge_status(s):
+                        cores = {
+                            'Liberado para Fabrica': ('background:#EFF6FF;color:#1D4ED8', 'Lib. Fábrica'),
+                            'Aguardando Expedicao':  ('background:#FEF3C7;color:#92400E', 'Ag. Expedição'),
+                            'Enviado Parcial':       ('background:#EFF6FF;color:#1447C0', 'Env. Parcial'),
+                            'Concluido':             ('background:#ECFDF5;color:#065F46', 'Concluído'),
+                        }
+                        estilo, label = cores.get(s, ('background:#F1F5F9;color:#334155', s))
+                        return f'<span style="{estilo};padding:3px 9px;border-radius:5px;font-size:11px;font-weight:700">{label}</span>'
+
+                    hoje_ts = pd.Timestamp.now().normalize()
+                    cols_show = ['Obra_Vinculada','Num_OP','Tipo_Material','EDT_Vinculado',
+                                 'Qtd_Caixas',col_medida_rel,'Data_Producao_Programada','Data_Limite_Obra','Concluido_Em','Status_Item',
+                                 'Em_Parada','Motivo_Parada']
+                    cols_show_exist = [c for c in cols_show if c in df_rel.columns]
+                    df_tabela = df_rel[cols_show_exist].copy()
+                    col_saldo_label = f'{label_medida_rel} (total)' if filtro_apenas_concluidos_rel else f'{label_medida_rel} (saldo)'
+                    col_names = ['Obra','OP','Material','EDT/Lote','Caixas',col_saldo_label,'Ini Prod.','Limite']
+                    if 'Concluido_Em' in df_tabela.columns:
+                        col_names = col_names + ['Conclusão']
+                    col_names = col_names + ['Status']
+                    if 'Em_Parada' in df_tabela.columns:
+                        df_tabela['Situacao'] = df_tabela.apply(
+                            lambda r: f"⛔ PARADA — {r.get('Motivo_Parada','')}" if r.get('Em_Parada') else '', axis=1
+                        )
+                        df_tabela = df_tabela.drop(columns=['Em_Parada','Motivo_Parada'], errors='ignore')
+                        col_names = col_names + ['Situacao']
+                    df_tabela.columns = col_names
+
+                    # % de representação sobre o total filtrado
+                    col_pct = f'% {label_medida_rel}'
+                    total_medida_rel = df_tabela[col_saldo_label].sum()
+                    total_cx_rel  = df_tabela['Caixas'].sum()
+                    if total_medida_rel > 0:
+                        df_tabela[col_pct] = (df_tabela[col_saldo_label] / total_medida_rel * 100).round(1)
+                        base_pct = col_saldo_label
+                    elif total_cx_rel > 0:
+                        df_tabela[col_pct] = (df_tabela['Caixas'] / total_cx_rel * 100).round(1)
+                        base_pct = 'Caixas'
+                    else:
+                        df_tabela[col_pct] = 0.0
+                        base_pct = col_saldo_label
+
                     for col_dt in ['Ini Prod.','Limite']:
-                        df_avulsas[col_dt] = pd.to_datetime(df_avulsas[col_dt], errors='coerce').dt.strftime('%d/%m/%Y')
-                    st.dataframe(df_avulsas.style.format({col_saldo_label_av: '{:.2f}'}), hide_index=True, use_container_width=True)
-                    st.caption(f"{len(df_avulsas)} OP(s) sem frente encontrada(s).")
+                        df_tabela[col_dt] = pd.to_datetime(df_tabela[col_dt], errors='coerce').dt.strftime('%d/%m/%Y')
+                    if 'Conclusão' in df_tabela.columns:
+                        conclusao_dt = pd.to_datetime(df_tabela['Conclusão'], errors='coerce')
+                        df_tabela['Conclusão'] = conclusao_dt.dt.strftime('%d/%m/%Y %H:%M')
+                        df_tabela.loc[conclusao_dt.isna(), 'Conclusão'] = '—'
+
+                    # Highlight atraso
+                    def highlight_row(row):
+                        limite = pd.to_datetime(row['Limite'], format='%d/%m/%Y', errors='coerce')
+                        if pd.notna(limite) and limite < hoje_ts and row['Status'] not in ['Concluído']:
+                            return ['background-color:#FEF2F2'] * len(row)
+                        return [''] * len(row)
+
+                    styled = df_tabela.style.apply(highlight_row, axis=1).format({col_saldo_label: '{:.2f}', col_pct: '{:.1f}%'})
+                    st.dataframe(styled, hide_index=True, use_container_width=True, height=420)
+
+                    st.caption(f"Total de {len(df_tabela)} registros | % calculada sobre {base_pct} do total filtrado | Linhas em vermelho = prazo vencido")
+
+                    # ── Exportar Excel formatado ───────────────────────
+
+                    def gerar_excel_relatorio(df_exp, titulo_filtro="Todas as Obras"):
+                        wb = Workbook()
+                        ws = wb.active
+                        ws.title = "Relatório de Produção"
+
+                        # Paleta
+                        cor_header_dark = "0F172A"
+                        cor_header_accent = "1A56DB"
+                        cor_sub = "1E293B"
+                        cor_linha_par = "F8FAFC"
+                        cor_linha_impar = "FFFFFF"
+                        cor_atrasado = "FEE2E2"
+                        cor_texto_branco = "FFFFFF"
+                        cor_texto_escuro = "1E293B"
+
+                        thin = Side(style='thin', color="E2E8F0")
+                        borda = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+                        # ── Linha 1: título geral ────────────────────
+                        ws.merge_cells("A1:J1")
+                        ws["A1"] = "PASSOLD — SISTEMAS DE FACHADAS"
+                        ws["A1"].font = Font(name="Calibri", bold=True, size=16, color=cor_texto_branco)
+                        ws["A1"].fill = PatternFill("solid", fgColor=cor_header_dark)
+                        ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+                        ws.row_dimensions[1].height = 32
+
+                        # ── Linha 2: subtítulo ───────────────────────
+                        ws.merge_cells("A2:J2")
+                        ws["A2"] = f"Relatório Geral de Produção  |  Obra: {titulo_filtro}  |  Gerado em: {datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M')}"
+                        ws["A2"].font = Font(name="Calibri", size=10, color="94A3B8", italic=True)
+                        ws["A2"].fill = PatternFill("solid", fgColor=cor_sub)
+                        ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+                        ws.row_dimensions[2].height = 20
+
+                        # ── Linha 3: espaço ──────────────────────────
+                        ws.row_dimensions[3].height = 6
+
+                        # ── Linha 4: cabeçalho das colunas ──────────
+                        cabecalhos = list(df_exp.columns)
+                        for col_idx, cab in enumerate(cabecalhos, start=1):
+                            cell = ws.cell(row=4, column=col_idx, value=cab.upper())
+                            cell.font = Font(name="Calibri", bold=True, size=10, color=cor_texto_branco)
+                            cell.fill = PatternFill("solid", fgColor=cor_header_accent)
+                            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                            cell.border = borda
+                        ws.row_dimensions[4].height = 22
+
+                        # ── Linhas de dados ──────────────────────────
+                        hoje_str = datetime.now(FUSO_BR).strftime('%d/%m/%Y')
+                        # Busca a posição de 'Limite'/'Status' pelo nome, nao por indice fixo --
+                        # a coluna 'Conclusão' (opcional) desloca tudo que vem depois dela.
+                        idx_limite = cabecalhos.index('Limite') if 'Limite' in cabecalhos else None
+                        idx_status = cabecalhos.index('Status') if 'Status' in cabecalhos else None
+                        for row_idx, row_data in enumerate(df_exp.itertuples(index=False), start=5):
+                            is_par = (row_idx % 2 == 0)
+                            limite_val = str(row_data[idx_limite]) if idx_limite is not None else ""
+                            status_val = str(row_data[idx_status]) if idx_status is not None else ""
+                            atrasado = False
+                            try:
+                                lim_dt = datetime.strptime(limite_val, '%d/%m/%Y')
+                                atrasado = lim_dt < hoje_projeto() and status_val not in ['Concluído', 'Concluido']
+                            except Exception:
+                                pass
+
+                            bg = cor_atrasado if atrasado else (cor_linha_par if is_par else cor_linha_impar)
+                            for col_idx, valor in enumerate(row_data, start=1):
+                                cell = ws.cell(row=row_idx, column=col_idx, value=valor)
+                                cell.font = Font(name="Calibri", size=10, color=cor_texto_escuro)
+                                cell.fill = PatternFill("solid", fgColor=bg)
+                                cell.alignment = Alignment(horizontal="center", vertical="center")
+                                cell.border = borda
+                            ws.row_dimensions[row_idx].height = 18
+
+                        # ── Larguras automáticas ──────────────────────
+                        larguras = [14, 20, 18, 18, 10, 10, 14, 14, 20, 12]
+                        for i, larg in enumerate(larguras, start=1):
+                            ws.column_dimensions[get_column_letter(i)].width = larg
+
+                        # ── Linha de rodapé ───────────────────────────
+                        ultima = ws.max_row + 2
+                        ws.merge_cells(f"A{ultima}:J{ultima}")
+                        ws[f"A{ultima}"] = f"Total de {len(df_exp)} registros  |  Linhas em vermelho = prazo vencido"
+                        ws[f"A{ultima}"].font = Font(name="Calibri", size=9, italic=True, color="64748B")
+                        ws[f"A{ultima}"].alignment = Alignment(horizontal="right")
+
+                        buf = io.BytesIO()
+                        wb.save(buf)
+                        buf.seek(0)
+                        return buf.getvalue()
+
+                    titulo_filtro_excel = filtro_obra_rel if filtro_obra_rel != "Todas" else "Todas as Obras"
+                    excel_bytes = gerar_excel_relatorio(df_tabela, titulo_filtro_excel)
+                    st.download_button(
+                        label="Baixar relatório em Excel",
+                        data=excel_bytes,
+                        file_name=f"relatorio_producao_{datetime.now(FUSO_BR).strftime('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="dl_rel_xlsx"
+                    )
+                # ── Seção: OPs sem frente ─────────────────────────────
+                st.markdown("---")
+                st.markdown("**📋 OPs sem frente cadastradas**")
+                with st.container(border=True):
+                    df_avulsas = df_banco_micro_rel[df_banco_micro_rel['EDT_Vinculado'].str.startswith('AVULSO', na=False)].copy() if not df_banco_micro_rel.empty else pd.DataFrame()
+                    if filtro_obra_rel != "Todas" and not df_avulsas.empty:
+                        df_avulsas = df_avulsas[df_avulsas['Obra_Vinculada'] == filtro_obra_rel]
+                    if filtro_escopo_rel != "Todos" and not df_avulsas.empty and 'Escopo' in df_avulsas.columns:
+                        df_avulsas = df_avulsas[df_avulsas['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
+                    if df_avulsas.empty:
+                        st.info("Nenhuma OP sem frente encontrada.")
+                    else:
+                        df_avulsas = df_avulsas.merge(carregar_saldo_pecas_por_lote(), left_on='id', right_on='lote_id', how='left')
+                        df_avulsas['M2_Item'] = df_avulsas.apply(lambda r: _saldo_pendente_rel(r, 'M2_Item', 'm2_op_real'), axis=1)
+                        df_avulsas['Peso_Kg'] = df_avulsas.apply(lambda r: _saldo_pendente_rel(r, 'Peso_Kg', 'peso_op_real'), axis=1)
+                        cols_av = ['Obra_Vinculada','Num_OP','Tipo_Material','Qtd_Caixas',col_medida_rel,
+                                   'Data_Producao_Programada','Data_Limite_Obra','Status_Item','Romaneio_Chapas']
+                        df_avulsas = df_avulsas[cols_av].copy()
+                        col_saldo_label_av = f'{label_medida_rel} (total)' if filtro_apenas_concluidos_rel else f'{label_medida_rel} (saldo)'
+                        df_avulsas.columns = ['Obra','OP','Material','Caixas',col_saldo_label_av,'Ini Prod.','Limite','Status','Detalhes']
+                        for col_dt in ['Ini Prod.','Limite']:
+                            df_avulsas[col_dt] = pd.to_datetime(df_avulsas[col_dt], errors='coerce').dt.strftime('%d/%m/%Y')
+                        st.dataframe(df_avulsas.style.format({col_saldo_label_av: '{:.2f}'}), hide_index=True, use_container_width=True)
+                        st.caption(f"{len(df_avulsas)} OP(s) sem frente encontrada(s).")
 
     # ==================================================
     # RELATORIO DE PRODUTIVIDADE — kg (Esquadria-Vidro) / m² (ACM) por colaborador
@@ -12524,7 +12527,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
-                ("2026-08-20", "Relatório Geral ganha o \"Relatório Semanal\": um Excel só com Concluído (no período) + Parcial + Em Produção, dividido em ACM e Esquadrias."),
+                ("2026-08-20", "Relatório Geral ganha o \"Relatório Semanal\" (Concluído + Parcial + Em Produção, por ACM/Esquadrias) e sobe pro topo da tela — os filtros/KPIs/gráficos antigos continuam disponíveis dentro do expander \"Relatório Geral clássico\"."),
                 ("2026-08-19", "Romaneio Manual ganha aba \"Colar Lista\" pra adicionar vários itens de uma vez (campos lado a lado, um item por linha)."),
                 ("2026-08-18", "Kanban ganha níveis de prioridade (Urgente/Alto/Médio/Baixo) nos quadros do Departamento Técnico ACM e Esquadrias, com ordenação automática por prioridade."),
                 ("2026-08-18", "Kanban ganha filtro por número da RC; campo de novo cartão vira \"Número da RC\" no quadro Compras."),
@@ -12786,16 +12789,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     ("relatorio_geral", "📊 Relatório Geral", """
 **Quem acessa:** Master, Diretoria, PCP, Medição.
 
-**Para que serve:** Visão completa de todas as OPs ativas, com filtros, gráficos e exportação em Excel.
+**Para que serve:** Gerar o relatório semanal pra diretoria e, quando precisar investigar algo pontual, filtrar/exportar qualquer recorte das OPs ativas.
 
 **Passo a passo:**
-1. Filtre por Obra, Status e Escopo.
-2. Escolha qual data usar no filtro de período ("Entrada em Produção", "Data Limite" ou "Data de Conclusão") e o intervalo De/Até.
-3. Ligue "Ver concluídos" pra incluir itens já concluídos na lista; ligue "Incluir OPs em parada" pra trazer paradas mesmo fora do período de data.
-4. Confira os KPIs e gráficos do topo, e a tabela detalhada por OP mais abaixo (linhas vermelhas = prazo vencido).
-5. Baixe tudo em Excel no botão "Baixar relatório em Excel".
-6. O expander "OPs sem frente cadastradas" no final lista lotes avulsos, sem vínculo com o cronograma.
-7. Pro relatório semanal pra diretoria, use o expander "📅 Relatório Semanal — Concluído + Parcial + Em Produção": escolha Obra e o período de "Concluído de/até", clique "📊 Gerar Relatório Semanal" e baixe o Excel. Ele já sai com 3 seções (Concluído no período, Parcial, Em Produção), cada uma dividida em ACM e Esquadrias.
+1. Expander "📅 Relatório Semanal — Concluído + Parcial + Em Produção" (aberto direto na tela, é o mais usado): escolha Obra e o período de "Concluído de/até", clique "📊 Gerar Relatório Semanal" e baixe o Excel. Ele já sai com 3 seções (Concluído no período, Parcial, Em Produção), cada uma dividida em ACM e Esquadrias.
+2. Pra qualquer outro recorte (um status específico, um intervalo de datas diferente, ver os gráficos/KPIs, OPs sem frente cadastradas), abra o expander "🔍 Relatório Geral clássico — filtros avançados, KPIs e gráficos": filtre por Obra, Status, Escopo e período, confira os gráficos e a tabela detalhada (linhas vermelhas = prazo vencido), e baixe em Excel se precisar.
 
 **Regras importantes:**
 - Em OPs Parcialmente Concluídas, o m²/kg mostrado é o saldo pendente (não o total do lote) — exceto quando o filtro de Status é "Concluido".
