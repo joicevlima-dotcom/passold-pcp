@@ -15,6 +15,8 @@ import psycopg2.extras
 from psycopg2 import pool
 from zoneinfo import ZoneInfo
 from html import escape as html_escape
+import smtplib
+from email.message import EmailMessage
 
 FUSO_BR = ZoneInfo('America/Sao_Paulo')
 
@@ -1144,6 +1146,7 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE kanban_cards ADD COLUMN IF NOT EXISTS prazo DATE")
         cursor.execute("ALTER TABLE kanban_cards ADD COLUMN IF NOT EXISTS destinatario TEXT")
         cursor.execute("ALTER TABLE kanban_cards ADD COLUMN IF NOT EXISTS prioridade TEXT")
+        cursor.execute("ALTER TABLE kanban_cards ADD COLUMN IF NOT EXISTS atribuido_a TEXT")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS kanban_historico (
                 id SERIAL PRIMARY KEY,
@@ -1944,16 +1947,17 @@ def excluir_coluna(coluna_id: int):
         liberar_conexao(conn)
 
 def criar_card(quadro_id: int, coluna_id: int, titulo: str, descricao: str, obra: str,
-               numero_projeto: str, responsavel: str, destinatario: str, prazo, criado_por: str, prioridade: str = None):
+               numero_projeto: str, responsavel: str, destinatario: str, prazo, criado_por: str,
+               prioridade: str = None, atribuido_a: str = None):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
         cursor.execute(
             """INSERT INTO kanban_cards
-               (quadro_id, coluna_id, titulo, descricao, obra, numero_projeto, responsavel, destinatario, prazo, criado_por, prioridade)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+               (quadro_id, coluna_id, titulo, descricao, obra, numero_projeto, responsavel, destinatario, prazo, criado_por, prioridade, atribuido_a)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (quadro_id, coluna_id, titulo.strip(), (descricao or "").strip(),
-             obra or None, numero_projeto or None, (responsavel or "").strip(), (destinatario or "").strip(), prazo, criado_por, prioridade)
+             obra or None, numero_projeto or None, (responsavel or "").strip(), (destinatario or "").strip(), prazo, criado_por, prioridade, atribuido_a)
         )
         conn.commit()
         return True, ""
@@ -1962,6 +1966,55 @@ def criar_card(quadro_id: int, coluna_id: int, titulo: str, descricao: str, obra
         return False, f"Erro ao criar cartão: {e}"
     finally:
         liberar_conexao(conn)
+
+# ── Notificação por e-mail (Kanban — Departamento Técnico ACM/Esquadrias) ──
+KANBAN_EQUIPE_EMAILS = {
+    "William": "william@fachadaspassold.com.br",
+    "Josué": "projetos2@fachadaspassold.com.br",
+    "Élio": "projetospassold04@outlook.com",
+    "Anderson": "projetos@fachadaspassold.com.br",
+    "Kauan": "projetos3@fachadaspassold.com.br",
+    "Jonathan": None,  # ainda sem e-mail cadastrado
+}
+KANBAN_EMAIL_DIRETOR_ENGENHARIA = "daniel@fachadaspassold.com.br"
+
+def enviar_email_kanban_novo_cartao(atribuido_a: str, quadro_nome: str, coluna_nome: str, titulo: str,
+                                     descricao: str, obra: str, numero_projeto: str, prazo, criado_por: str) -> bool:
+    """Notifica por e-mail o atribuído e o diretor de engenharia sobre um cartão novo.
+    Nunca levanta exceção (falha de e-mail não pode derrubar a criação do cartão).
+    Retorna True se o atribuído tinha e-mail cadastrado e o envio não falhou."""
+    email_atribuido = KANBAN_EQUIPE_EMAILS.get(atribuido_a)
+    destinatarios = [e for e in [email_atribuido, KANBAN_EMAIL_DIRETOR_ENGENHARIA] if e]
+    if not destinatarios:
+        return False
+    try:
+        smtp_user = st.secrets["email"]["smtp_user"]
+        smtp_password = st.secrets["email"]["smtp_password"]
+    except Exception:
+        return False
+
+    corpo = f"Nova tarefa atribuída a {atribuido_a} no quadro {quadro_nome}.\n\n"
+    corpo += f"Título: {titulo}\nColuna: {coluna_nome}\n"
+    if obra:
+        corpo += f"Obra: {obra}\n"
+    if numero_projeto:
+        corpo += f"Projeto: {numero_projeto}\n"
+    if prazo:
+        corpo += f"Prazo: {prazo.strftime('%d/%m/%Y') if hasattr(prazo, 'strftime') else prazo}\n"
+    corpo += f"\nDescrição:\n{descricao or '—'}\n\nCriado por: {criado_por}\n"
+
+    msg = EmailMessage()
+    msg["Subject"] = f"[Kanban] Nova tarefa: {titulo}"
+    msg["From"] = smtp_user
+    msg["To"] = ", ".join(destinatarios)
+    msg.set_content(corpo)
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as s:
+            s.login(smtp_user, smtp_password)
+            s.send_message(msg)
+    except Exception:
+        return False
+    return email_atribuido is not None
 
 def criar_comentario(card_id: int, autor: str, texto: str):
     conn = conectar_banco()
@@ -11168,6 +11221,13 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             )
                         else:
                             nc_prioridade = None
+                        if eh_quadro_prioridade:
+                            nc_atribuido = st.selectbox(
+                                "Atribuído a:", ["—"] + list(KANBAN_EQUIPE_EMAILS.keys()),
+                                key=f"kanban_card_atribuido_{quadro_atual_id}"
+                            )
+                        else:
+                            nc_atribuido = None
                         nc_desc = st.text_area("Descrição:", key=f"kanban_card_desc_{quadro_atual_id}", height=68)
                         nc_projeto = st.selectbox("Projeto:", ["—"] + projetos_obra, key=f"kanban_card_projeto_{quadro_atual_id}")
                         nc_prazo = st.date_input("Prazo:", value=None, format="DD/MM/YYYY", key=f"kanban_card_prazo_{quadro_atual_id}")
@@ -11190,20 +11250,36 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.error("Informe o solicitante.")
                             elif not nc_dest.strip():
                                 st.error("Informe o destinatário.")
+                            elif eh_quadro_prioridade and nc_atribuido == "—":
+                                st.error("Escolha o atribuído.")
                             else:
                                 nc_coluna_id = int(df_colunas[df_colunas['nome'] == nc_coluna_nome]['id'].iloc[0])
                                 nc_titulo_final = f"RC {nc_titulo.strip()}" if eh_quadro_compras else nc_titulo.strip()
+                                nc_atribuido_final = nc_atribuido if (eh_quadro_prioridade and nc_atribuido != "—") else None
                                 ok_c, msg_c = criar_card(
                                     quadro_atual_id, nc_coluna_id, nc_titulo_final, nc_desc,
                                     nc_obra if nc_obra != "—" else None,
                                     nc_projeto if nc_projeto != "—" else None,
-                                    nc_resp, nc_dest, nc_prazo, st.session_state.usuario_nome, nc_prioridade
+                                    nc_resp, nc_dest, nc_prazo, st.session_state.usuario_nome, nc_prioridade,
+                                    nc_atribuido_final
                                 )
                                 if ok_c:
                                     _limpar_cache_kanban()
                                     registrar_auditoria(st.session_state.usuario_nome, "KANBAN_CRIAR_CARTAO",
                                         f"Quadro: {quadro_row['nome']} | Coluna: {nc_coluna_nome} | {nc_titulo_final}")
-                                    st.toast("Cartão criado!")
+                                    if nc_atribuido_final:
+                                        notificou = enviar_email_kanban_novo_cartao(
+                                            nc_atribuido_final, quadro_row['nome'], nc_coluna_nome, nc_titulo_final,
+                                            nc_desc, nc_obra if nc_obra != "—" else None,
+                                            nc_projeto if nc_projeto != "—" else None,
+                                            nc_prazo, st.session_state.usuario_nome
+                                        )
+                                        if notificou:
+                                            st.toast("Cartão criado! E-mail enviado.")
+                                        else:
+                                            st.toast(f"Cartão criado! (e-mail de {nc_atribuido_final} ainda não cadastrado ou falhou — avisamos a diretoria)")
+                                    else:
+                                        st.toast("Cartão criado!")
                                     st.rerun()
                                 else:
                                     st.error(msg_c)
@@ -11245,6 +11321,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     tags_label = []
                     if eh_quadro_prioridade and card.get('prioridade'):
                         tags_label.append(f"{_KANBAN_PRIORIDADE_EMOJI.get(card['prioridade'], '')} {card['prioridade'].upper()}")
+                    if eh_quadro_prioridade and card.get('atribuido_a'):
+                        tags_label.append(f"👤 {card['atribuido_a']}")
                     if card.get('obra'):
                         obra_txt = str(card['obra'])
                         if card.get('numero_projeto'):
@@ -11283,6 +11361,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         st.rerun()
                                     else:
                                         st.error(msg_p)
+                        if card.get('atribuido_a'):
+                            st.caption(f"👤 Atribuído a: {card['atribuido_a']}")
                         if card.get('obra'):
                             st.caption(f"🏗️ Obra: {card['obra']}")
                         if card.get('numero_projeto'):
@@ -12527,6 +12607,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-08-20", "Kanban: nos quadros do Departamento Técnico ACM e Esquadrias, novo cartão ganha campo \"Atribuído a:\" e dispara e-mail automático pra pessoa atribuída + diretor de engenharia."),
                 ("2026-08-20", "Relatório Geral ganha o \"Relatório Semanal\" (Concluído + Parcial + Em Produção, por ACM/Esquadrias) e sobe pro topo da tela — os filtros/KPIs/gráficos antigos continuam disponíveis dentro do expander \"Relatório Geral clássico\"."),
                 ("2026-08-19", "Romaneio Manual ganha aba \"Colar Lista\" pra adicionar vários itens de uma vez (campos lado a lado, um item por linha)."),
                 ("2026-08-18", "Kanban ganha níveis de prioridade (Urgente/Alto/Médio/Baixo) nos quadros do Departamento Técnico ACM e Esquadrias, com ordenação automática por prioridade."),
@@ -12846,6 +12927,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 **Regras importantes:**
 - No quadro chamado exatamente "Compras", o campo de título vira "Número da RC" e só aceita dígitos — o sistema salva como "RC 1234" automaticamente.
 - Nos quadros "Departamento Tecnico - ACM" e "Departamento Tecnico - Esquadrias", o cartão ganha um campo "Prioridade:" (🔴 Urgente / 🟠 Alto / 🟡 Médio / 🔵 Baixo), editável a qualquer momento dentro do cartão — e a lista passa a ordenar pela prioridade (mais urgente no topo) antes da data de criação.
+- Nesses mesmos dois quadros, o cartão também ganha um campo "Atribuído a:" (lista fixa da equipe técnica). Ao criar o cartão, o sistema manda um e-mail automático pra pessoa atribuída e em cópia pro diretor de engenharia, avisando da tarefa nova.
 - O menu "Mover para:" nunca mostra a coluna onde o cartão já está — por isso, se o cartão já está em "Acompanhamento Entregas", por exemplo, essa opção não aparece na lista.
 - Histórico de movimentações do cartão só aparece pra Master; excluir cartão também é só Master.
 - Master pode restringir quais setores veem cada quadro, em "🔒 Quem pode ver este quadro".
