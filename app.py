@@ -2075,6 +2075,19 @@ def atualizar_titulo_card(card_id: int, titulo: str):
     finally:
         liberar_conexao(conn)
 
+def atualizar_descricao_card(card_id: int, descricao: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE kanban_cards SET descricao=%s, atualizado_em=NOW() WHERE id=%s", (descricao, card_id))
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao atualizar descrição: {e}"
+    finally:
+        liberar_conexao(conn)
+
 def excluir_card(card_id: int):
     conn = conectar_banco()
     try:
@@ -11425,8 +11438,33 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             st.caption(f"📨 Destinatário: {card['destinatario']}")
                         dias_parado = (hoje_projeto() - card['criado_em']).days
                         st.caption(f"🕐 há {dias_parado}d" if dias_parado != 1 else "🕐 há 1d")
-                        if card.get('descricao'):
-                            st.write(card['descricao'])
+                        edit_desc_key = f"kanban_edit_descricao_{card_id}"
+                        if st.session_state.get(edit_desc_key):
+                            nova_desc_card = st.text_area("Descrição:", value=card.get('descricao') or '', key=f"kanban_descricao_input_{card_id}")
+                            col_desc1, col_desc2 = st.columns([1, 1])
+                            with col_desc1:
+                                if st.button("💾 Salvar", key=f"kanban_descricao_btn_{card_id}"):
+                                    ok_d2, msg_d2 = atualizar_descricao_card(card_id, nova_desc_card.strip())
+                                    if ok_d2:
+                                        _limpar_cache_kanban()
+                                        registrar_auditoria(st.session_state.usuario_nome, "KANBAN_ALTERAR_DESCRICAO",
+                                            f"Quadro: {quadro_row['nome']} | {card['titulo']}")
+                                        st.session_state[edit_desc_key] = False
+                                        st.toast("Descrição atualizada!")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg_d2)
+                            with col_desc2:
+                                if st.button("✖️ Cancelar", key=f"kanban_descricao_cancel_{card_id}"):
+                                    st.session_state[edit_desc_key] = False
+                                    st.rerun()
+                        else:
+                            if card.get('descricao'):
+                                st.write(card['descricao'])
+                            if pode_editar_kanban:
+                                if st.button("✏️ Editar descrição", key=f"kanban_descricao_toggle_{card_id}"):
+                                    st.session_state[edit_desc_key] = True
+                                    st.rerun()
 
                         st.markdown("---")
                         df_anexos_card = df_anexos[df_anexos['card_id'] == card_id] if not df_anexos.empty else df_anexos
