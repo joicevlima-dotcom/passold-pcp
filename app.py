@@ -2102,6 +2102,19 @@ def arquivar_card(card_id: int, arquivado: bool):
     finally:
         liberar_conexao(conn)
 
+def atualizar_projeto_card(card_id: int, numero_projeto: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE kanban_cards SET numero_projeto=%s, atualizado_em=NOW() WHERE id=%s", (numero_projeto or None, card_id))
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao atualizar projeto: {e}"
+    finally:
+        liberar_conexao(conn)
+
 def excluir_card(card_id: int):
     conn = conectar_banco()
     try:
@@ -11457,8 +11470,40 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             st.caption(f"👤 Atribuído a: {card['atribuido_a']}")
                         if card.get('obra'):
                             st.caption(f"🏗️ Obra: {card['obra']}")
-                        if card.get('numero_projeto'):
-                            st.caption(f"📋 Projeto: {card['numero_projeto']}")
+                        edit_proj_key = f"kanban_edit_projeto_{card_id}"
+                        if st.session_state.get(edit_proj_key):
+                            projetos_card_obra = sorted(df_projetos[df_projetos['Obra'] == card.get('obra')]['Numero_Projeto'].dropna().unique().tolist()) if card.get('obra') and not df_projetos.empty else []
+                            proj_atual_idx = (["—"] + projetos_card_obra).index(card['numero_projeto']) if card.get('numero_projeto') in projetos_card_obra else 0
+                            col_proj1, col_proj2, col_proj3 = st.columns([3, 1, 1])
+                            novo_projeto_card = col_proj1.selectbox(
+                                "Projeto:", ["—"] + projetos_card_obra, index=proj_atual_idx, key=f"kanban_projeto_sel_{card_id}"
+                            )
+                            with col_proj2:
+                                st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+                                if st.button("💾 Salvar", key=f"kanban_projeto_btn_{card_id}"):
+                                    ok_pj, msg_pj = atualizar_projeto_card(card_id, novo_projeto_card if novo_projeto_card != "—" else "")
+                                    if ok_pj:
+                                        _limpar_cache_kanban()
+                                        registrar_auditoria(st.session_state.usuario_nome, "KANBAN_ALTERAR_PROJETO",
+                                            f"Quadro: {quadro_row['nome']} | {card['titulo']}: {card.get('numero_projeto') or '—'} → {novo_projeto_card}")
+                                        st.session_state[edit_proj_key] = False
+                                        st.toast("Projeto atualizado!")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg_pj)
+                            with col_proj3:
+                                st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+                                if st.button("✖️ Cancelar", key=f"kanban_projeto_cancel_{card_id}"):
+                                    st.session_state[edit_proj_key] = False
+                                    st.rerun()
+                        else:
+                            col_proj_cap, col_proj_btn = st.columns([5, 1])
+                            if card.get('numero_projeto'):
+                                col_proj_cap.caption(f"📋 Projeto: {card['numero_projeto']}")
+                            if pode_editar_kanban and card.get('obra'):
+                                if col_proj_btn.button("✏️", key=f"kanban_projeto_toggle_{card_id}", help="Editar projeto"):
+                                    st.session_state[edit_proj_key] = True
+                                    st.rerun()
                         if pd.notna(card.get('prazo')):
                             st.caption(f"📅 Prazo: {pd.Timestamp(card['prazo']).strftime('%d/%m/%Y')}")
                         if card.get('responsavel'):
