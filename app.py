@@ -11137,15 +11137,22 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             else:
                                 st.error(msg_sa)
 
-                    df_colunas_rel = carregar_kanban_colunas(quadro_atual_id)
-                    df_cards_rel = carregar_kanban_cards(quadro_atual_id)
-                    rel_bytes = gerar_relatorio_kanban_xlsx(quadro_row['nome'], df_colunas_rel, df_cards_rel)
-                    st.download_button(
-                        "📄 Baixar relatório (Excel)", data=rel_bytes,
-                        file_name=f"Kanban_{quadro_row['nome'].replace(' ', '_')}_{hoje_projeto().strftime('%Y%m%d_%H%M')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"kanban_dl_relatorio_{quadro_atual_id}"
-                    )
+                    kanban_rel_key = f"ver_kanban_relatorio_{quadro_atual_id}"
+                    mostrar_kanban_rel = st.session_state.get(kanban_rel_key)
+                    if not mostrar_kanban_rel:
+                        if st.button("📄 Preparar relatório (Excel)", key=f"kanban_prep_relatorio_{quadro_atual_id}"):
+                            st.session_state[kanban_rel_key] = True
+                            mostrar_kanban_rel = True
+                    if mostrar_kanban_rel:
+                        df_colunas_rel = carregar_kanban_colunas(quadro_atual_id)
+                        df_cards_rel = carregar_kanban_cards(quadro_atual_id)
+                        rel_bytes = gerar_relatorio_kanban_xlsx(quadro_row['nome'], df_colunas_rel, df_cards_rel)
+                        st.download_button(
+                            "📄 Baixar relatório (Excel)", data=rel_bytes,
+                            file_name=f"Kanban_{quadro_row['nome'].replace(' ', '_')}_{hoje_projeto().strftime('%Y%m%d_%H%M')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"kanban_dl_relatorio_{quadro_atual_id}"
+                        )
 
             with col_exc:
                 pode_excluir_quadro = (setor == "Master") or (quadro_row.get('criado_por') == st.session_state.usuario_nome)
@@ -11609,17 +11616,24 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     st.caption(f"Destinatário: {row_doc['destinatario']} ({_nn(row_doc.get('setor_destinatario'), '—')}) · {len(itens_doc)} item(ns) · {len(fotos_doc)} foto(s)")
                                     st.caption(f"Emitido em {pd.to_datetime(row_doc['criado_em']).strftime('%d/%m/%Y %H:%M')} por {row_doc['criado_por']}")
                                 with c2:
-                                    doc_bytes = gerar_termo_envio_xlsx(
-                                        row_doc['tipo_documento'], doc_id, row_doc['obra'], _nn(row_doc.get('numero_projeto')),
-                                        itens_doc, row_doc['destinatario'], _nn(row_doc.get('setor_destinatario')),
-                                        row_doc.get('responsavel_entrega'), row_doc.get('data_envio'), row_doc.get('data_prevista_devolucao'),
-                                        _nn(row_doc.get('observacoes'))
-                                    )
-                                    st.download_button(
-                                        "🖨️ Baixar", data=doc_bytes, file_name=f"Termo_{doc_id:06d}.xlsx",
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        key=f"dl_doc_{doc_id}"
-                                    )
+                                    doc_dl_key = f"ver_doc_{doc_id}"
+                                    mostrar_dl_doc = st.session_state.get(doc_dl_key)
+                                    if not mostrar_dl_doc:
+                                        if st.button("🖨️ Preparar", key=f"prep_doc_{doc_id}", help="Gerar arquivo para baixar"):
+                                            st.session_state[doc_dl_key] = True
+                                            mostrar_dl_doc = True
+                                    if mostrar_dl_doc:
+                                        doc_bytes = gerar_termo_envio_xlsx(
+                                            row_doc['tipo_documento'], doc_id, row_doc['obra'], _nn(row_doc.get('numero_projeto')),
+                                            itens_doc, row_doc['destinatario'], _nn(row_doc.get('setor_destinatario')),
+                                            row_doc.get('responsavel_entrega'), row_doc.get('data_envio'), row_doc.get('data_prevista_devolucao'),
+                                            _nn(row_doc.get('observacoes'))
+                                        )
+                                        st.download_button(
+                                            "🖨️ Baixar", data=doc_bytes, file_name=f"Termo_{doc_id:06d}.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            key=f"dl_doc_{doc_id}"
+                                        )
                                 if itens_doc:
                                     st.dataframe(
                                         pd.DataFrame(itens_doc).rename(columns={"descricao": "Descrição", "codigo": "Cód./Patrimônio", "quantidade": "Qtd"}),
