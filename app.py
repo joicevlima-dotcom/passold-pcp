@@ -2062,6 +2062,19 @@ def atualizar_prioridade_card(card_id: int, prioridade: str):
     finally:
         liberar_conexao(conn)
 
+def atualizar_titulo_card(card_id: int, titulo: str):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE kanban_cards SET titulo=%s, atualizado_em=NOW() WHERE id=%s", (titulo, card_id))
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao atualizar título: {e}"
+    finally:
+        liberar_conexao(conn)
+
 def excluir_card(card_id: int):
     conn = conectar_banco()
     try:
@@ -11347,6 +11360,36 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     label_extra = f" — {' · '.join(tags_label)}" if tags_label else ""
 
                     with st.expander(f"🗂️ {card['titulo']}  ·  {coluna_nome_card}{label_extra}", expanded=False, key=f"kanban_expander_{card_id}"):
+                        if pode_editar_kanban:
+                            edit_titulo_key = f"kanban_edit_titulo_{card_id}"
+                            if st.session_state.get(edit_titulo_key):
+                                col_tit1, col_tit2, col_tit3 = st.columns([4, 1, 1])
+                                novo_titulo_card = col_tit1.text_input("Título:", value=card['titulo'], key=f"kanban_titulo_input_{card_id}")
+                                with col_tit2:
+                                    st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+                                    if st.button("💾 Salvar", key=f"kanban_titulo_btn_{card_id}"):
+                                        if novo_titulo_card.strip():
+                                            ok_t, msg_t = atualizar_titulo_card(card_id, novo_titulo_card.strip())
+                                            if ok_t:
+                                                _limpar_cache_kanban()
+                                                registrar_auditoria(st.session_state.usuario_nome, "KANBAN_ALTERAR_TITULO",
+                                                    f"Quadro: {quadro_row['nome']} | {card['titulo']} → {novo_titulo_card.strip()}")
+                                                st.session_state[edit_titulo_key] = False
+                                                st.toast("Título atualizado!")
+                                                st.rerun()
+                                            else:
+                                                st.error(msg_t)
+                                        else:
+                                            st.warning("Título não pode ficar vazio.")
+                                with col_tit3:
+                                    st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+                                    if st.button("✖️ Cancelar", key=f"kanban_titulo_cancel_{card_id}"):
+                                        st.session_state[edit_titulo_key] = False
+                                        st.rerun()
+                            else:
+                                if st.button("✏️ Editar título", key=f"kanban_titulo_toggle_{card_id}"):
+                                    st.session_state[edit_titulo_key] = True
+                                    st.rerun()
                         if eh_quadro_prioridade:
                             prio_atual_card = card.get('prioridade') if card.get('prioridade') in _KANBAN_PRIORIDADE_RANK else "Médio"
                             col_prio1, col_prio2 = st.columns([3, 1])
