@@ -4565,6 +4565,21 @@ def atualizar_item_insumo(item_id: int, status: str, obs: str, usuario: str, qtd
     finally:
         liberar_conexao(conn)
 
+def atualizar_descricao_item_insumo(item_id: int, nova_descricao: str):
+    """Corrige a descricao de um item de saida de insumos lancado errado (ex: erro de digitacao)."""
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE saidas_insumos_itens SET descricao=%s WHERE id=%s", (nova_descricao, item_id))
+        conn.commit()
+        carregar_itens_saida_insumos.clear()
+        carregar_todos_itens_insumos.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao atualizar descrição: {e}")
+    finally:
+        liberar_conexao(conn)
+
 def salvar_saida_insumos(data_saida, obra: str, destino: str, itens: list, usuario: str, numero_projeto: str = ''):
     """Saida de insumos (parafuso, broca, lima etc) do almoxarifado — igual qualquer outra
     saida de material, so que manual porque nao esta vinculada a uma OP. Obra e opcional."""
@@ -9844,8 +9859,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 elif st_ins == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
                                 else:                           cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
                                 badge_txt_ins = f"{st_ins} ({qtd_env_atual_ins:g}/{item_ins['quantidade']:g})" if st_ins == 'Parcial' and pd.notna(qtd_env_atual_ins) else st_ins
+                                edit_desc_ins_key = f"alm_ins_edit_desc_{item_ins['id']}"
                                 rci = st.columns([4, 2, 2, 3, 2])
-                                rci[0].markdown(f"**{item_ins['descricao']}**")
+                                with rci[0]:
+                                    if setor in ["Master", "Almoxarifado"] and not st.session_state.get(edit_desc_ins_key):
+                                        col_desc_ins, col_desc_ins_btn = st.columns([5, 1])
+                                        col_desc_ins.markdown(f"**{item_ins['descricao']}**")
+                                        if col_desc_ins_btn.button("✏️", key=f"alm_ins_desc_toggle_{item_ins['id']}", help="Editar descrição"):
+                                            st.session_state[edit_desc_ins_key] = True
+                                            st.rerun()
+                                    elif not st.session_state.get(edit_desc_ins_key):
+                                        st.markdown(f"**{item_ins['descricao']}**")
                                 rci[1].markdown(f"`{item_ins['quantidade']}`")
                                 rci[2].markdown(f"{item_ins['unidade']}")
                                 rci[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {badge_txt_ins}</span>", unsafe_allow_html=True)
@@ -9863,6 +9887,25 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         value=float(qtd_env_atual_ins) if pd.notna(qtd_env_atual_ins) else float(item_ins['quantidade']),
                                         step=1.0, key=f"alm_ins_qtdparcial_{item_ins['id']}"
                                     )
+                                if st.session_state.get(edit_desc_ins_key):
+                                    nova_desc_ins = st.text_input("Nova descrição:", value=item_ins['descricao'],
+                                                                   key=f"alm_ins_desc_input_{item_ins['id']}")
+                                    ced1, ced2 = st.columns([1, 1])
+                                    with ced1:
+                                        if st.button("💾 Salvar", key=f"alm_ins_desc_save_{item_ins['id']}"):
+                                            if nova_desc_ins.strip():
+                                                atualizar_descricao_item_insumo(int(item_ins['id']), nova_desc_ins.strip())
+                                                registrar_auditoria(st.session_state.usuario_nome, "EDITAR_DESCRICAO_INSUMO",
+                                                    f"Saída #{int(saida_row['id'])} — '{item_ins['descricao']}' → '{nova_desc_ins.strip()}'")
+                                                st.session_state[edit_desc_ins_key] = False
+                                                st.toast("Descrição atualizada!")
+                                                st.rerun()
+                                            else:
+                                                st.error("Descrição não pode ficar vazia.")
+                                    with ced2:
+                                        if st.button("✖️ Cancelar", key=f"alm_ins_desc_cancel_{item_ins['id']}"):
+                                            st.session_state[edit_desc_ins_key] = False
+                                            st.rerun()
                                 obs_ins_atual_raw = item_ins.get('observacao')
                                 obs_atual_ins = obs_ins_atual_raw if pd.notna(obs_ins_atual_raw) else ''
                                 if acao_ins != st_ins or (acao_ins == "Parcial" and qtd_parcial_nova_ins != qtd_env_atual_ins):
@@ -12801,6 +12844,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-08-21", "Almoxarifado: agora dá pra corrigir a descrição de um item de insumo lançado errado (lápis ao lado do nome, aba Romaneios de Insumos)."),
                 ("2026-08-21", "Kanban ganha \"📦 Arquivar\" cartão — some da lista principal (quadros deixam de pesar com o tempo) mas continua no relatório e pode ser desarquivado; Documentos e relatório do Kanban só geram o Excel quando a pessoa clica em baixar, não mais em todo carregamento da tela."),
                 ("2026-08-20", "Kanban: nos quadros do Departamento Técnico ACM e Esquadrias, novo cartão ganha campo \"Atribuído a:\" e dispara e-mail automático pra pessoa atribuída + diretor de engenharia."),
                 ("2026-08-20", "Relatório Geral ganha o \"Relatório Semanal\" (Concluído + Parcial + Em Produção, por ACM/Esquadrias) e sobe pro topo da tela — os filtros/KPIs/gráficos antigos continuam disponíveis dentro do expander \"Relatório Geral clássico\"."),
@@ -13014,6 +13058,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 **Regras importantes:**
 - Mudar o status ou a quantidade parcial já salva na hora — não tem botão "salvar" separado.
 - Excluir uma saída de insumos lançada errada só é permitido pra Master/Almoxarifado, com confirmação.
+- Digitou a descrição errada de um item de insumo? Master/Almoxarifado podem corrigir clicando no lápis (✏️) ao lado da descrição, na aba "📦 Romaneios de Insumos".
 """),
                     ("romaneio_manual", "📋 Romaneio Manual", """
 **Quem acessa:** Master, Almoxarifado, PCP.
