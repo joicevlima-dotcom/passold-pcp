@@ -1147,6 +1147,7 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE kanban_cards ADD COLUMN IF NOT EXISTS destinatario TEXT")
         cursor.execute("ALTER TABLE kanban_cards ADD COLUMN IF NOT EXISTS prioridade TEXT")
         cursor.execute("ALTER TABLE kanban_cards ADD COLUMN IF NOT EXISTS atribuido_a TEXT")
+        cursor.execute("ALTER TABLE kanban_cards ADD COLUMN IF NOT EXISTS arquivado BOOLEAN DEFAULT FALSE")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS kanban_historico (
                 id SERIAL PRIMARY KEY,
@@ -2085,6 +2086,19 @@ def atualizar_descricao_card(card_id: int, descricao: str):
     except Exception as e:
         conn.rollback()
         return False, f"Erro ao atualizar descrição: {e}"
+    finally:
+        liberar_conexao(conn)
+
+def arquivar_card(card_id: int, arquivado: bool):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE kanban_cards SET arquivado=%s, atualizado_em=NOW() WHERE id=%s", (arquivado, card_id))
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao {'arquivar' if arquivado else 'desarquivar'} cartão: {e}"
     finally:
         liberar_conexao(conn)
 
@@ -11222,15 +11236,26 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             obras_disponiveis = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
             mapa_coluna_nome = dict(zip(df_colunas['id'].tolist(), df_colunas['nome'].tolist()))
 
+            # arquivado pode nao existir ainda em caches antigos/linhas legadas -- trata como False
+            if not df_cards.empty:
+                df_cards = df_cards.copy()
+                df_cards['arquivado'] = df_cards.get('arquivado', False)
+                df_cards['arquivado'] = df_cards['arquivado'].fillna(False).astype(bool)
+            df_cards_ativos = df_cards[~df_cards['arquivado']] if not df_cards.empty else df_cards
+
             # ── Visão geral (igual ao Almoxarifado: metricas + lista unica, sem colunas lado a lado) ──
+            # Cartoes arquivados nao entram na contagem -- sao trabalho ja concluido, nao fila ativa.
             st.markdown("#### Visão geral")
             NUM_STAT_POR_LINHA = 6
             for inicio in range(0, len(df_colunas), NUM_STAT_POR_LINHA):
                 bloco_stat = df_colunas.iloc[inicio:inicio + NUM_STAT_POR_LINHA]
                 cols_stat = st.columns(len(bloco_stat))
                 for j, (_, coluna_stat) in enumerate(bloco_stat.iterrows()):
-                    n_stat = len(df_cards[df_cards['coluna_id'] == coluna_stat['id']]) if not df_cards.empty else 0
+                    n_stat = len(df_cards_ativos[df_cards_ativos['coluna_id'] == coluna_stat['id']]) if not df_cards_ativos.empty else 0
                     cols_stat[j].metric(coluna_stat['nome'], n_stat)
+            n_arquivados_total = int(df_cards['arquivado'].sum()) if not df_cards.empty else 0
+            if n_arquivados_total:
+                st.caption(f"📦 {n_arquivados_total} cartão(ões) arquivado(s) — oculto(s) da lista por padrão.")
 
             st.markdown("---")
             if pode_editar_kanban:
@@ -11328,8 +11353,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 "Filtrar por número da RC:" if eh_quadro_compras else "Filtrar por título:",
                 key=f"kanban_filtro_titulo_{quadro_atual_id}", placeholder="Ex: 5025" if eh_quadro_compras else ""
             )
+            mostrar_arquivados = st.checkbox("📦 Mostrar cartões arquivados", key=f"kanban_mostrar_arquivados_{quadro_atual_id}")
 
-            df_cards_filtrado = df_cards
+            df_cards_filtrado = df_cards if mostrar_arquivados else df_cards_ativos
             if filtro_coluna != "Todos" and not df_cards_filtrado.empty:
                 ids_coluna_filtro = df_colunas[df_colunas['nome'] == filtro_coluna]['id'].tolist()
                 df_cards_filtrado = df_cards_filtrado[df_cards_filtrado['coluna_id'].isin(ids_coluna_filtro)]
@@ -11371,8 +11397,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             desc_resumo = desc_resumo[:60].rstrip() + "…"
                         tags_label.append(desc_resumo)
                     label_extra = f" — {' · '.join(tags_label)}" if tags_label else ""
+                    icone_card = "📦" if card.get('arquivado') else "🗂️"
 
-                    with st.expander(f"🗂️ {card['titulo']}  ·  {coluna_nome_card}{label_extra}", expanded=False, key=f"kanban_expander_{card_id}"):
+                    with st.expander(f"{icone_card} {card['titulo']}  ·  {coluna_nome_card}{label_extra}", expanded=False, key=f"kanban_expander_{card_id}"):
+                        if card.get('arquivado'):
+                            st.caption("📦 Cartão arquivado.")
                         if pode_editar_kanban:
                             edit_titulo_key = f"kanban_edit_titulo_{card_id}"
                             if st.session_state.get(edit_titulo_key):
@@ -11506,20 +11535,45 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 for _, h in df_hist_card.iterrows():
                                     st.caption(f"• {h['coluna_anterior']} → {h['coluna_nova']} — {h['usuario']} ({h['criado_em'].strftime('%d/%m %H:%M')})")
 
-                        outras_colunas = df_colunas[df_colunas['id'] != coluna_id]
-                        if not outras_colunas.empty:
-                            destino_nome = st.selectbox("Mover para:", outras_colunas['nome'].tolist(), key=f"kanban_mover_sel_{card_id}")
-                            if st.button("➡️ Mover", key=f"kanban_mover_btn_{card_id}"):
-                                destino_row = outras_colunas[outras_colunas['nome'] == destino_nome].iloc[0]
-                                ok_m, msg_m = mover_card(card_id, coluna_nome_card, int(destino_row['id']), destino_row['nome'], st.session_state.usuario_nome)
-                                if ok_m:
-                                    _limpar_cache_kanban()
-                                    registrar_auditoria(st.session_state.usuario_nome, "KANBAN_MOVER_CARTAO",
-                                        f"Quadro: {quadro_row['nome']} | {card['titulo']}: {coluna_nome_card} → {destino_row['nome']}")
-                                    st.toast("Cartão movido!")
-                                    st.rerun()
-                                else:
-                                    st.error(msg_m)
+                        if not card.get('arquivado'):
+                            outras_colunas = df_colunas[df_colunas['id'] != coluna_id]
+                            if not outras_colunas.empty:
+                                destino_nome = st.selectbox("Mover para:", outras_colunas['nome'].tolist(), key=f"kanban_mover_sel_{card_id}")
+                                if st.button("➡️ Mover", key=f"kanban_mover_btn_{card_id}"):
+                                    destino_row = outras_colunas[outras_colunas['nome'] == destino_nome].iloc[0]
+                                    ok_m, msg_m = mover_card(card_id, coluna_nome_card, int(destino_row['id']), destino_row['nome'], st.session_state.usuario_nome)
+                                    if ok_m:
+                                        _limpar_cache_kanban()
+                                        registrar_auditoria(st.session_state.usuario_nome, "KANBAN_MOVER_CARTAO",
+                                            f"Quadro: {quadro_row['nome']} | {card['titulo']}: {coluna_nome_card} → {destino_row['nome']}")
+                                        st.toast("Cartão movido!")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg_m)
+
+                        if pode_editar_kanban:
+                            if card.get('arquivado'):
+                                if st.button("♻️ Desarquivar", key=f"kanban_desarquivar_{card_id}"):
+                                    ok_a, msg_a = arquivar_card(card_id, False)
+                                    if ok_a:
+                                        _limpar_cache_kanban()
+                                        registrar_auditoria(st.session_state.usuario_nome, "KANBAN_DESARQUIVAR_CARTAO",
+                                            f"Quadro: {quadro_row['nome']} | {card['titulo']}")
+                                        st.toast("Cartão desarquivado.")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg_a)
+                            else:
+                                if st.button("📦 Arquivar", key=f"kanban_arquivar_{card_id}", help="Some da lista principal, mas continua no relatório e no histórico."):
+                                    ok_a, msg_a = arquivar_card(card_id, True)
+                                    if ok_a:
+                                        _limpar_cache_kanban()
+                                        registrar_auditoria(st.session_state.usuario_nome, "KANBAN_ARQUIVAR_CARTAO",
+                                            f"Quadro: {quadro_row['nome']} | {card['titulo']}")
+                                        st.toast("Cartão arquivado.")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg_a)
 
                         if setor == "Master":
                             del_key = f"kanban_confirm_del_card_{card_id}"
@@ -12702,6 +12756,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-08-21", "Kanban ganha \"📦 Arquivar\" cartão — some da lista principal (quadros deixam de pesar com o tempo) mas continua no relatório e pode ser desarquivado; Documentos e relatório do Kanban só geram o Excel quando a pessoa clica em baixar, não mais em todo carregamento da tela."),
                 ("2026-08-20", "Kanban: nos quadros do Departamento Técnico ACM e Esquadrias, novo cartão ganha campo \"Atribuído a:\" e dispara e-mail automático pra pessoa atribuída + diretor de engenharia."),
                 ("2026-08-20", "Relatório Geral ganha o \"Relatório Semanal\" (Concluído + Parcial + Em Produção, por ACM/Esquadrias) e sobe pro topo da tela — os filtros/KPIs/gráficos antigos continuam disponíveis dentro do expander \"Relatório Geral clássico\"."),
                 ("2026-08-19", "Romaneio Manual ganha aba \"Colar Lista\" pra adicionar vários itens de uma vez (campos lado a lado, um item por linha)."),
@@ -13018,6 +13073,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 3. Em "➕ Novo cartão", preencha Obra, Coluna, Título (ou "Número da RC" se o quadro se chamar Compras), Descrição, Projeto, Prazo, Solicitante e Destinatário.
 4. Use os filtros ("Mostrar cartões de:", "Filtrar por obra:", "Filtrar por número da RC/título") pra achar cartões rápido.
 5. Abra um cartão pra ver detalhes, anexar arquivo, comentar, mover pra outra coluna ("Mover para:" + "➡️ Mover") ou, se Master, excluir.
+6. Cartão que já terminou o fluxo? Clique "📦 Arquivar" dentro dele — ele some da lista principal (pra não deixar o quadro cada vez mais pesado), mas continua contando no relatório em Excel e pode ser recuperado a qualquer momento marcando "📦 Mostrar cartões arquivados" nos filtros e clicando "♻️ Desarquivar".
 
 **Regras importantes:**
 - No quadro chamado exatamente "Compras", o campo de título vira "Número da RC" e só aceita dígitos — o sistema salva como "RC 1234" automaticamente.
