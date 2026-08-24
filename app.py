@@ -9759,6 +9759,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         int(k): v.reset_index(drop=True)
                         for k, v in todos_comps.groupby('item_id', sort=False)
                     } if not todos_comps.empty else {}
+                    # Comentarios de TODOS os componentes numa unica query, em vez de uma
+                    # consulta por componente toda vez que o expander dele estiver aberto.
+                    _coms_por_comp = carregar_comentarios_varios('componente_op', tuple(todos_comps['id'])) if not todos_comps.empty else {}
 
                     for _, op_row in df_ops_comp.iterrows():
                         df_comp = _comps_por_item.get(int(op_row['item_id']), todos_comps.iloc[0:0])
@@ -9822,7 +9825,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                           key=f"alm_obs_{comp['id']}", placeholder="Ex: em falta, previsão 20/06...")
                                 if obs_nova != obs_atual:
                                     atualizar_componente(comp['id'], st_item, obs_nova, st.session_state.usuario_nome, qtd_env_atual)
-                                bloco_comentarios('componente_op', int(comp['id']), f"comp_{comp['id']}")
+                                bloco_comentarios('componente_op', int(comp['id']), f"comp_{comp['id']}",
+                                                  df_com=_coms_por_comp.get(int(comp['id'])))
                                 st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
 
                             if n_indisp > 0:
@@ -9965,6 +9969,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         for k, v in df_todos_ins.groupby('saida_id', sort=False)
                     } if not df_todos_ins.empty else {}
                     _itens_ins_vazio = pd.DataFrame(columns=_cols_ins)
+                    # Comentarios de TODOS os itens de insumo numa unica query, em vez de uma
+                    # consulta por item toda vez que o expander da saida estiver aberto.
+                    _coms_por_item_ins = carregar_comentarios_varios('saida_insumo_item', tuple(df_todos_ins['id'])) if not df_todos_ins.empty else {}
 
                     for _, saida_row in df_saidas.iterrows():
                         df_itens_saida = _itens_por_saida.get(int(saida_row['id']), _itens_ins_vazio)
@@ -10067,7 +10074,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                           key=f"alm_ins_obs_{item_ins['id']}", placeholder="Ex: em falta, previsão 20/06...")
                                 if obs_nova_ins != obs_atual_ins:
                                     atualizar_item_insumo(int(item_ins['id']), st_ins, obs_nova_ins, st.session_state.usuario_nome, qtd_env_atual_ins)
-                                bloco_comentarios('saida_insumo_item', int(item_ins['id']), f"insumo_{item_ins['id']}")
+                                bloco_comentarios('saida_insumo_item', int(item_ins['id']), f"insumo_{item_ins['id']}",
+                                                  df_com=_coms_por_item_ins.get(int(item_ins['id'])))
                                 st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
 
                             with st.expander("➕ Adicionar item a esta saída", expanded=False, key=f"alm_ins_add_expander_{int(saida_row['id'])}"):
