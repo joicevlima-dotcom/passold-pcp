@@ -3019,6 +3019,7 @@ def resetar_banco_dados_completo(usuario=None):
         carregar_medicao_obras.clear()
         carregar_componentes_op.clear()
         carregar_todas_ops_com_componentes.clear()
+        carregar_todos_componentes_op.clear()
         carregar_pecas_lote.clear()
         carregar_todas_pecas_obra.clear()
         return True
@@ -4500,6 +4501,9 @@ def salvar_componentes(item_id, obra, cod_lote, num_op, componentes: list):
                 VALUES (%s,%s,%s,%s,%s,%s,%s,'Aguardando Conferencia',NULL)
             """, (item_id, obra, cod_lote, num_op, c['nome'], c['qtd'], c['unidade']))
         conn.commit()
+        carregar_componentes_op.clear()
+        carregar_todas_ops_com_componentes.clear()
+        carregar_todos_componentes_op.clear()
     except Exception as e:
         conn.rollback()
         st.error(f"Erro ao salvar componentes: {e}")
@@ -4531,6 +4535,19 @@ def carregar_todas_ops_com_componentes():
         liberar_conexao(conn)
     return df
 
+@st.cache_data(ttl=30)
+def carregar_todos_componentes_op():
+    """Tabela componentes_op inteira -- usado na aba Almoxarifado (Romaneios com Vinculo
+    a OP) pra montar os contadores e a lista por OP em memoria, sem repetir uma consulta
+    sem cache a cada rerun da pagina (a cada clique em qualquer aba do Almoxarifado)."""
+    conn = conectar_banco()
+    try:
+        return pd.read_sql_query("SELECT * FROM componentes_op ORDER BY item_id, id", conn)
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
 def atualizar_componente(comp_id, status, obs, usuario, qtd_enviada=None):
     conn = conectar_banco()
     try:
@@ -4543,6 +4560,7 @@ def atualizar_componente(comp_id, status, obs, usuario, qtd_enviada=None):
         conn.commit()
         carregar_componentes_op.clear()
         carregar_todas_ops_com_componentes.clear()
+        carregar_todos_componentes_op.clear()
         carregar_itens_indisponiveis_almoxarifado.clear()
     except Exception as e:
         conn.rollback()
@@ -4558,6 +4576,7 @@ def excluir_componente(comp_id: int):
         conn.commit()
         carregar_componentes_op.clear()
         carregar_todas_ops_com_componentes.clear()
+        carregar_todos_componentes_op.clear()
     except Exception as e:
         conn.rollback()
         st.error(f"Erro ao excluir componente: {e}")
@@ -4575,6 +4594,7 @@ def excluir_todos_componentes(item_id: int):
         conn.commit()
         carregar_componentes_op.clear()
         carregar_todas_ops_com_componentes.clear()
+        carregar_todos_componentes_op.clear()
         carregar_romaneios_componentes_emitidos.clear()
     except Exception as e:
         conn.rollback()
@@ -4982,6 +5002,7 @@ def editar_obra_projeto_lote(lote_id: int, nova_obra: str, novo_projeto: str):
         try:
             carregar_componentes_op.clear()
             carregar_todas_ops_com_componentes.clear()
+            carregar_todos_componentes_op.clear()
             carregar_itens_indisponiveis_almoxarifado.clear()
         except Exception:
             pass
@@ -9734,11 +9755,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 if df_ops_comp.empty:
                     st.info("Nenhuma OP com lista de componentes cadastrada ainda.")
                 else:
-                    conn_alm = conectar_banco()
-                    try:
-                        todos_comps = pd.read_sql_query("SELECT * FROM componentes_op ORDER BY item_id, id", conn_alm)
-                    finally:
-                        liberar_conexao(conn_alm)
+                    todos_comps = carregar_todos_componentes_op()
 
                     n_aguard  = len(todos_comps[todos_comps['status_item'] == 'Aguardando Conferencia'])
                     n_ok      = len(todos_comps[todos_comps['status_item'] == 'Disponivel'])
