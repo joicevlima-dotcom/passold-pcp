@@ -10130,13 +10130,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             if df_disp_ins.empty:
                                 st.caption("Nenhum item Disponível ainda pra emitir romaneio — confira os itens acima primeiro.")
                             else:
-                                rom_insumo_bytes = gerar_romaneio_insumos_xlsx(saida_row, df_disp_ins)
-                                st.download_button(
-                                    "🖨️ Emitir Romaneio", data=rom_insumo_bytes,
-                                    file_name=f"Romaneio_Insumos_{pd.to_datetime(saida_row['data_saida']).strftime('%Y%m%d')}_{int(saida_row['id'])}.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    key=f"dl_saida_insumo_{saida_row['id']}"
-                                )
+                                bytes_key_ins = f"rom_ins_bytes_{saida_row['id']}"
+                                if st.button("🖨️ Gerar Romaneio", key=f"prep_rom_ins_{saida_row['id']}"):
+                                    st.session_state[bytes_key_ins] = gerar_romaneio_insumos_xlsx(saida_row, df_disp_ins)
+                                if st.session_state.get(bytes_key_ins):
+                                    st.download_button(
+                                        "⬇️ Baixar Romaneio", data=st.session_state[bytes_key_ins],
+                                        file_name=f"Romaneio_Insumos_{pd.to_datetime(saida_row['data_saida']).strftime('%Y%m%d')}_{int(saida_row['id'])}.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key=f"dl_saida_insumo_{saida_row['id']}"
+                                    )
 
                             # ── Excluir saída lançada errada ──
                             if setor in ["Master", "Almoxarifado"]:
