@@ -9718,452 +9718,455 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
     # ==================================================
     elif nome_aba == "Almoxarifado":
         with aba_objeto:
-            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Almoxarifado</h2><p>Conferência e controle de materiais recebidos</p></div><span class="page-icon">📦</span></div>', unsafe_allow_html=True)
-            st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
+            @st.fragment
+            def _render_pagina_almoxarifado():
+                st.markdown('<div class="page-header"><div class="page-header-left"><h2>Almoxarifado</h2><p>Conferência e controle de materiais recebidos</p></div><span class="page-icon">📦</span></div>', unsafe_allow_html=True)
+                st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')} | Usuário: {st.session_state.usuario_nome}")
 
-            df_indisp_geral = carregar_itens_indisponiveis_almoxarifado()
-            ver_indisponiveis = st.toggle(
-                f"❌ Ver só os Indisponíveis ({len(df_indisp_geral)})",
-                key="ver_indisponiveis_almox", value=False
-            )
-            if ver_indisponiveis:
-                if df_indisp_geral.empty:
-                    st.success("✅ Nenhum item indisponível no momento — tudo em dia!")
-                else:
-                    st.dataframe(
-                        df_indisp_geral.rename(columns={
-                            "origem": "Origem", "obra": "Obra", "numero_projeto": "Projeto",
-                            "referencia": "Referência", "item": "Item", "quantidade": "Qtd",
-                            "unidade": "Unidade", "observacao": "Observação",
-                        }),
-                        use_container_width=True, hide_index=True
-                    )
-                    rel_indisp_bytes = gerar_relatorio_indisponiveis_xlsx(df_indisp_geral)
-                    st.download_button(
-                        "📄 Baixar Relatório de Indisponíveis", data=rel_indisp_bytes,
-                        file_name=f"Indisponiveis_Almoxarifado_{hoje_projeto().strftime('%Y%m%d_%H%M')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="dl_rel_indisponiveis_almox"
-                    )
-                st.markdown("---")
-
-            tab_alm_op, tab_alm_ins = st.tabs(["📋 Romaneios com Vínculo a OP", "📦 Romaneios de Insumos"])
-
-            with tab_alm_op:
-                df_ops_comp = carregar_todas_ops_com_componentes()
-
-                if df_ops_comp.empty:
-                    st.info("Nenhuma OP com lista de componentes cadastrada ainda.")
-                else:
-                    todos_comps = carregar_todos_componentes_op()
-
-                    n_aguard  = len(todos_comps[todos_comps['status_item'] == 'Aguardando Conferencia'])
-                    n_ok      = len(todos_comps[todos_comps['status_item'] == 'Disponivel'])
-                    n_parc    = len(todos_comps[todos_comps['status_item'] == 'Parcial'])
-                    n_falta   = len(todos_comps[todos_comps['status_item'] == 'Indisponivel'])
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("⏳ Aguardando", n_aguard)
-                    c2.metric("✅ Disponíveis", n_ok)
-                    c3.metric("🟡 Parciais", n_parc)
-                    c4.metric("❌ Indisponíveis", n_falta)
-                    st.markdown("---")
-
-                    df_rom_emitidos = carregar_romaneios_componentes_emitidos()
-
-                    # todos_comps (acima) ja traz a tabela componentes_op inteira; filtrar em
-                    # memoria evita uma consulta por OP (N+1) buscando exatamente os mesmos dados.
-                    _comps_por_item = {
-                        int(k): v.reset_index(drop=True)
-                        for k, v in todos_comps.groupby('item_id', sort=False)
-                    } if not todos_comps.empty else {}
-                    # Comentarios de TODOS os componentes numa unica query, em vez de uma
-                    # consulta por componente toda vez que o expander dele estiver aberto.
-                    _coms_por_comp = carregar_comentarios_varios('componente_op', tuple(todos_comps['id'])) if not todos_comps.empty else {}
-
-                    for _, op_row in df_ops_comp.iterrows():
-                        df_comp = _comps_por_item.get(int(op_row['item_id']), todos_comps.iloc[0:0])
-                        if df_comp.empty:
-                            continue
-                        n_total   = len(df_comp)
-                        n_conf    = len(df_comp[df_comp['status_item'] != 'Aguardando Conferencia'])
-                        n_indisp  = len(df_comp[df_comp['status_item'] == 'Indisponivel'])
-                        n_parcial = len(df_comp[df_comp['status_item'] == 'Parcial'])
-                        if n_indisp > 0:        icone = "❌"
-                        elif n_parcial > 0:     icone = "🟡"
-                        elif n_conf == n_total: icone = "✅"
-                        else:                   icone = "⏳"
-
-                        with st.expander(
-                            f"{icone} OP: {op_row['num_op']} — {op_row['cod_lote']} | {op_row['obra_vinculada']}"
-                            f"{' (Proj. ' + str(op_row['numero_projeto']) + ')' if op_row.get('numero_projeto') else ''}  "
-                            f"({n_conf}/{n_total} conferidos{f' — {n_indisp} FALTANDO' if n_indisp > 0 else ''})",
-                            expanded=False, key=f"alm_comp_expander_{int(op_row['item_id'])}"
-                        ):
-                            hc = st.columns([4, 2, 2, 3, 2])
-                            for col_h, label in zip(hc, ["COMPONENTE", "QTD", "UN", "STATUS", "AÇÃO"]):
-                                col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
-                            st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
-
-                            status_opcoes_comp = ["Aguardando Conferencia", "Disponivel", "Parcial", "Indisponivel"]
-                            for _, comp in df_comp.iterrows():
-                                st_item = comp['status_item']
-                                qtd_env_atual = comp.get('quantidade_enviada')
-                                if st_item == 'Disponivel':     cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
-                                elif st_item == 'Parcial':      cor = "#B45309"; bg = "#FEF3C7"; emoji = "🟡"
-                                elif st_item == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
-                                else:                           cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
-                                badge_txt = f"{st_item} ({qtd_env_atual:g}/{comp['quantidade']:g})" if st_item == 'Parcial' and pd.notna(qtd_env_atual) else st_item
-                                rc = st.columns([4, 2, 2, 3, 2])
-                                rc[0].markdown(f"**{comp['nome_componente']}**")
-                                rc[1].markdown(f"`{comp['quantidade']}`")
-                                rc[2].markdown(f"{comp['unidade']}")
-                                rc[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {badge_txt}</span>", unsafe_allow_html=True)
-                                with rc[4]:
-                                    acao = st.selectbox(
-                                        "", status_opcoes_comp,
-                                        index=status_opcoes_comp.index(st_item) if st_item in status_opcoes_comp else 0,
-                                        key=f"alm_st_{comp['id']}", label_visibility="collapsed"
-                                    )
-                                qtd_parcial_nova = None
-                                if acao == "Parcial":
-                                    qtd_parcial_nova = st.number_input(
-                                        f"Quantidade enviada — {comp['nome_componente']} (solicitado: {comp['quantidade']:g} {comp['unidade']}):",
-                                        min_value=0.0, max_value=float(comp['quantidade']),
-                                        value=float(qtd_env_atual) if pd.notna(qtd_env_atual) else float(comp['quantidade']),
-                                        step=1.0, key=f"alm_qtdparcial_{comp['id']}"
-                                    )
-                                obs_comp_atual_raw = comp.get('observacao')
-                                obs_comp_atual = obs_comp_atual_raw if pd.notna(obs_comp_atual_raw) else ''
-                                if acao != st_item or (acao == "Parcial" and qtd_parcial_nova != qtd_env_atual):
-                                    atualizar_componente(comp['id'], acao, obs_comp_atual, st.session_state.usuario_nome, qtd_parcial_nova)
-                                    st.rerun()
-                                obs_atual = obs_comp_atual
-                                obs_nova  = st.text_input(f"Obs — {comp['nome_componente']}:", value=obs_atual,
-                                                          key=f"alm_obs_{comp['id']}", placeholder="Ex: em falta, previsão 20/06...")
-                                if obs_nova != obs_atual:
-                                    atualizar_componente(comp['id'], st_item, obs_nova, st.session_state.usuario_nome, qtd_env_atual)
-                                bloco_comentarios('componente_op', int(comp['id']), f"comp_{comp['id']}",
-                                                  df_com=_coms_por_comp.get(int(comp['id'])))
-                                st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
-
-                            if n_indisp > 0:
-                                itens_falt = df_comp[df_comp['status_item'] == 'Indisponivel']['nome_componente'].tolist()
-                                st.error(f"⚠️ Itens em falta: {', '.join(itens_falt)}")
-                            elif n_parcial > 0 and n_conf == n_total:
-                                st.warning("🟡 Todos conferidos, mas alguns componentes estão parciais.")
-                            elif n_conf == n_total:
-                                st.success("✅ Todos os componentes conferidos e disponíveis!")
-
-                            # ── Emitir romaneio (itens Disponível ou Parcial) ──
-                            item_id_op = int(op_row['item_id'])
-                            df_disponiveis = df_comp[df_comp['status_item'].isin(['Disponivel', 'Parcial'])]
-                            ja_emitido = df_rom_emitidos[df_rom_emitidos['item_id'] == item_id_op] if not df_rom_emitidos.empty else pd.DataFrame()
-                            st.markdown("<br>", unsafe_allow_html=True)
-                            if not ja_emitido.empty:
-                                emitido_em_fmt = pd.to_datetime(ja_emitido.iloc[0]['emitido_em']).strftime('%d/%m/%Y %H:%M')
-                                st.caption(f"✅ Romaneio emitido em {emitido_em_fmt} por {ja_emitido.iloc[0]['emitido_por']}")
-                            if df_disponiveis.empty:
-                                st.caption("Nenhum item Disponível ainda pra emitir romaneio.")
-                            else:
-                                bytes_key_comp = f"rom_comp_bytes_{item_id_op}"
-                                if st.button("🖨️ Gerar Romaneio" if ja_emitido.empty else "🖨️ Gerar Reemissão",
-                                             key=f"prep_rom_comp_{item_id_op}"):
-                                    st.session_state[bytes_key_comp] = gerar_romaneio_componentes_xlsx(
-                                        op_row['obra_vinculada'], op_row['num_op'], op_row['cod_lote'],
-                                        df_disponiveis, st.session_state.usuario_nome,
-                                        numero_projeto=_nn(op_row.get('numero_projeto'))
-                                    )
-                                if st.session_state.get(bytes_key_comp):
-                                    st.download_button(
-                                        "⬇️ Baixar Romaneio" if ja_emitido.empty else "⬇️ Baixar Reemissão",
-                                        data=st.session_state[bytes_key_comp],
-                                        file_name=f"Romaneio_Componentes_{op_row['num_op']}.xlsx",
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        key=f"dl_rom_comp_{item_id_op}",
-                                        on_click=registrar_romaneio_componentes_emitido,
-                                        args=(item_id_op, op_row['num_op'], op_row['obra_vinculada'], st.session_state.usuario_nome)
-                                    )
-
-            with tab_alm_ins:
-                df_todos_ins = carregar_todos_itens_insumos()
-                if not df_todos_ins.empty:
-                    n_aguard_ins = len(df_todos_ins[df_todos_ins['status_item'] == 'Aguardando Conferencia'])
-                    n_ok_ins     = len(df_todos_ins[df_todos_ins['status_item'] == 'Disponivel'])
-                    n_parc_ins   = len(df_todos_ins[df_todos_ins['status_item'] == 'Parcial'])
-                    n_falta_ins  = len(df_todos_ins[df_todos_ins['status_item'] == 'Indisponivel'])
-                    ci1, ci2, ci3, ci4 = st.columns(4)
-                    ci1.metric("⏳ Aguardando", n_aguard_ins)
-                    ci2.metric("✅ Disponíveis", n_ok_ins)
-                    ci3.metric("🟡 Parciais", n_parc_ins)
-                    ci4.metric("❌ Indisponíveis", n_falta_ins)
-                    st.markdown("---")
-
-                with st.expander("➕ Nova Saída de Insumos", expanded=df_todos_ins.empty):
-                    st.caption("Saída de material manual (parafuso, broca, lima etc) — igual qualquer outra saída, sem OP vinculada. Obra e Projeto são obrigatórios.")
-                    obras_insumo = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
-                    if not obras_insumo:
-                        st.info("Cadastre uma Obra e um Projeto em 'Cadastrar Obra' antes de registrar uma saída de insumos.")
-                    ii1, ii2, ii3, ii4 = st.columns(4)
-                    with ii1:
-                        insumo_data = st.date_input("Data de saída:", value=hoje_projeto().date(), format="DD/MM/YYYY", key="insumo_data")
-                    with ii2:
-                        insumo_obra = st.selectbox("Obra:", obras_insumo, key="insumo_obra") if obras_insumo else None
-                    with ii3:
-                        projetos_insumo = sorted(
-                            df_projetos[df_projetos['Obra'] == insumo_obra]['Numero_Projeto'].unique().tolist()
-                        ) if insumo_obra else []
-                        insumo_projeto = st.selectbox("Projeto:", projetos_insumo, key="insumo_projeto") if projetos_insumo else None
-                        if insumo_obra and not projetos_insumo:
-                            st.caption("⚠️ Cadastre um projeto pra essa obra em 'Cadastrar Obra'.")
-                    with ii4:
-                        insumo_destino = st.text_input("Destino:", key="insumo_destino", placeholder="Ex: Produção, Obra tal, Manutenção...")
-
-                    if "insumo_itens" not in st.session_state:
-                        st.session_state.insumo_itens = []
-
-                    st.markdown("**Adicionar item:**")
-                    ii4, ii5, ii6, ii7 = st.columns([4, 2, 2, 1])
-                    with ii4:
-                        insumo_desc = st.text_input("Descrição do insumo:", key="insumo_desc",
-                                                     placeholder="Ex: Parafuso M6, Broca 8mm, Lima...")
-                    with ii5:
-                        insumo_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="insumo_qtd")
-                    with ii6:
-                        insumo_unidade = st.selectbox("Unidade:", ["un", "kg", "m", "cx", "pç", "rolo", "L"], key="insumo_unidade")
-                    with ii7:
-                        st.write("")
-                        st.write("")
-                        if st.button("➕", key="btn_add_insumo_item"):
-                            if not insumo_desc.strip():
-                                st.error("Informe a descrição do insumo.")
-                            else:
-                                st.session_state.insumo_itens.append({
-                                    "descricao": insumo_desc.strip(), "quantidade": insumo_qtd, "unidade": insumo_unidade
-                                })
-                                st.rerun()
-
-                    if st.session_state.insumo_itens:
-                        st.markdown("**Itens desta saída:**")
-                        for i, item in enumerate(st.session_state.insumo_itens):
-                            col_desc, col_qtd, col_rem = st.columns([5, 2, 1])
-                            col_desc.write(f"{i+1}. {item['descricao']}")
-                            col_qtd.write(f"{item['quantidade']:g} {item['unidade']}")
-                            with col_rem:
-                                if st.button("🗑", key=f"rem_insumo_item_{i}"):
-                                    st.session_state.insumo_itens.pop(i)
-                                    st.rerun()
-
-                        if st.button("💾 Registrar Saída", key="btn_salvar_insumo", type="primary",
-                                     disabled=not (insumo_obra and insumo_projeto)):
-                            saida_id = salvar_saida_insumos(
-                                insumo_data, insumo_obra, insumo_destino.strip(),
-                                st.session_state.insumo_itens, st.session_state.usuario_nome,
-                                numero_projeto=insumo_projeto
-                            )
-                            if saida_id:
-                                registrar_auditoria(st.session_state.usuario_nome, "SAIDA_INSUMOS",
-                                    f"Saída #{saida_id} — {len(st.session_state.insumo_itens)} item(ns) — Destino: {insumo_destino.strip()}")
-                                st.session_state.insumo_itens = []
-                                st.toast("Saída registrada!")
-                                st.rerun()
+                df_indisp_geral = carregar_itens_indisponiveis_almoxarifado()
+                ver_indisponiveis = st.toggle(
+                    f"❌ Ver só os Indisponíveis ({len(df_indisp_geral)})",
+                    key="ver_indisponiveis_almox", value=False
+                )
+                if ver_indisponiveis:
+                    if df_indisp_geral.empty:
+                        st.success("✅ Nenhum item indisponível no momento — tudo em dia!")
                     else:
-                        st.caption("Nenhum item adicionado ainda.")
+                        st.dataframe(
+                            df_indisp_geral.rename(columns={
+                                "origem": "Origem", "obra": "Obra", "numero_projeto": "Projeto",
+                                "referencia": "Referência", "item": "Item", "quantidade": "Qtd",
+                                "unidade": "Unidade", "observacao": "Observação",
+                            }),
+                            use_container_width=True, hide_index=True
+                        )
+                        rel_indisp_bytes = gerar_relatorio_indisponiveis_xlsx(df_indisp_geral)
+                        st.download_button(
+                            "📄 Baixar Relatório de Indisponíveis", data=rel_indisp_bytes,
+                            file_name=f"Indisponiveis_Almoxarifado_{hoje_projeto().strftime('%Y%m%d_%H%M')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="dl_rel_indisponiveis_almox"
+                        )
+                    st.markdown("---")
 
-                st.markdown("---")
-                st.markdown("#### Histórico e Conferência de Saídas")
-                st.caption("A via física continua sendo emitida normalmente — a conferência abaixo (Disponível/Indisponível) é o controle digital, sem precisar editar o romaneio na mão depois.")
-                df_saidas = carregar_saidas_insumos()
-                if df_saidas.empty:
-                    st.caption("Nenhuma saída registrada ainda.")
-                else:
-                    # df_todos_ins (topo da aba) ja tem a tabela saidas_insumos_itens inteira e e'
-                    # invalidada nas mesmas mutacoes que a versao por saida — filtrar em memoria
-                    # evita uma consulta por saida (N+1) buscando exatamente as mesmas linhas.
-                    _cols_ins = ['id', 'descricao', 'quantidade', 'unidade',
-                                 'status_item', 'observacao', 'quantidade_enviada']
-                    _itens_por_saida = {
-                        int(k): v.sort_values('id')[_cols_ins].reset_index(drop=True)
-                        for k, v in df_todos_ins.groupby('saida_id', sort=False)
-                    } if not df_todos_ins.empty else {}
-                    _itens_ins_vazio = pd.DataFrame(columns=_cols_ins)
-                    # Comentarios de TODOS os itens de insumo numa unica query, em vez de uma
-                    # consulta por item toda vez que o expander da saida estiver aberto.
-                    _coms_por_item_ins = carregar_comentarios_varios('saida_insumo_item', tuple(df_todos_ins['id'])) if not df_todos_ins.empty else {}
+                tab_alm_op, tab_alm_ins = st.tabs(["📋 Romaneios com Vínculo a OP", "📦 Romaneios de Insumos"])
 
-                    for _, saida_row in df_saidas.iterrows():
-                        df_itens_saida = _itens_por_saida.get(int(saida_row['id']), _itens_ins_vazio)
-                        n_total_ins = len(df_itens_saida)
-                        n_conf_ins  = len(df_itens_saida[df_itens_saida['status_item'] != 'Aguardando Conferencia']) if n_total_ins else 0
-                        n_indisp_ins = len(df_itens_saida[df_itens_saida['status_item'] == 'Indisponivel']) if n_total_ins else 0
-                        n_parcial_ins = len(df_itens_saida[df_itens_saida['status_item'] == 'Parcial']) if n_total_ins else 0
-                        if n_indisp_ins > 0:                              icone_ins = "❌"
-                        elif n_parcial_ins > 0:                           icone_ins = "🟡"
-                        elif n_total_ins and n_conf_ins == n_total_ins:   icone_ins = "✅"
-                        else:                                             icone_ins = "⏳"
+                with tab_alm_op:
+                    df_ops_comp = carregar_todas_ops_com_componentes()
 
-                        with st.expander(
-                            f"{icone_ins} {pd.to_datetime(saida_row['data_saida']).strftime('%d/%m/%Y')} — "
-                            f"{_nn(saida_row.get('obra'), 'Sem obra')}"
-                            f"{' (Proj. ' + str(saida_row['numero_projeto']) + ')' if pd.notna(saida_row.get('numero_projeto')) else ''}"
-                            f" — {_nn(saida_row.get('destino'), '—')} "
-                            f"({n_conf_ins}/{n_total_ins} conferidos{f' — {n_indisp_ins} FALTANDO' if n_indisp_ins > 0 else ''}) — por {saida_row['registrado_por']}",
-                            expanded=False, key=f"alm_ins_expander_{int(saida_row['id'])}"
-                        ):
-                            pode_editar_item_ins = setor in ["Master", "Almoxarifado"]
-                            hci = st.columns([4, 1.5, 1, 2.5, 2.5, 0.8]) if pode_editar_item_ins else st.columns([4, 2, 2, 3, 2])
-                            labels_ins_header = ["INSUMO", "QTD", "UN", "STATUS", "AÇÃO", ""] if pode_editar_item_ins else ["INSUMO", "QTD", "UN", "STATUS", "AÇÃO"]
-                            for col_h, label in zip(hci, labels_ins_header):
-                                col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
-                            st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
+                    if df_ops_comp.empty:
+                        st.info("Nenhuma OP com lista de componentes cadastrada ainda.")
+                    else:
+                        todos_comps = carregar_todos_componentes_op()
 
-                            status_opcoes_ins = ["Aguardando Conferencia", "Disponivel", "Parcial", "Indisponivel"]
-                            for _, item_ins in df_itens_saida.iterrows():
-                                st_ins = item_ins['status_item']
-                                qtd_env_atual_ins = item_ins.get('quantidade_enviada')
-                                if st_ins == 'Disponivel':     cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
-                                elif st_ins == 'Parcial':      cor = "#B45309"; bg = "#FEF3C7"; emoji = "🟡"
-                                elif st_ins == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
-                                else:                           cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
-                                badge_txt_ins = f"{st_ins} ({qtd_env_atual_ins:g}/{item_ins['quantidade']:g})" if st_ins == 'Parcial' and pd.notna(qtd_env_atual_ins) else st_ins
-                                edit_item_ins_key = f"alm_ins_edit_item_{item_ins['id']}"
-                                rci = st.columns([4, 1.5, 1, 2.5, 2.5, 0.8]) if pode_editar_item_ins else st.columns([4, 2, 2, 3, 2])
-                                rci[0].markdown(f"**{item_ins['descricao']}**")
-                                rci[1].markdown(f"`{item_ins['quantidade']}`")
-                                rci[2].markdown(f"{item_ins['unidade']}")
-                                rci[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {badge_txt_ins}</span>", unsafe_allow_html=True)
-                                with rci[4]:
-                                    acao_ins = st.selectbox(
-                                        "", status_opcoes_ins,
-                                        index=status_opcoes_ins.index(st_ins) if st_ins in status_opcoes_ins else 0,
-                                        key=f"alm_ins_st_{item_ins['id']}", label_visibility="collapsed"
-                                    )
-                                if pode_editar_item_ins:
-                                    with rci[5]:
-                                        if st.button("✏️", key=f"alm_ins_item_toggle_{item_ins['id']}", help="Editar item (descrição, qtd, unidade)"):
-                                            st.session_state[edit_item_ins_key] = not st.session_state.get(edit_item_ins_key, False)
-                                            st.rerun()
-                                qtd_parcial_nova_ins = None
-                                if acao_ins == "Parcial":
-                                    qtd_parcial_nova_ins = st.number_input(
-                                        f"Quantidade enviada — {item_ins['descricao']} (solicitado: {item_ins['quantidade']:g} {item_ins['unidade']}):",
-                                        min_value=0.0, max_value=float(item_ins['quantidade']),
-                                        value=float(qtd_env_atual_ins) if pd.notna(qtd_env_atual_ins) else float(item_ins['quantidade']),
-                                        step=1.0, key=f"alm_ins_qtdparcial_{item_ins['id']}"
-                                    )
-                                if pode_editar_item_ins and st.session_state.get(edit_item_ins_key):
-                                    st.markdown("<div style='background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px;margin-bottom:8px;'>", unsafe_allow_html=True)
-                                    eic1, eic2, eic3 = st.columns([4, 2, 2])
-                                    with eic1:
-                                        nova_desc_ins = st.text_input("Descrição:", value=item_ins['descricao'],
-                                                                       key=f"alm_ins_desc_input_{item_ins['id']}")
-                                    with eic2:
-                                        nova_qtd_ins = st.number_input("Quantidade:", min_value=0.0, value=float(item_ins['quantidade']),
-                                                                        step=1.0, key=f"alm_ins_qtd_input_{item_ins['id']}")
-                                    with eic3:
-                                        _und_opcoes_ins = ["un", "kg", "m", "cx", "pç", "rolo", "L"]
-                                        _und_atual_ins = item_ins['unidade'] if item_ins['unidade'] in _und_opcoes_ins else "un"
-                                        nova_und_ins = st.selectbox("Unidade:", _und_opcoes_ins, index=_und_opcoes_ins.index(_und_atual_ins),
-                                                                     key=f"alm_ins_und_input_{item_ins['id']}")
-                                    ced1, ced2 = st.columns([1, 1])
-                                    with ced1:
-                                        if st.button("💾 Salvar", key=f"alm_ins_item_save_{item_ins['id']}", type="primary"):
-                                            if nova_desc_ins.strip():
-                                                atualizar_dados_item_insumo(int(item_ins['id']), nova_desc_ins.strip(), nova_qtd_ins, nova_und_ins)
-                                                registrar_auditoria(st.session_state.usuario_nome, "EDITAR_ITEM_INSUMO",
-                                                    f"Saída #{int(saida_row['id'])} — '{item_ins['descricao']}' ({item_ins['quantidade']:g} {item_ins['unidade']}) → "
-                                                    f"'{nova_desc_ins.strip()}' ({nova_qtd_ins:g} {nova_und_ins})")
-                                                st.session_state[edit_item_ins_key] = False
-                                                st.toast("Item atualizado!")
-                                                st.rerun()
-                                            else:
-                                                st.error("Descrição não pode ficar vazia.")
-                                    with ced2:
-                                        if st.button("✖️ Cancelar", key=f"alm_ins_item_cancel_{item_ins['id']}"):
-                                            st.session_state[edit_item_ins_key] = False
-                                            st.rerun()
-                                    st.markdown("</div>", unsafe_allow_html=True)
-                                obs_ins_atual_raw = item_ins.get('observacao')
-                                obs_atual_ins = obs_ins_atual_raw if pd.notna(obs_ins_atual_raw) else ''
-                                if acao_ins != st_ins or (acao_ins == "Parcial" and qtd_parcial_nova_ins != qtd_env_atual_ins):
-                                    atualizar_item_insumo(int(item_ins['id']), acao_ins, obs_atual_ins, st.session_state.usuario_nome, qtd_parcial_nova_ins)
-                                    st.rerun()
-                                obs_nova_ins  = st.text_input(f"Obs — {item_ins['descricao']}:", value=obs_atual_ins,
-                                                          key=f"alm_ins_obs_{item_ins['id']}", placeholder="Ex: em falta, previsão 20/06...")
-                                if obs_nova_ins != obs_atual_ins:
-                                    atualizar_item_insumo(int(item_ins['id']), st_ins, obs_nova_ins, st.session_state.usuario_nome, qtd_env_atual_ins)
-                                bloco_comentarios('saida_insumo_item', int(item_ins['id']), f"insumo_{item_ins['id']}",
-                                                  df_com=_coms_por_item_ins.get(int(item_ins['id'])))
-                                st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
+                        n_aguard  = len(todos_comps[todos_comps['status_item'] == 'Aguardando Conferencia'])
+                        n_ok      = len(todos_comps[todos_comps['status_item'] == 'Disponivel'])
+                        n_parc    = len(todos_comps[todos_comps['status_item'] == 'Parcial'])
+                        n_falta   = len(todos_comps[todos_comps['status_item'] == 'Indisponivel'])
+                        c1, c2, c3, c4 = st.columns(4)
+                        c1.metric("⏳ Aguardando", n_aguard)
+                        c2.metric("✅ Disponíveis", n_ok)
+                        c3.metric("🟡 Parciais", n_parc)
+                        c4.metric("❌ Indisponíveis", n_falta)
+                        st.markdown("---")
 
-                            with st.expander("➕ Adicionar item a esta saída", expanded=False, key=f"alm_ins_add_expander_{int(saida_row['id'])}"):
-                                nic1, nic2, nic3, nic4 = st.columns([4, 2, 2, 1])
-                                with nic1:
-                                    novo_item_desc = st.text_input("Descrição:", key=f"novo_item_desc_{saida_row['id']}", placeholder="Ex: Spray, silicone...")
-                                with nic2:
-                                    novo_item_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key=f"novo_item_qtd_{saida_row['id']}")
-                                with nic3:
-                                    novo_item_und = st.selectbox("Unidade:", ["un", "kg", "m", "cx", "pç", "rolo", "L"], key=f"novo_item_und_{saida_row['id']}")
-                                with nic4:
-                                    st.write("")
-                                    st.write("")
-                                    if st.button("➕", key=f"btn_add_item_saida_{saida_row['id']}"):
-                                        if not novo_item_desc.strip():
-                                            st.error("Informe a descrição do item.")
-                                        else:
-                                            if adicionar_item_saida_insumo(int(saida_row['id']), novo_item_desc.strip(), novo_item_qtd, novo_item_und):
-                                                registrar_auditoria(st.session_state.usuario_nome, "ADICIONAR_ITEM_INSUMO",
-                                                    f"Saída #{int(saida_row['id'])} — item adicionado: {novo_item_desc.strip()} ({novo_item_qtd:g} {novo_item_und})")
-                                                st.toast("Item adicionado!")
-                                                st.rerun()
+                        df_rom_emitidos = carregar_romaneios_componentes_emitidos()
 
-                            if n_indisp_ins > 0:
-                                itens_falt_ins = df_itens_saida[df_itens_saida['status_item'] == 'Indisponivel']['descricao'].tolist()
-                                st.error(f"⚠️ Itens em falta: {', '.join(itens_falt_ins)}")
-                            elif n_parcial_ins > 0 and n_total_ins and n_conf_ins == n_total_ins:
-                                st.warning("🟡 Todos conferidos, mas alguns itens estão parciais.")
-                            elif n_total_ins and n_conf_ins == n_total_ins:
-                                st.success("✅ Todos os itens conferidos e disponíveis!")
+                        # todos_comps (acima) ja traz a tabela componentes_op inteira; filtrar em
+                        # memoria evita uma consulta por OP (N+1) buscando exatamente os mesmos dados.
+                        _comps_por_item = {
+                            int(k): v.reset_index(drop=True)
+                            for k, v in todos_comps.groupby('item_id', sort=False)
+                        } if not todos_comps.empty else {}
+                        # Comentarios de TODOS os componentes numa unica query, em vez de uma
+                        # consulta por componente toda vez que o expander dele estiver aberto.
+                        _coms_por_comp = carregar_comentarios_varios('componente_op', tuple(todos_comps['id'])) if not todos_comps.empty else {}
 
-                            # ── Emitir romaneio (itens Disponível ou Parcial, igual as OPs) ──
-                            st.markdown("<br>", unsafe_allow_html=True)
-                            df_disp_ins = df_itens_saida[df_itens_saida['status_item'].isin(['Disponivel', 'Parcial'])]
-                            if df_disp_ins.empty:
-                                st.caption("Nenhum item Disponível ainda pra emitir romaneio — confira os itens acima primeiro.")
-                            else:
-                                bytes_key_ins = f"rom_ins_bytes_{saida_row['id']}"
-                                if st.button("🖨️ Gerar Romaneio", key=f"prep_rom_ins_{saida_row['id']}"):
-                                    st.session_state[bytes_key_ins] = gerar_romaneio_insumos_xlsx(saida_row, df_disp_ins)
-                                if st.session_state.get(bytes_key_ins):
-                                    st.download_button(
-                                        "⬇️ Baixar Romaneio", data=st.session_state[bytes_key_ins],
-                                        file_name=f"Romaneio_Insumos_{pd.to_datetime(saida_row['data_saida']).strftime('%Y%m%d')}_{int(saida_row['id'])}.xlsx",
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        key=f"dl_saida_insumo_{saida_row['id']}"
-                                    )
+                        for _, op_row in df_ops_comp.iterrows():
+                            df_comp = _comps_por_item.get(int(op_row['item_id']), todos_comps.iloc[0:0])
+                            if df_comp.empty:
+                                continue
+                            n_total   = len(df_comp)
+                            n_conf    = len(df_comp[df_comp['status_item'] != 'Aguardando Conferencia'])
+                            n_indisp  = len(df_comp[df_comp['status_item'] == 'Indisponivel'])
+                            n_parcial = len(df_comp[df_comp['status_item'] == 'Parcial'])
+                            if n_indisp > 0:        icone = "❌"
+                            elif n_parcial > 0:     icone = "🟡"
+                            elif n_conf == n_total: icone = "✅"
+                            else:                   icone = "⏳"
 
-                            # ── Excluir saída lançada errada ──
-                            if setor in ["Master", "Almoxarifado"]:
+                            with st.expander(
+                                f"{icone} OP: {op_row['num_op']} — {op_row['cod_lote']} | {op_row['obra_vinculada']}"
+                                f"{' (Proj. ' + str(op_row['numero_projeto']) + ')' if op_row.get('numero_projeto') else ''}  "
+                                f"({n_conf}/{n_total} conferidos{f' — {n_indisp} FALTANDO' if n_indisp > 0 else ''})",
+                                expanded=False, key=f"alm_comp_expander_{int(op_row['item_id'])}"
+                            ):
+                                hc = st.columns([4, 2, 2, 3, 2])
+                                for col_h, label in zip(hc, ["COMPONENTE", "QTD", "UN", "STATUS", "AÇÃO"]):
+                                    col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
+                                st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
+
+                                status_opcoes_comp = ["Aguardando Conferencia", "Disponivel", "Parcial", "Indisponivel"]
+                                for _, comp in df_comp.iterrows():
+                                    st_item = comp['status_item']
+                                    qtd_env_atual = comp.get('quantidade_enviada')
+                                    if st_item == 'Disponivel':     cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
+                                    elif st_item == 'Parcial':      cor = "#B45309"; bg = "#FEF3C7"; emoji = "🟡"
+                                    elif st_item == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
+                                    else:                           cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
+                                    badge_txt = f"{st_item} ({qtd_env_atual:g}/{comp['quantidade']:g})" if st_item == 'Parcial' and pd.notna(qtd_env_atual) else st_item
+                                    rc = st.columns([4, 2, 2, 3, 2])
+                                    rc[0].markdown(f"**{comp['nome_componente']}**")
+                                    rc[1].markdown(f"`{comp['quantidade']}`")
+                                    rc[2].markdown(f"{comp['unidade']}")
+                                    rc[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {badge_txt}</span>", unsafe_allow_html=True)
+                                    with rc[4]:
+                                        acao = st.selectbox(
+                                            "", status_opcoes_comp,
+                                            index=status_opcoes_comp.index(st_item) if st_item in status_opcoes_comp else 0,
+                                            key=f"alm_st_{comp['id']}", label_visibility="collapsed"
+                                        )
+                                    qtd_parcial_nova = None
+                                    if acao == "Parcial":
+                                        qtd_parcial_nova = st.number_input(
+                                            f"Quantidade enviada — {comp['nome_componente']} (solicitado: {comp['quantidade']:g} {comp['unidade']}):",
+                                            min_value=0.0, max_value=float(comp['quantidade']),
+                                            value=float(qtd_env_atual) if pd.notna(qtd_env_atual) else float(comp['quantidade']),
+                                            step=1.0, key=f"alm_qtdparcial_{comp['id']}"
+                                        )
+                                    obs_comp_atual_raw = comp.get('observacao')
+                                    obs_comp_atual = obs_comp_atual_raw if pd.notna(obs_comp_atual_raw) else ''
+                                    if acao != st_item or (acao == "Parcial" and qtd_parcial_nova != qtd_env_atual):
+                                        atualizar_componente(comp['id'], acao, obs_comp_atual, st.session_state.usuario_nome, qtd_parcial_nova)
+                                        st.rerun(scope="fragment")
+                                    obs_atual = obs_comp_atual
+                                    obs_nova  = st.text_input(f"Obs — {comp['nome_componente']}:", value=obs_atual,
+                                                              key=f"alm_obs_{comp['id']}", placeholder="Ex: em falta, previsão 20/06...")
+                                    if obs_nova != obs_atual:
+                                        atualizar_componente(comp['id'], st_item, obs_nova, st.session_state.usuario_nome, qtd_env_atual)
+                                    bloco_comentarios('componente_op', int(comp['id']), f"comp_{comp['id']}",
+                                                      df_com=_coms_por_comp.get(int(comp['id'])))
+                                    st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
+
+                                if n_indisp > 0:
+                                    itens_falt = df_comp[df_comp['status_item'] == 'Indisponivel']['nome_componente'].tolist()
+                                    st.error(f"⚠️ Itens em falta: {', '.join(itens_falt)}")
+                                elif n_parcial > 0 and n_conf == n_total:
+                                    st.warning("🟡 Todos conferidos, mas alguns componentes estão parciais.")
+                                elif n_conf == n_total:
+                                    st.success("✅ Todos os componentes conferidos e disponíveis!")
+
+                                # ── Emitir romaneio (itens Disponível ou Parcial) ──
+                                item_id_op = int(op_row['item_id'])
+                                df_disponiveis = df_comp[df_comp['status_item'].isin(['Disponivel', 'Parcial'])]
+                                ja_emitido = df_rom_emitidos[df_rom_emitidos['item_id'] == item_id_op] if not df_rom_emitidos.empty else pd.DataFrame()
                                 st.markdown("<br>", unsafe_allow_html=True)
-                                confirm_key_del_ins = f"confirm_del_saida_ins_{saida_row['id']}"
-                                if not st.session_state.get(confirm_key_del_ins):
-                                    if st.button("🗑️ Excluir esta saída (lançamento errado)", key=f"btn_del_saida_ins_{saida_row['id']}"):
-                                        st.session_state[confirm_key_del_ins] = True
-                                        st.rerun()
+                                if not ja_emitido.empty:
+                                    emitido_em_fmt = pd.to_datetime(ja_emitido.iloc[0]['emitido_em']).strftime('%d/%m/%Y %H:%M')
+                                    st.caption(f"✅ Romaneio emitido em {emitido_em_fmt} por {ja_emitido.iloc[0]['emitido_por']}")
+                                if df_disponiveis.empty:
+                                    st.caption("Nenhum item Disponível ainda pra emitir romaneio.")
                                 else:
-                                    st.warning("⚠️ Isso vai apagar essa saída e todos os itens dela. Confirma?")
-                                    dsi1, dsi2 = st.columns(2)
-                                    with dsi1:
-                                        if st.button("✅ Sim, excluir", key=f"btn_confirma_del_saida_ins_{saida_row['id']}", type="primary"):
-                                            if excluir_saida_insumo(int(saida_row['id'])):
-                                                registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_SAIDA_INSUMO",
-                                                    f"Saída #{int(saida_row['id'])} — {_nn(saida_row.get('obra'), 'Sem obra')} — {_nn(saida_row.get('destino'), '—')}")
+                                    bytes_key_comp = f"rom_comp_bytes_{item_id_op}"
+                                    if st.button("🖨️ Gerar Romaneio" if ja_emitido.empty else "🖨️ Gerar Reemissão",
+                                                 key=f"prep_rom_comp_{item_id_op}"):
+                                        st.session_state[bytes_key_comp] = gerar_romaneio_componentes_xlsx(
+                                            op_row['obra_vinculada'], op_row['num_op'], op_row['cod_lote'],
+                                            df_disponiveis, st.session_state.usuario_nome,
+                                            numero_projeto=_nn(op_row.get('numero_projeto'))
+                                        )
+                                    if st.session_state.get(bytes_key_comp):
+                                        st.download_button(
+                                            "⬇️ Baixar Romaneio" if ja_emitido.empty else "⬇️ Baixar Reemissão",
+                                            data=st.session_state[bytes_key_comp],
+                                            file_name=f"Romaneio_Componentes_{op_row['num_op']}.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            key=f"dl_rom_comp_{item_id_op}",
+                                            on_click=registrar_romaneio_componentes_emitido,
+                                            args=(item_id_op, op_row['num_op'], op_row['obra_vinculada'], st.session_state.usuario_nome)
+                                        )
+
+                with tab_alm_ins:
+                    df_todos_ins = carregar_todos_itens_insumos()
+                    if not df_todos_ins.empty:
+                        n_aguard_ins = len(df_todos_ins[df_todos_ins['status_item'] == 'Aguardando Conferencia'])
+                        n_ok_ins     = len(df_todos_ins[df_todos_ins['status_item'] == 'Disponivel'])
+                        n_parc_ins   = len(df_todos_ins[df_todos_ins['status_item'] == 'Parcial'])
+                        n_falta_ins  = len(df_todos_ins[df_todos_ins['status_item'] == 'Indisponivel'])
+                        ci1, ci2, ci3, ci4 = st.columns(4)
+                        ci1.metric("⏳ Aguardando", n_aguard_ins)
+                        ci2.metric("✅ Disponíveis", n_ok_ins)
+                        ci3.metric("🟡 Parciais", n_parc_ins)
+                        ci4.metric("❌ Indisponíveis", n_falta_ins)
+                        st.markdown("---")
+
+                    with st.expander("➕ Nova Saída de Insumos", expanded=df_todos_ins.empty):
+                        st.caption("Saída de material manual (parafuso, broca, lima etc) — igual qualquer outra saída, sem OP vinculada. Obra e Projeto são obrigatórios.")
+                        obras_insumo = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
+                        if not obras_insumo:
+                            st.info("Cadastre uma Obra e um Projeto em 'Cadastrar Obra' antes de registrar uma saída de insumos.")
+                        ii1, ii2, ii3, ii4 = st.columns(4)
+                        with ii1:
+                            insumo_data = st.date_input("Data de saída:", value=hoje_projeto().date(), format="DD/MM/YYYY", key="insumo_data")
+                        with ii2:
+                            insumo_obra = st.selectbox("Obra:", obras_insumo, key="insumo_obra") if obras_insumo else None
+                        with ii3:
+                            projetos_insumo = sorted(
+                                df_projetos[df_projetos['Obra'] == insumo_obra]['Numero_Projeto'].unique().tolist()
+                            ) if insumo_obra else []
+                            insumo_projeto = st.selectbox("Projeto:", projetos_insumo, key="insumo_projeto") if projetos_insumo else None
+                            if insumo_obra and not projetos_insumo:
+                                st.caption("⚠️ Cadastre um projeto pra essa obra em 'Cadastrar Obra'.")
+                        with ii4:
+                            insumo_destino = st.text_input("Destino:", key="insumo_destino", placeholder="Ex: Produção, Obra tal, Manutenção...")
+
+                        if "insumo_itens" not in st.session_state:
+                            st.session_state.insumo_itens = []
+
+                        st.markdown("**Adicionar item:**")
+                        ii4, ii5, ii6, ii7 = st.columns([4, 2, 2, 1])
+                        with ii4:
+                            insumo_desc = st.text_input("Descrição do insumo:", key="insumo_desc",
+                                                         placeholder="Ex: Parafuso M6, Broca 8mm, Lima...")
+                        with ii5:
+                            insumo_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key="insumo_qtd")
+                        with ii6:
+                            insumo_unidade = st.selectbox("Unidade:", ["un", "kg", "m", "cx", "pç", "rolo", "L"], key="insumo_unidade")
+                        with ii7:
+                            st.write("")
+                            st.write("")
+                            if st.button("➕", key="btn_add_insumo_item"):
+                                if not insumo_desc.strip():
+                                    st.error("Informe a descrição do insumo.")
+                                else:
+                                    st.session_state.insumo_itens.append({
+                                        "descricao": insumo_desc.strip(), "quantidade": insumo_qtd, "unidade": insumo_unidade
+                                    })
+                                    st.rerun(scope="fragment")
+
+                        if st.session_state.insumo_itens:
+                            st.markdown("**Itens desta saída:**")
+                            for i, item in enumerate(st.session_state.insumo_itens):
+                                col_desc, col_qtd, col_rem = st.columns([5, 2, 1])
+                                col_desc.write(f"{i+1}. {item['descricao']}")
+                                col_qtd.write(f"{item['quantidade']:g} {item['unidade']}")
+                                with col_rem:
+                                    if st.button("🗑", key=f"rem_insumo_item_{i}"):
+                                        st.session_state.insumo_itens.pop(i)
+                                        st.rerun(scope="fragment")
+
+                            if st.button("💾 Registrar Saída", key="btn_salvar_insumo", type="primary",
+                                         disabled=not (insumo_obra and insumo_projeto)):
+                                saida_id = salvar_saida_insumos(
+                                    insumo_data, insumo_obra, insumo_destino.strip(),
+                                    st.session_state.insumo_itens, st.session_state.usuario_nome,
+                                    numero_projeto=insumo_projeto
+                                )
+                                if saida_id:
+                                    registrar_auditoria(st.session_state.usuario_nome, "SAIDA_INSUMOS",
+                                        f"Saída #{saida_id} — {len(st.session_state.insumo_itens)} item(ns) — Destino: {insumo_destino.strip()}")
+                                    st.session_state.insumo_itens = []
+                                    st.toast("Saída registrada!")
+                                    st.rerun(scope="fragment")
+                        else:
+                            st.caption("Nenhum item adicionado ainda.")
+
+                    st.markdown("---")
+                    st.markdown("#### Histórico e Conferência de Saídas")
+                    st.caption("A via física continua sendo emitida normalmente — a conferência abaixo (Disponível/Indisponível) é o controle digital, sem precisar editar o romaneio na mão depois.")
+                    df_saidas = carregar_saidas_insumos()
+                    if df_saidas.empty:
+                        st.caption("Nenhuma saída registrada ainda.")
+                    else:
+                        # df_todos_ins (topo da aba) ja tem a tabela saidas_insumos_itens inteira e e'
+                        # invalidada nas mesmas mutacoes que a versao por saida — filtrar em memoria
+                        # evita uma consulta por saida (N+1) buscando exatamente as mesmas linhas.
+                        _cols_ins = ['id', 'descricao', 'quantidade', 'unidade',
+                                     'status_item', 'observacao', 'quantidade_enviada']
+                        _itens_por_saida = {
+                            int(k): v.sort_values('id')[_cols_ins].reset_index(drop=True)
+                            for k, v in df_todos_ins.groupby('saida_id', sort=False)
+                        } if not df_todos_ins.empty else {}
+                        _itens_ins_vazio = pd.DataFrame(columns=_cols_ins)
+                        # Comentarios de TODOS os itens de insumo numa unica query, em vez de uma
+                        # consulta por item toda vez que o expander da saida estiver aberto.
+                        _coms_por_item_ins = carregar_comentarios_varios('saida_insumo_item', tuple(df_todos_ins['id'])) if not df_todos_ins.empty else {}
+
+                        for _, saida_row in df_saidas.iterrows():
+                            df_itens_saida = _itens_por_saida.get(int(saida_row['id']), _itens_ins_vazio)
+                            n_total_ins = len(df_itens_saida)
+                            n_conf_ins  = len(df_itens_saida[df_itens_saida['status_item'] != 'Aguardando Conferencia']) if n_total_ins else 0
+                            n_indisp_ins = len(df_itens_saida[df_itens_saida['status_item'] == 'Indisponivel']) if n_total_ins else 0
+                            n_parcial_ins = len(df_itens_saida[df_itens_saida['status_item'] == 'Parcial']) if n_total_ins else 0
+                            if n_indisp_ins > 0:                              icone_ins = "❌"
+                            elif n_parcial_ins > 0:                           icone_ins = "🟡"
+                            elif n_total_ins and n_conf_ins == n_total_ins:   icone_ins = "✅"
+                            else:                                             icone_ins = "⏳"
+
+                            with st.expander(
+                                f"{icone_ins} {pd.to_datetime(saida_row['data_saida']).strftime('%d/%m/%Y')} — "
+                                f"{_nn(saida_row.get('obra'), 'Sem obra')}"
+                                f"{' (Proj. ' + str(saida_row['numero_projeto']) + ')' if pd.notna(saida_row.get('numero_projeto')) else ''}"
+                                f" — {_nn(saida_row.get('destino'), '—')} "
+                                f"({n_conf_ins}/{n_total_ins} conferidos{f' — {n_indisp_ins} FALTANDO' if n_indisp_ins > 0 else ''}) — por {saida_row['registrado_por']}",
+                                expanded=False, key=f"alm_ins_expander_{int(saida_row['id'])}"
+                            ):
+                                pode_editar_item_ins = setor in ["Master", "Almoxarifado"]
+                                hci = st.columns([4, 1.5, 1, 2.5, 2.5, 0.8]) if pode_editar_item_ins else st.columns([4, 2, 2, 3, 2])
+                                labels_ins_header = ["INSUMO", "QTD", "UN", "STATUS", "AÇÃO", ""] if pode_editar_item_ins else ["INSUMO", "QTD", "UN", "STATUS", "AÇÃO"]
+                                for col_h, label in zip(hci, labels_ins_header):
+                                    col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
+                                st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
+
+                                status_opcoes_ins = ["Aguardando Conferencia", "Disponivel", "Parcial", "Indisponivel"]
+                                for _, item_ins in df_itens_saida.iterrows():
+                                    st_ins = item_ins['status_item']
+                                    qtd_env_atual_ins = item_ins.get('quantidade_enviada')
+                                    if st_ins == 'Disponivel':     cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
+                                    elif st_ins == 'Parcial':      cor = "#B45309"; bg = "#FEF3C7"; emoji = "🟡"
+                                    elif st_ins == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
+                                    else:                           cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
+                                    badge_txt_ins = f"{st_ins} ({qtd_env_atual_ins:g}/{item_ins['quantidade']:g})" if st_ins == 'Parcial' and pd.notna(qtd_env_atual_ins) else st_ins
+                                    edit_item_ins_key = f"alm_ins_edit_item_{item_ins['id']}"
+                                    rci = st.columns([4, 1.5, 1, 2.5, 2.5, 0.8]) if pode_editar_item_ins else st.columns([4, 2, 2, 3, 2])
+                                    rci[0].markdown(f"**{item_ins['descricao']}**")
+                                    rci[1].markdown(f"`{item_ins['quantidade']}`")
+                                    rci[2].markdown(f"{item_ins['unidade']}")
+                                    rci[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {badge_txt_ins}</span>", unsafe_allow_html=True)
+                                    with rci[4]:
+                                        acao_ins = st.selectbox(
+                                            "", status_opcoes_ins,
+                                            index=status_opcoes_ins.index(st_ins) if st_ins in status_opcoes_ins else 0,
+                                            key=f"alm_ins_st_{item_ins['id']}", label_visibility="collapsed"
+                                        )
+                                    if pode_editar_item_ins:
+                                        with rci[5]:
+                                            if st.button("✏️", key=f"alm_ins_item_toggle_{item_ins['id']}", help="Editar item (descrição, qtd, unidade)"):
+                                                st.session_state[edit_item_ins_key] = not st.session_state.get(edit_item_ins_key, False)
+                                                st.rerun(scope="fragment")
+                                    qtd_parcial_nova_ins = None
+                                    if acao_ins == "Parcial":
+                                        qtd_parcial_nova_ins = st.number_input(
+                                            f"Quantidade enviada — {item_ins['descricao']} (solicitado: {item_ins['quantidade']:g} {item_ins['unidade']}):",
+                                            min_value=0.0, max_value=float(item_ins['quantidade']),
+                                            value=float(qtd_env_atual_ins) if pd.notna(qtd_env_atual_ins) else float(item_ins['quantidade']),
+                                            step=1.0, key=f"alm_ins_qtdparcial_{item_ins['id']}"
+                                        )
+                                    if pode_editar_item_ins and st.session_state.get(edit_item_ins_key):
+                                        st.markdown("<div style='background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px;margin-bottom:8px;'>", unsafe_allow_html=True)
+                                        eic1, eic2, eic3 = st.columns([4, 2, 2])
+                                        with eic1:
+                                            nova_desc_ins = st.text_input("Descrição:", value=item_ins['descricao'],
+                                                                           key=f"alm_ins_desc_input_{item_ins['id']}")
+                                        with eic2:
+                                            nova_qtd_ins = st.number_input("Quantidade:", min_value=0.0, value=float(item_ins['quantidade']),
+                                                                            step=1.0, key=f"alm_ins_qtd_input_{item_ins['id']}")
+                                        with eic3:
+                                            _und_opcoes_ins = ["un", "kg", "m", "cx", "pç", "rolo", "L"]
+                                            _und_atual_ins = item_ins['unidade'] if item_ins['unidade'] in _und_opcoes_ins else "un"
+                                            nova_und_ins = st.selectbox("Unidade:", _und_opcoes_ins, index=_und_opcoes_ins.index(_und_atual_ins),
+                                                                         key=f"alm_ins_und_input_{item_ins['id']}")
+                                        ced1, ced2 = st.columns([1, 1])
+                                        with ced1:
+                                            if st.button("💾 Salvar", key=f"alm_ins_item_save_{item_ins['id']}", type="primary"):
+                                                if nova_desc_ins.strip():
+                                                    atualizar_dados_item_insumo(int(item_ins['id']), nova_desc_ins.strip(), nova_qtd_ins, nova_und_ins)
+                                                    registrar_auditoria(st.session_state.usuario_nome, "EDITAR_ITEM_INSUMO",
+                                                        f"Saída #{int(saida_row['id'])} — '{item_ins['descricao']}' ({item_ins['quantidade']:g} {item_ins['unidade']}) → "
+                                                        f"'{nova_desc_ins.strip()}' ({nova_qtd_ins:g} {nova_und_ins})")
+                                                    st.session_state[edit_item_ins_key] = False
+                                                    st.toast("Item atualizado!")
+                                                    st.rerun(scope="fragment")
+                                                else:
+                                                    st.error("Descrição não pode ficar vazia.")
+                                        with ced2:
+                                            if st.button("✖️ Cancelar", key=f"alm_ins_item_cancel_{item_ins['id']}"):
+                                                st.session_state[edit_item_ins_key] = False
+                                                st.rerun(scope="fragment")
+                                        st.markdown("</div>", unsafe_allow_html=True)
+                                    obs_ins_atual_raw = item_ins.get('observacao')
+                                    obs_atual_ins = obs_ins_atual_raw if pd.notna(obs_ins_atual_raw) else ''
+                                    if acao_ins != st_ins or (acao_ins == "Parcial" and qtd_parcial_nova_ins != qtd_env_atual_ins):
+                                        atualizar_item_insumo(int(item_ins['id']), acao_ins, obs_atual_ins, st.session_state.usuario_nome, qtd_parcial_nova_ins)
+                                        st.rerun(scope="fragment")
+                                    obs_nova_ins  = st.text_input(f"Obs — {item_ins['descricao']}:", value=obs_atual_ins,
+                                                              key=f"alm_ins_obs_{item_ins['id']}", placeholder="Ex: em falta, previsão 20/06...")
+                                    if obs_nova_ins != obs_atual_ins:
+                                        atualizar_item_insumo(int(item_ins['id']), st_ins, obs_nova_ins, st.session_state.usuario_nome, qtd_env_atual_ins)
+                                    bloco_comentarios('saida_insumo_item', int(item_ins['id']), f"insumo_{item_ins['id']}",
+                                                      df_com=_coms_por_item_ins.get(int(item_ins['id'])))
+                                    st.markdown("<hr style='margin:4px 0;border-color:#F1F5F9;'>", unsafe_allow_html=True)
+
+                                with st.expander("➕ Adicionar item a esta saída", expanded=False, key=f"alm_ins_add_expander_{int(saida_row['id'])}"):
+                                    nic1, nic2, nic3, nic4 = st.columns([4, 2, 2, 1])
+                                    with nic1:
+                                        novo_item_desc = st.text_input("Descrição:", key=f"novo_item_desc_{saida_row['id']}", placeholder="Ex: Spray, silicone...")
+                                    with nic2:
+                                        novo_item_qtd = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0, key=f"novo_item_qtd_{saida_row['id']}")
+                                    with nic3:
+                                        novo_item_und = st.selectbox("Unidade:", ["un", "kg", "m", "cx", "pç", "rolo", "L"], key=f"novo_item_und_{saida_row['id']}")
+                                    with nic4:
+                                        st.write("")
+                                        st.write("")
+                                        if st.button("➕", key=f"btn_add_item_saida_{saida_row['id']}"):
+                                            if not novo_item_desc.strip():
+                                                st.error("Informe a descrição do item.")
+                                            else:
+                                                if adicionar_item_saida_insumo(int(saida_row['id']), novo_item_desc.strip(), novo_item_qtd, novo_item_und):
+                                                    registrar_auditoria(st.session_state.usuario_nome, "ADICIONAR_ITEM_INSUMO",
+                                                        f"Saída #{int(saida_row['id'])} — item adicionado: {novo_item_desc.strip()} ({novo_item_qtd:g} {novo_item_und})")
+                                                    st.toast("Item adicionado!")
+                                                    st.rerun(scope="fragment")
+
+                                if n_indisp_ins > 0:
+                                    itens_falt_ins = df_itens_saida[df_itens_saida['status_item'] == 'Indisponivel']['descricao'].tolist()
+                                    st.error(f"⚠️ Itens em falta: {', '.join(itens_falt_ins)}")
+                                elif n_parcial_ins > 0 and n_total_ins and n_conf_ins == n_total_ins:
+                                    st.warning("🟡 Todos conferidos, mas alguns itens estão parciais.")
+                                elif n_total_ins and n_conf_ins == n_total_ins:
+                                    st.success("✅ Todos os itens conferidos e disponíveis!")
+
+                                # ── Emitir romaneio (itens Disponível ou Parcial, igual as OPs) ──
+                                st.markdown("<br>", unsafe_allow_html=True)
+                                df_disp_ins = df_itens_saida[df_itens_saida['status_item'].isin(['Disponivel', 'Parcial'])]
+                                if df_disp_ins.empty:
+                                    st.caption("Nenhum item Disponível ainda pra emitir romaneio — confira os itens acima primeiro.")
+                                else:
+                                    bytes_key_ins = f"rom_ins_bytes_{saida_row['id']}"
+                                    if st.button("🖨️ Gerar Romaneio", key=f"prep_rom_ins_{saida_row['id']}"):
+                                        st.session_state[bytes_key_ins] = gerar_romaneio_insumos_xlsx(saida_row, df_disp_ins)
+                                    if st.session_state.get(bytes_key_ins):
+                                        st.download_button(
+                                            "⬇️ Baixar Romaneio", data=st.session_state[bytes_key_ins],
+                                            file_name=f"Romaneio_Insumos_{pd.to_datetime(saida_row['data_saida']).strftime('%Y%m%d')}_{int(saida_row['id'])}.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            key=f"dl_saida_insumo_{saida_row['id']}"
+                                        )
+
+                                # ── Excluir saída lançada errada ──
+                                if setor in ["Master", "Almoxarifado"]:
+                                    st.markdown("<br>", unsafe_allow_html=True)
+                                    confirm_key_del_ins = f"confirm_del_saida_ins_{saida_row['id']}"
+                                    if not st.session_state.get(confirm_key_del_ins):
+                                        if st.button("🗑️ Excluir esta saída (lançamento errado)", key=f"btn_del_saida_ins_{saida_row['id']}"):
+                                            st.session_state[confirm_key_del_ins] = True
+                                            st.rerun(scope="fragment")
+                                    else:
+                                        st.warning("⚠️ Isso vai apagar essa saída e todos os itens dela. Confirma?")
+                                        dsi1, dsi2 = st.columns(2)
+                                        with dsi1:
+                                            if st.button("✅ Sim, excluir", key=f"btn_confirma_del_saida_ins_{saida_row['id']}", type="primary"):
+                                                if excluir_saida_insumo(int(saida_row['id'])):
+                                                    registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_SAIDA_INSUMO",
+                                                        f"Saída #{int(saida_row['id'])} — {_nn(saida_row.get('obra'), 'Sem obra')} — {_nn(saida_row.get('destino'), '—')}")
+                                                    st.session_state.pop(confirm_key_del_ins, None)
+                                                    st.toast("Saída excluída.")
+                                                    st.rerun(scope="fragment")
+                                        with dsi2:
+                                            if st.button("Cancelar", key=f"btn_cancela_del_saida_ins_{saida_row['id']}"):
                                                 st.session_state.pop(confirm_key_del_ins, None)
-                                                st.toast("Saída excluída.")
-                                                st.rerun()
-                                    with dsi2:
-                                        if st.button("Cancelar", key=f"btn_cancela_del_saida_ins_{saida_row['id']}"):
-                                            st.session_state.pop(confirm_key_del_ins, None)
-                                            st.rerun()
+                                                st.rerun(scope="fragment")
+            _render_pagina_almoxarifado()
 
     # ==================================================
     # ROMANEIO MANUAL (sem OP vinculada)
