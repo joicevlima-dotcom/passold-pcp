@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
@@ -41,6 +42,45 @@ METAS_PRODUTIVIDADE = {"Esquadria-Vidro": 450, "ACM": 382}
 FATOR_PRODUTIVIDADE_DIFICULDADE = {1: 1.00, 2: 0.90, 3: 0.80, 4: 0.70, 5: 0.50}
 
 st.set_page_config(page_title="Passold Sistemas de Fachadas", layout="wide", page_icon="🏭", initial_sidebar_state="expanded")
+
+# Streamlit não expõe uma API pra mexer no <head> da página -- esse componente roda
+# num iframe same-origin e injeta o manifest/ícones/service worker direto no documento
+# pai, permitindo "Adicionar à tela inicial" no celular como se fosse um app instalado.
+components.html("""
+<script>
+(function() {
+    var doc = window.parent.document;
+    if (doc.querySelector('link[rel="manifest"]')) { return; }
+    var head = doc.head;
+
+    function addMeta(name, content) {
+        var m = doc.createElement('meta');
+        m.name = name;
+        m.content = content;
+        head.appendChild(m);
+    }
+    function addLink(rel, href, extra) {
+        var l = doc.createElement('link');
+        l.rel = rel;
+        l.href = href;
+        if (extra) { for (var k in extra) { l[k] = extra[k]; } }
+        head.appendChild(l);
+    }
+
+    addLink('manifest', '/app/static/manifest.json');
+    addMeta('theme-color', '#1E3A5F');
+    addMeta('apple-mobile-web-app-capable', 'yes');
+    addMeta('apple-mobile-web-app-status-bar-style', 'black-translucent');
+    addMeta('apple-mobile-web-app-title', 'Passold');
+    addLink('apple-touch-icon', '/app/static/icons/apple-touch-icon.png');
+    addLink('icon', '/app/static/icons/icon-192.png', {sizes: '192x192'});
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/app/static/sw.js').catch(function() {});
+    }
+})();
+</script>
+""", height=0, width=0)
 
 st.markdown("""
 <style>
@@ -407,6 +447,51 @@ div[data-testid="stToggle"] label span,
     border: 1px dashed var(--border-hover) !important;
 }
 [data-testid="stFileUploaderDropzoneInstructions"] * { color: var(--text-muted) !important; }
+
+/* ── Ajustes de celular ────────────────────────────────────────────────
+Streamlit por padrao so encolhe tudo proporcionalmente numa tela estreita,
+o que deixa colunas, botoes e menu espremidos. As regras abaixo so valem
+ate 768px de largura e nao mudam nada na versao desktop. ──────────────── */
+@media (max-width: 768px) {
+    /* Empilha qualquer st.columns() em vez de espremer lado a lado */
+    div[data-testid="stHorizontalBlock"] {
+        flex-direction: column !important;
+    }
+    div[data-testid="stColumn"] {
+        width: 100% !important;
+        min-width: 100% !important;
+        flex: 1 1 100% !important;
+    }
+
+    /* Sem o botao «» pra fechar, a sidebar fica presa aberta cobrindo a
+    tela inteira no celular -- devolve o botao so nesse breakpoint. */
+    button[data-testid="collapsedControl"],
+    section[data-testid="stSidebar"] > div > div > button[kind="header"],
+    [data-testid*="ollapse" i] button,
+    button[data-testid*="ollapse" i],
+    [data-testid="stSidebarHeader"] button,
+    [data-testid="stSidebarCollapseButton"] {
+        display: flex !important;
+        pointer-events: auto !important;
+    }
+
+    /* Itens do menu e botoes maiores pro toque (alvo minimo ~44px) */
+    section[data-testid="stSidebar"] .stRadio > div > div[role="radiogroup"] > label {
+        padding: 13px 14px !important;
+        font-size: 0.95rem !important;
+    }
+    .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {
+        min-height: 44px !important;
+        font-size: 0.95rem !important;
+    }
+
+    .topbar {
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 12px 16px;
+    }
+    .topbar-title { font-size: 1.05rem; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -12859,6 +12944,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-08-24", "Primeira leva de ajustes pro celular: colunas empilham em vez de espremer, botões e menu maiores pro toque, e dá pra instalar o sistema na tela inicial como um app (veja \"📱 Instalar como app no celular\" em Sistema)."),
                 ("2026-08-21", "Almoxarifado: agora dá pra corrigir descrição, quantidade e unidade de um item de insumo lançado errado (lápis na linha do item, aba Romaneios de Insumos)."),
                 ("2026-08-21", "Kanban ganha \"📦 Arquivar\" cartão — some da lista principal (quadros deixam de pesar com o tempo) mas continua no relatório e pode ser desarquivado; Documentos e relatório do Kanban só geram o Excel quando a pessoa clica em baixar, não mais em todo carregamento da tela."),
                 ("2026-08-20", "Kanban: nos quadros do Departamento Técnico ACM e Esquadrias, novo cartão ganha campo \"Atribuído a:\" e dispara e-mail automático pra pessoa atribuída + diretor de engenharia."),
@@ -13208,6 +13294,27 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 """),
                 ]),
                 ("⚙️ Sistema", [
+                    ("instalar_app", "📱 Instalar como app no celular", """
+**Quem acessa:** Todo mundo — funciona em qualquer setor, direto do navegador do celular.
+
+**Para que serve:** Colocar um ícone do sistema na tela inicial do celular, que abre em tela cheia (sem a barra de endereço do navegador), como se fosse um aplicativo instalado.
+
+**Passo a passo — Android (Chrome):**
+1. Abra o sistema pelo Chrome no celular.
+2. Toque nos três pontinhos (⋮) no canto superior direito.
+3. Toque em "Adicionar à tela inicial" (ou "Instalar app", se aparecer).
+4. Confirme o nome e toque em "Adicionar".
+
+**Passo a passo — iPhone (Safari):**
+1. Abra o sistema pelo Safari no celular (precisa ser o Safari, outros navegadores no iPhone não oferecem essa opção).
+2. Toque no ícone de compartilhar (o quadrado com a seta pra cima), na barra inferior.
+3. Role e toque em "Adicionar à Tela de Início".
+4. Confirme o nome e toque em "Adicionar".
+
+**Regras importantes:**
+- Não é um app "de verdade" baixado de loja (Play Store/App Store) — é o mesmo site, só que abre com aparência de app. Continua puxando os dados em tempo real do servidor normalmente.
+- As telas mais usadas no celular já ficaram mais largas e com botões maiores nessa atualização; se algum lugar específico ainda estiver difícil de usar no celular, avise pra ajustar.
+"""),
                     ("configuracoes", "⚙️ Configurações", """
 **Quem acessa:** Master.
 
