@@ -466,9 +466,11 @@ ate 768px de largura e nao mudam nada na versao desktop. ───────�
     /* Sem o botao «» pra fechar, a sidebar fica presa aberta cobrindo a
     tela inteira no celular -- devolve o botao so nesse breakpoint. O botao
     de REABRIR (quando a sidebar ja esta fechada) mora dentro do <header>
-    nativo do Streamlit, que fica com visibility:hidden global -- e
-    visibility e' herdado, entao so display:flex nao bastava, precisa
-    tambem resetar visibility no proprio botao e no header que o contem. */
+    nativo do Streamlit -- nas versoes recentes (1.5x) o testid dele e'
+    "stExpandSidebarButton", nao "collapsedControl" (nome de versao antiga,
+    mantido abaixo so por seguranca). O header inteiro fica com
+    visibility:hidden global, e visibility e' herdado -- por isso precisa
+    resetar visibility no proprio botao, nao so display. */
     header[data-testid="stHeader"] {
         visibility: visible !important;
         height: auto !important;
@@ -477,6 +479,7 @@ ate 768px de largura e nao mudam nada na versao desktop. ───────�
     header[data-testid="stHeader"] * {
         visibility: hidden;
     }
+    button[data-testid="stExpandSidebarButton"],
     button[data-testid="collapsedControl"],
     section[data-testid="stSidebar"] > div > div > button[kind="header"],
     [data-testid*="ollapse" i] button,
@@ -490,6 +493,7 @@ ate 768px de largura e nao mudam nada na versao desktop. ───────�
         z-index: 999999 !important;
         color: var(--primary) !important;
     }
+    button[data-testid="stExpandSidebarButton"] *,
     button[data-testid="collapsedControl"] * {
         visibility: visible !important;
     }
