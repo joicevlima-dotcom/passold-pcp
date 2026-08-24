@@ -473,11 +473,15 @@ ate 768px de largura e nao mudam nada na versao desktop. ───────�
     resetar visibility no proprio botao, nao so display. */
     header[data-testid="stHeader"] {
         visibility: visible !important;
-        height: auto !important;
         background: transparent !important;
     }
     header[data-testid="stHeader"] * {
         visibility: hidden;
+    }
+    /* O header e' posicionado por cima do conteudo (position:absolute) --
+    garante espaco no topo pro botao nao ficar em cima do titulo da tela. */
+    div[data-testid="stMainBlockContainer"] {
+        padding-top: 3.5rem !important;
     }
     button[data-testid="stExpandSidebarButton"],
     button[data-testid="collapsedControl"],
