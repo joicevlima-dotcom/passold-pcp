@@ -9808,16 +9808,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             for _, comp in df_comp.iterrows():
                                 st_item = comp['status_item']
                                 qtd_env_atual = comp.get('quantidade_enviada')
-                                if st_item == 'Disponivel':     cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
-                                elif st_item == 'Parcial':      cor = "#B45309"; bg = "#FEF3C7"; emoji = "🟡"
-                                elif st_item == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
-                                else:                           cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
-                                badge_txt = f"{st_item} ({qtd_env_atual:g}/{comp['quantidade']:g})" if st_item == 'Parcial' and pd.notna(qtd_env_atual) else st_item
                                 rc = st.columns([4, 2, 2, 3, 2])
                                 rc[0].markdown(f"**{comp['nome_componente']}**")
                                 rc[1].markdown(f"`{comp['quantidade']}`")
                                 rc[2].markdown(f"{comp['unidade']}")
-                                rc[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {badge_txt}</span>", unsafe_allow_html=True)
                                 with rc[4]:
                                     acao = st.selectbox(
                                         "", status_opcoes_comp,
@@ -9832,11 +9826,19 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         value=float(qtd_env_atual) if pd.notna(qtd_env_atual) else float(comp['quantidade']),
                                         step=1.0, key=f"alm_qtdparcial_{comp['id']}"
                                     )
+                                # Selo usa o status JA escolhido no dropdown (acao), nao o valor antigo do
+                                # banco -- reflete a troca na hora, sem precisar de um rerun so pra isso.
+                                qtd_badge = qtd_parcial_nova if acao == "Parcial" else qtd_env_atual
+                                if acao == 'Disponivel':     cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
+                                elif acao == 'Parcial':      cor = "#B45309"; bg = "#FEF3C7"; emoji = "🟡"
+                                elif acao == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
+                                else:                         cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
+                                badge_txt = f"{acao} ({qtd_badge:g}/{comp['quantidade']:g})" if acao == 'Parcial' and pd.notna(qtd_badge) else acao
+                                rc[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {badge_txt}</span>", unsafe_allow_html=True)
                                 obs_comp_atual_raw = comp.get('observacao')
                                 obs_comp_atual = obs_comp_atual_raw if pd.notna(obs_comp_atual_raw) else ''
                                 if acao != st_item or (acao == "Parcial" and qtd_parcial_nova != qtd_env_atual):
                                     atualizar_componente(comp['id'], acao, obs_comp_atual, st.session_state.usuario_nome, qtd_parcial_nova)
-                                    st.rerun()
                                 obs_atual = obs_comp_atual
                                 obs_nova  = st.text_input(f"Obs — {comp['nome_componente']}:", value=obs_atual,
                                                           key=f"alm_obs_{comp['id']}", placeholder="Ex: em falta, previsão 20/06...")
@@ -10020,17 +10022,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             for _, item_ins in df_itens_saida.iterrows():
                                 st_ins = item_ins['status_item']
                                 qtd_env_atual_ins = item_ins.get('quantidade_enviada')
-                                if st_ins == 'Disponivel':     cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
-                                elif st_ins == 'Parcial':      cor = "#B45309"; bg = "#FEF3C7"; emoji = "🟡"
-                                elif st_ins == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
-                                else:                           cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
-                                badge_txt_ins = f"{st_ins} ({qtd_env_atual_ins:g}/{item_ins['quantidade']:g})" if st_ins == 'Parcial' and pd.notna(qtd_env_atual_ins) else st_ins
                                 edit_item_ins_key = f"alm_ins_edit_item_{item_ins['id']}"
                                 rci = st.columns([4, 1.5, 1, 2.5, 2.5, 0.8]) if pode_editar_item_ins else st.columns([4, 2, 2, 3, 2])
                                 rci[0].markdown(f"**{item_ins['descricao']}**")
                                 rci[1].markdown(f"`{item_ins['quantidade']}`")
                                 rci[2].markdown(f"{item_ins['unidade']}")
-                                rci[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {badge_txt_ins}</span>", unsafe_allow_html=True)
                                 with rci[4]:
                                     acao_ins = st.selectbox(
                                         "", status_opcoes_ins,
@@ -10050,6 +10046,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         value=float(qtd_env_atual_ins) if pd.notna(qtd_env_atual_ins) else float(item_ins['quantidade']),
                                         step=1.0, key=f"alm_ins_qtdparcial_{item_ins['id']}"
                                     )
+                                # Selo usa o status JA escolhido no dropdown (acao_ins), nao o valor antigo
+                                # do banco -- reflete a troca na hora, sem precisar de um rerun so pra isso.
+                                qtd_badge_ins = qtd_parcial_nova_ins if acao_ins == "Parcial" else qtd_env_atual_ins
+                                if acao_ins == 'Disponivel':     cor = "#15803D"; bg = "#F0FDF4"; emoji = "✅"
+                                elif acao_ins == 'Parcial':      cor = "#B45309"; bg = "#FEF3C7"; emoji = "🟡"
+                                elif acao_ins == 'Indisponivel': cor = "#DC2626"; bg = "#FEF2F2"; emoji = "❌"
+                                else:                             cor = "#D97706"; bg = "#FFFBEB"; emoji = "⏳"
+                                badge_txt_ins = f"{acao_ins} ({qtd_badge_ins:g}/{item_ins['quantidade']:g})" if acao_ins == 'Parcial' and pd.notna(qtd_badge_ins) else acao_ins
+                                rci[3].markdown(f"<span style='background:{bg};color:{cor};padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;'>{emoji} {badge_txt_ins}</span>", unsafe_allow_html=True)
                                 if pode_editar_item_ins and st.session_state.get(edit_item_ins_key):
                                     st.markdown("<div style='background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px;margin-bottom:8px;'>", unsafe_allow_html=True)
                                     eic1, eic2, eic3 = st.columns([4, 2, 2])
@@ -10086,7 +10091,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 obs_atual_ins = obs_ins_atual_raw if pd.notna(obs_ins_atual_raw) else ''
                                 if acao_ins != st_ins or (acao_ins == "Parcial" and qtd_parcial_nova_ins != qtd_env_atual_ins):
                                     atualizar_item_insumo(int(item_ins['id']), acao_ins, obs_atual_ins, st.session_state.usuario_nome, qtd_parcial_nova_ins)
-                                    st.rerun()
                                 obs_nova_ins  = st.text_input(f"Obs — {item_ins['descricao']}:", value=obs_atual_ins,
                                                           key=f"alm_ins_obs_{item_ins['id']}", placeholder="Ex: em falta, previsão 20/06...")
                                 if obs_nova_ins != obs_atual_ins:
