@@ -514,6 +514,29 @@ ate 768px de largura e nao mudam nada na versao desktop. ───────�
         padding: 12px 16px;
     }
     .topbar-title { font-size: 1.05rem; }
+
+    /* Calendario de producao (ACM/Esquadrias): precisa continuar em grade
+    de 7 colunas mesmo no celular, senao vira uma lista sem sentido de
+    dias da semana -- essa e' a excecao a regra geral de empilhar colunas. */
+    .st-key-cal_grid_acm div[data-testid="stHorizontalBlock"],
+    .st-key-cal_grid_esq div[data-testid="stHorizontalBlock"] {
+        flex-direction: row !important;
+        gap: 3px !important;
+    }
+    .st-key-cal_grid_acm div[data-testid="stColumn"],
+    .st-key-cal_grid_esq div[data-testid="stColumn"] {
+        width: auto !important;
+        min-width: 0 !important;
+        flex: 1 1 0 !important;
+    }
+    .st-key-cal_grid_acm .stButton > button,
+    .st-key-cal_grid_esq .stButton > button {
+        min-height: 0 !important;
+        padding: 4px 2px !important;
+        font-size: 10px !important;
+        line-height: 1.25 !important;
+        white-space: normal !important;
+    }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -6460,35 +6483,36 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     st.markdown("---")
                     cal     = py_calendar.Calendar(firstweekday=6)
                     semanas = cal.monthdatescalendar(st.session_state.prog_ano, st.session_state.prog_mes)
-                    cols_h  = st.columns(7)
-                    for i, nome in enumerate(["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"]):
-                        cols_h[i].markdown(
-                            f"<div style='text-align:center;font-weight:600;color:#475569;padding:4px 0;font-size:13px;'>{nome}</div>",
-                            unsafe_allow_html=True
-                        )
-                    for semana in semanas:
-                        cols = st.columns(7)
-                        for i, data_dia in enumerate(semana):
-                            with cols[i]:
-                                if data_dia.month == st.session_state.prog_mes:
-                                    lotes_dia = df_exp[df_exp['_dia'] == data_dia] if not df_exp.empty else pd.DataFrame()
-                                    n_lotes   = lotes_dia['Cod_Lote'].nunique() if not lotes_dia.empty else 0
-                                    eh_hoje   = (data_dia == hoje_projeto().date())
-                                    if n_lotes > 0:
-                                        obras_d   = lotes_dia['Obra_Vinculada'].unique()
-                                        label_o   = obras_d[0] if len(obras_d) == 1 else f"{len(obras_d)} obras"
-                                        btn_label = f"{data_dia.day}  |  {n_lotes} lote(s)\n{label_o}"
-                                        if st.button(btn_label, key=f"btn_{data_dia}", use_container_width=True):
-                                            st.session_state.dia_clicado_tv = data_dia
+                    with st.container(key="cal_grid_acm"):
+                        cols_h  = st.columns(7)
+                        for i, nome in enumerate(["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"]):
+                            cols_h[i].markdown(
+                                f"<div style='text-align:center;font-weight:600;color:#475569;padding:4px 0;font-size:13px;'>{nome}</div>",
+                                unsafe_allow_html=True
+                            )
+                        for semana in semanas:
+                            cols = st.columns(7)
+                            for i, data_dia in enumerate(semana):
+                                with cols[i]:
+                                    if data_dia.month == st.session_state.prog_mes:
+                                        lotes_dia = df_exp[df_exp['_dia'] == data_dia] if not df_exp.empty else pd.DataFrame()
+                                        n_lotes   = lotes_dia['Cod_Lote'].nunique() if not lotes_dia.empty else 0
+                                        eh_hoje   = (data_dia == hoje_projeto().date())
+                                        if n_lotes > 0:
+                                            obras_d   = lotes_dia['Obra_Vinculada'].unique()
+                                            label_o   = obras_d[0] if len(obras_d) == 1 else f"{len(obras_d)} obras"
+                                            btn_label = f"{data_dia.day}  |  {n_lotes} lote(s)\n{label_o}"
+                                            if st.button(btn_label, key=f"btn_{data_dia}", use_container_width=True):
+                                                st.session_state.dia_clicado_tv = data_dia
+                                        else:
+                                            css_class = "cal-day-today" if eh_hoje else "cal-day-empty"
+                                            st.markdown(
+                                                f"<div class='{css_class}'><span style='color:#94A3B8;font-size:15px;'>{data_dia.day}</span>"
+                                                f"<br><span style='color:#CBD5E1;font-size:10px;'>—</span></div>",
+                                                unsafe_allow_html=True
+                                            )
                                     else:
-                                        css_class = "cal-day-today" if eh_hoje else "cal-day-empty"
-                                        st.markdown(
-                                            f"<div class='{css_class}'><span style='color:#94A3B8;font-size:15px;'>{data_dia.day}</span>"
-                                            f"<br><span style='color:#CBD5E1;font-size:10px;'>—</span></div>",
-                                            unsafe_allow_html=True
-                                        )
-                                else:
-                                    st.markdown('<div style="height:70px;"></div>', unsafe_allow_html=True)
+                                        st.markdown('<div style="height:70px;"></div>', unsafe_allow_html=True)
 
                     st.markdown("---")
                     if "dia_clicado_tv" not in st.session_state:
@@ -7124,33 +7148,34 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     st.markdown("---")
                     cal_esq = py_calendar.Calendar(firstweekday=6)
                     semanas_esq = cal_esq.monthdatescalendar(st.session_state.esq_ano, st.session_state.esq_mes)
-                    cols_h_esq = st.columns(7)
-                    for i, nome in enumerate(["Dom","Seg","Ter","Qua","Qui","Sex","Sab"]):
-                        cols_h_esq[i].markdown(
-                            f"<div style='text-align:center;font-weight:600;color:#475569;padding:4px 0;font-size:13px;'>{nome}</div>",
-                            unsafe_allow_html=True)
-                    for semana in semanas_esq:
-                        cols = st.columns(7)
-                        for i, data_dia in enumerate(semana):
-                            with cols[i]:
-                                if data_dia.month == st.session_state.esq_mes:
-                                    lotes_dia = df_exp_esq[df_exp_esq['_dia'] == data_dia]
-                                    n_lotes = lotes_dia['Cod_Lote'].nunique() if not lotes_dia.empty else 0
-                                    eh_hoje = (data_dia == hoje_projeto().date())
-                                    if n_lotes > 0:
-                                        obras_d = lotes_dia['Obra_Vinculada'].unique()
-                                        label_o = obras_d[0] if len(obras_d) == 1 else f"{len(obras_d)} obras"
-                                        if st.button(f"{data_dia.day}  |  {n_lotes} lote(s)\n{label_o}",
-                                                     key=f"esq_btn_{data_dia}", use_container_width=True):
-                                            st.session_state.esq_dia_clicado = data_dia
+                    with st.container(key="cal_grid_esq"):
+                        cols_h_esq = st.columns(7)
+                        for i, nome in enumerate(["Dom","Seg","Ter","Qua","Qui","Sex","Sab"]):
+                            cols_h_esq[i].markdown(
+                                f"<div style='text-align:center;font-weight:600;color:#475569;padding:4px 0;font-size:13px;'>{nome}</div>",
+                                unsafe_allow_html=True)
+                        for semana in semanas_esq:
+                            cols = st.columns(7)
+                            for i, data_dia in enumerate(semana):
+                                with cols[i]:
+                                    if data_dia.month == st.session_state.esq_mes:
+                                        lotes_dia = df_exp_esq[df_exp_esq['_dia'] == data_dia]
+                                        n_lotes = lotes_dia['Cod_Lote'].nunique() if not lotes_dia.empty else 0
+                                        eh_hoje = (data_dia == hoje_projeto().date())
+                                        if n_lotes > 0:
+                                            obras_d = lotes_dia['Obra_Vinculada'].unique()
+                                            label_o = obras_d[0] if len(obras_d) == 1 else f"{len(obras_d)} obras"
+                                            if st.button(f"{data_dia.day}  |  {n_lotes} lote(s)\n{label_o}",
+                                                         key=f"esq_btn_{data_dia}", use_container_width=True):
+                                                st.session_state.esq_dia_clicado = data_dia
+                                        else:
+                                            css = "cal-day-today" if eh_hoje else "cal-day-empty"
+                                            st.markdown(
+                                                f"<div class='{css}'><span style='color:#94A3B8;font-size:15px;'>{data_dia.day}</span>"
+                                                f"<br><span style='color:#CBD5E1;font-size:10px;'>—</span></div>",
+                                                unsafe_allow_html=True)
                                     else:
-                                        css = "cal-day-today" if eh_hoje else "cal-day-empty"
-                                        st.markdown(
-                                            f"<div class='{css}'><span style='color:#94A3B8;font-size:15px;'>{data_dia.day}</span>"
-                                            f"<br><span style='color:#CBD5E1;font-size:10px;'>—</span></div>",
-                                            unsafe_allow_html=True)
-                                else:
-                                    st.markdown('<div style="height:70px;"></div>', unsafe_allow_html=True)
+                                        st.markdown('<div style="height:70px;"></div>', unsafe_allow_html=True)
 
                     st.markdown("---")
                     if "esq_dia_clicado" not in st.session_state:
