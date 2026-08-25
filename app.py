@@ -968,6 +968,7 @@ def inicializar_banco_de_dados():
             )
         """)
         cursor.execute("ALTER TABLE saidas_insumos ADD COLUMN IF NOT EXISTS numero_projeto TEXT")
+        cursor.execute("ALTER TABLE saidas_insumos ADD COLUMN IF NOT EXISTS arquivado BOOLEAN DEFAULT FALSE")
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS status_item TEXT DEFAULT 'Aguardando Conferencia'")
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS observacao TEXT")
         cursor.execute("ALTER TABLE saidas_insumos_itens ADD COLUMN IF NOT EXISTS conferido_por TEXT")
@@ -4638,12 +4639,26 @@ def carregar_saidas_insumos():
     try:
         return pd.read_sql_query("""
             SELECT s.id, s.data_saida, s.obra, s.numero_projeto, s.destino, s.registrado_por, s.criado_em,
+                   COALESCE(s.arquivado, FALSE) AS arquivado,
                    COUNT(i.id) AS qtd_itens
             FROM saidas_insumos s LEFT JOIN saidas_insumos_itens i ON i.saida_id = s.id
             GROUP BY s.id ORDER BY s.data_saida DESC, s.id DESC
         """, conn)
     except Exception:
         return pd.DataFrame()
+    finally:
+        liberar_conexao(conn)
+
+def arquivar_saida_insumo(saida_id: int, arquivado: bool):
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE saidas_insumos SET arquivado=%s WHERE id=%s", (arquivado, saida_id))
+        conn.commit()
+        carregar_saidas_insumos.clear()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao arquivar saída: {e}")
     finally:
         liberar_conexao(conn)
 
@@ -9993,26 +10008,20 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     _coms_por_item_ins = carregar_comentarios_varios('saida_insumo_item', tuple(df_todos_ins['id'])) if not df_todos_ins.empty else {}
 
                     # Renderizar o expander inteiro (widgets de status, obs, comentarios) de
-                    # CADA saida ja registrada -- inclusive as 100% concluidas -- e o que deixava
-                    # a tela lenta conforme o historico crescia. Separa concluidas (tudo Disponivel,
-                    # nada Parcial/Indisponivel) e só as monta quando o usuario pedir pra ver.
-                    _ids_concluidas_ins = []
-                    for _, _sr_ins in df_saidas.iterrows():
-                        _df_it_ins = _itens_por_saida.get(int(_sr_ins['id']), _itens_ins_vazio)
-                        _n_tot = len(_df_it_ins)
-                        if _n_tot and (_df_it_ins['status_item'] == 'Disponivel').all():
-                            _ids_concluidas_ins.append(int(_sr_ins['id']))
-                    _ids_concluidas_ins = set(_ids_concluidas_ins)
-                    df_saidas_pend_ins = df_saidas[~df_saidas['id'].isin(_ids_concluidas_ins)]
-                    df_saidas_conc_ins = df_saidas[df_saidas['id'].isin(_ids_concluidas_ins)]
+                    # CADA saida ja registrada -- pra sempre -- e o que deixava a tela lenta
+                    # conforme o historico crescia. Arquivamento e MANUAL (botao dentro do
+                    # expander) -- nao pode ser automatico por status, senao a saida some antes
+                    # do usuario conseguir gerar/baixar o romaneio.
+                    df_saidas_pend_ins = df_saidas[~df_saidas['arquivado'].fillna(False)]
+                    df_saidas_conc_ins = df_saidas[df_saidas['arquivado'].fillna(False)]
 
                     mostrar_conc_ins = st.checkbox(
-                        f"📁 Mostrar concluídas ({len(df_saidas_conc_ins)})",
+                        f"📁 Mostrar arquivadas ({len(df_saidas_conc_ins)})",
                         key="alm_ins_mostrar_concluidas", value=False
                     )
                     df_saidas_exibir_ins = pd.concat([df_saidas_pend_ins, df_saidas_conc_ins]) if mostrar_conc_ins else df_saidas_pend_ins
                     if df_saidas_pend_ins.empty and not df_saidas.empty and not mostrar_conc_ins:
-                        st.success("✅ Nenhuma saída pendente — tudo conferido!")
+                        st.success("✅ Nenhuma saída pendente — tudo arquivado!")
 
                     for _, saida_row in df_saidas_exibir_ins.iterrows():
                         df_itens_saida = _itens_por_saida.get(int(saida_row['id']), _itens_ins_vazio)
@@ -10113,6 +10122,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 obs_atual_ins = obs_ins_atual_raw if pd.notna(obs_ins_atual_raw) else ''
                                 if acao_ins != st_ins or (acao_ins == "Parcial" and qtd_parcial_nova_ins != qtd_env_atual_ins):
                                     atualizar_item_insumo(int(item_ins['id']), acao_ins, obs_atual_ins, st.session_state.usuario_nome, qtd_parcial_nova_ins)
+                                    # Sem isso o restante deste render (titulo do expander, botao de
+                                    # Gerar Romaneio) continua usando os dados de ANTES da troca --
+                                    # so atualizava no proximo clique em qualquer outra coisa da tela.
+                                    st.rerun()
                                 obs_nova_ins  = st.text_input(f"Obs — {item_ins['descricao']}:", value=obs_atual_ins,
                                                           key=f"alm_ins_obs_{item_ins['id']}", placeholder="Ex: em falta, previsão 20/06...")
                                 if obs_nova_ins != obs_atual_ins:
@@ -10166,6 +10179,20 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                         key=f"dl_saida_insumo_{saida_row['id']}"
                                     )
+
+                            # ── Arquivar/Desarquivar (organiza a lista sem apagar nada) ──
+                            if pode_editar_item_ins:
+                                st.markdown("<br>", unsafe_allow_html=True)
+                                if saida_row.get('arquivado'):
+                                    if st.button("↩️ Desarquivar", key=f"btn_desarq_ins_{saida_row['id']}"):
+                                        arquivar_saida_insumo(int(saida_row['id']), False)
+                                        st.toast("Saída desarquivada!")
+                                        st.rerun()
+                                else:
+                                    if st.button("📁 Arquivar esta saída", key=f"btn_arq_ins_{saida_row['id']}"):
+                                        arquivar_saida_insumo(int(saida_row['id']), True)
+                                        st.toast("Saída arquivada!")
+                                        st.rerun()
 
                             # ── Excluir saída lançada errada ──
                             if setor in ["Master", "Almoxarifado"]:
