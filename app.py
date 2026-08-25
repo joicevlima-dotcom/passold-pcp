@@ -10050,7 +10050,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E2E8F0;'>", unsafe_allow_html=True)
 
                             status_opcoes_ins = ["Aguardando Conferencia", "Disponivel", "Parcial", "Indisponivel"]
-                            for _, item_ins in df_itens_saida.iterrows():
+                            for idx_ins, item_ins in df_itens_saida.iterrows():
                                 st_ins = item_ins['status_item']
                                 qtd_env_atual_ins = item_ins.get('quantidade_enviada')
                                 edit_item_ins_key = f"alm_ins_edit_item_{item_ins['id']}"
@@ -10122,10 +10122,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 obs_atual_ins = obs_ins_atual_raw if pd.notna(obs_ins_atual_raw) else ''
                                 if acao_ins != st_ins or (acao_ins == "Parcial" and qtd_parcial_nova_ins != qtd_env_atual_ins):
                                     atualizar_item_insumo(int(item_ins['id']), acao_ins, obs_atual_ins, st.session_state.usuario_nome, qtd_parcial_nova_ins)
-                                    # Sem isso o restante deste render (titulo do expander, botao de
-                                    # Gerar Romaneio) continua usando os dados de ANTES da troca --
-                                    # so atualizava no proximo clique em qualquer outra coisa da tela.
-                                    st.rerun()
+                                    # Sem st.rerun() de proposito (ja tirado daqui uma vez por deixar
+                                    # 1 clique = 2 ciclos completos da pagina inteira). Em vez disso,
+                                    # reflete a troca direto no df local -- e o que df_disp_ins (botao
+                                    # Gerar Romaneio, logo abaixo do loop) le -- pra nao precisar de
+                                    # reload nenhum so pra ele aparecer.
+                                    df_itens_saida.loc[idx_ins, 'status_item'] = acao_ins
+                                    if acao_ins == "Parcial":
+                                        df_itens_saida.loc[idx_ins, 'quantidade_enviada'] = qtd_parcial_nova_ins
                                 obs_nova_ins  = st.text_input(f"Obs — {item_ins['descricao']}:", value=obs_atual_ins,
                                                           key=f"alm_ins_obs_{item_ins['id']}", placeholder="Ex: em falta, previsão 20/06...")
                                 if obs_nova_ins != obs_atual_ins:
