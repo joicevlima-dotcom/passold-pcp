@@ -9992,7 +9992,29 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     # consulta por item toda vez que o expander da saida estiver aberto.
                     _coms_por_item_ins = carregar_comentarios_varios('saida_insumo_item', tuple(df_todos_ins['id'])) if not df_todos_ins.empty else {}
 
-                    for _, saida_row in df_saidas.iterrows():
+                    # Renderizar o expander inteiro (widgets de status, obs, comentarios) de
+                    # CADA saida ja registrada -- inclusive as 100% concluidas -- e o que deixava
+                    # a tela lenta conforme o historico crescia. Separa concluidas (tudo Disponivel,
+                    # nada Parcial/Indisponivel) e só as monta quando o usuario pedir pra ver.
+                    _ids_concluidas_ins = []
+                    for _, _sr_ins in df_saidas.iterrows():
+                        _df_it_ins = _itens_por_saida.get(int(_sr_ins['id']), _itens_ins_vazio)
+                        _n_tot = len(_df_it_ins)
+                        if _n_tot and (_df_it_ins['status_item'] == 'Disponivel').all():
+                            _ids_concluidas_ins.append(int(_sr_ins['id']))
+                    _ids_concluidas_ins = set(_ids_concluidas_ins)
+                    df_saidas_pend_ins = df_saidas[~df_saidas['id'].isin(_ids_concluidas_ins)]
+                    df_saidas_conc_ins = df_saidas[df_saidas['id'].isin(_ids_concluidas_ins)]
+
+                    mostrar_conc_ins = st.checkbox(
+                        f"📁 Mostrar concluídas ({len(df_saidas_conc_ins)})",
+                        key="alm_ins_mostrar_concluidas", value=False
+                    )
+                    df_saidas_exibir_ins = pd.concat([df_saidas_pend_ins, df_saidas_conc_ins]) if mostrar_conc_ins else df_saidas_pend_ins
+                    if df_saidas_pend_ins.empty and not df_saidas.empty and not mostrar_conc_ins:
+                        st.success("✅ Nenhuma saída pendente — tudo conferido!")
+
+                    for _, saida_row in df_saidas_exibir_ins.iterrows():
                         df_itens_saida = _itens_por_saida.get(int(saida_row['id']), _itens_ins_vazio)
                         n_total_ins = len(df_itens_saida)
                         n_conf_ins  = len(df_itens_saida[df_itens_saida['status_item'] != 'Aguardando Conferencia']) if n_total_ins else 0
