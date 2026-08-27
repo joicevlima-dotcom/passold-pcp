@@ -7824,6 +7824,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             "unidade": av_unidade,
                             "dificuldade": int(av_dificuldade),
                         })
+                        # limpa os campos do item pra nao adicionar o mesmo lote duas vezes
+                        # sem querer (Obra/Projeto/Escopo e datas ficam como estao)
+                        for _k in ("av_desc", "av_qtd_cx", "av_m2", "av_peso",
+                                   "av_dificuldade", "av_unidade"):
+                            st.session_state.pop(_k, None)
                         st.rerun()
 
                 if st.session_state.av_itens:
