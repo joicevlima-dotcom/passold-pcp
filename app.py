@@ -7910,7 +7910,13 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         registrar_auditoria(st.session_state.usuario_nome, "LOTE_SEM_FRENTE",
                             f"Projeto {av_projeto} — {len(st.session_state.av_itens)} itens — {av_obra} — {av_destino} — Pendente")
                         st.toast(f"Lote cadastrado como Pendente — {len(st.session_state.av_itens)} item(ns). Libere em 'Liberar OPs da Semana'.")
-                        st.session_state.av_itens = []
+                        # zera o formulario inteiro depois de cadastrar, pra comecar do
+                        # branco e nao cadastrar o mesmo lote duas vezes sem querer
+                        for _k in ("av_itens", "av_obra", "av_projeto", "av_escopo",
+                                   "av_desc", "av_qtd_cx", "av_m2", "av_peso",
+                                   "av_unidade", "av_dificuldade", "av_dt_ini",
+                                   "av_dt_fim", "av_pav", "av_destino"):
+                            st.session_state.pop(_k, None)
                         st.rerun()
 
             st.markdown("<br>", unsafe_allow_html=True)
