@@ -5939,7 +5939,7 @@ GRUPOS_NAV = {
     },
     "🚚  Operações": {
         "Logistica":      ("🚚  Logística",       ["Master","Logistica","Producao"]),
-        "Almoxarifado":   ("📦  Almoxarifado",    ["Master","Almoxarifado","PCP"]),
+        "Almoxarifado":   ("📦  Almoxarifado",    ["Master","Almoxarifado","PCP","Producao"]),
         "Romaneio Manual": ("📋  Romaneio Manual", ["Master","Almoxarifado","PCP"]),
         "Lista Mestra": ("📑  Lista Mestra", ["Master","Almoxarifado","PCP"]),
         "Romaneios Devolvidos": ("🗂️  Romaneios Devolvidos", ["Master","PCP"]),
@@ -13092,6 +13092,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-08-28", "Almoxarifado: a Produção agora acessa a tela para conferir componentes de OP e insumos (mudar status, ver indisponíveis, baixar relatórios). Excluir ou corrigir lançamentos errados continua só com Master/Almoxarifado."),
                 ("2026-08-24", "Primeira leva de ajustes pro celular: colunas empilham em vez de espremer, botões e menu maiores pro toque, e dá pra instalar o sistema na tela inicial como um app (veja \"📱 Instalar como app no celular\" em Sistema)."),
                 ("2026-08-21", "Almoxarifado: agora dá pra corrigir descrição, quantidade e unidade de um item de insumo lançado errado (lápis na linha do item, aba Romaneios de Insumos)."),
                 ("2026-08-21", "Kanban ganha \"📦 Arquivar\" cartão — some da lista principal (quadros deixam de pesar com o tempo) mas continua no relatório e pode ser desarquivado; Documentos e relatório do Kanban só geram o Excel quando a pessoa clica em baixar, não mais em todo carregamento da tela."),
@@ -13295,7 +13296,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 - Envio agendado pra depois do prazo aparece com aviso "Fora do prazo!" mesmo antes de despachar.
 """),
                     ("almoxarifado", "📦 Almoxarifado", """
-**Quem acessa:** Master, Almoxarifado, PCP.
+**Quem acessa:** Master, Almoxarifado, PCP, Produção.
 
 **Para que serve:** Conferir o que chegou (componentes de OP e insumos avulsos), marcar disponibilidade item a item e emitir o romaneio de conferência.
 
