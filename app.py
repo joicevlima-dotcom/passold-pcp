@@ -7751,6 +7751,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             # ── CARD 0: LOTE SEM FRENTE (uso frequente — fica no topo) ──
             with st.expander("➕ Liberação de OP  ·  Ancoragens, prisílias e materiais de apoio", expanded=True):
                 st.caption("Para ancoragens, prisilias, corte de perfil e outros materiais de apoio — não precisa de frente detalhada, mas precisa de um Projeto já cadastrado em 'Cadastrar Obra'.")
+                # "Limpar" campo no Streamlit = trocar a key do widget (ver _uploader_key).
+                # _av_hv reseta o cabecalho (Obra/Projeto/Escopo/datas/pav/destino),
+                # _av_iv reseta os campos do item. "Adicionar Item" mexe so no _av_iv;
+                # "Cadastrar Lote" nos dois.
+                if "_av_hv" not in st.session_state:
+                    st.session_state["_av_hv"] = 0
+                if "_av_iv" not in st.session_state:
+                    st.session_state["_av_iv"] = 0
+                _hv = st.session_state["_av_hv"]
+                _iv = st.session_state["_av_iv"]
                 if df_projetos.empty:
                     st.info("Cadastre uma Obra e um Projeto em 'Cadastrar Obra' antes de lançar uma OP.")
                     av_obra, av_projeto, av_escopo = None, None, None
@@ -7758,10 +7768,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     av1, av2, av3 = st.columns(3)
                     with av1:
                         obras_disp = sorted(df_projetos['Obra'].dropna().unique().tolist())
-                        av_obra = st.selectbox("Obra:", obras_disp, key="av_obra")
+                        av_obra = st.selectbox("Obra:", obras_disp, key=f"av_obra_{_hv}")
                     with av2:
                         projetos_av = sorted(df_projetos[df_projetos['Obra'] == av_obra]['Numero_Projeto'].unique().tolist())
-                        av_projeto = st.selectbox("Projeto:", projetos_av, key="av_projeto") if projetos_av else None
+                        av_projeto = st.selectbox("Projeto:", projetos_av, key=f"av_projeto_{_hv}") if projetos_av else None
                     with av3:
                         # Sugere o escopo predominante da Obra (baseado nas frentes ja cadastradas em
                         # 'Cadastrar Obra') como ponto de partida, mas sempre deixa trocar — material
@@ -7775,7 +7785,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         )) if not df_banco_macro.empty and av_obra else []
                         opcoes_escopo_av = ["ACM", "Esquadria-Vidro", "Terceirizada"]
                         idx_escopo_av = opcoes_escopo_av.index(escopos_obra[0]) if len(escopos_obra) == 1 else 0
-                        av_escopo = st.selectbox("Tipo de Escopo:", opcoes_escopo_av, index=idx_escopo_av, key="av_escopo")
+                        av_escopo = st.selectbox("Tipo de Escopo:", opcoes_escopo_av, index=idx_escopo_av, key=f"av_escopo_{_hv}")
 
                     st.caption("Este item entra como **Pendente** e recebe o número da OP na liberação, em 'Liberar OPs da Semana'.")
 
@@ -7784,30 +7794,30 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     st.session_state.av_itens = []
 
                 st.markdown("**Itens da OP:**")
-                av_desc = st.text_input("Descrição do material:", key="av_desc",
+                av_desc = st.text_input("Descrição do material:", key=f"av_desc_{_iv}",
                                          placeholder="Ex: Ancoragem estrutural, Prisilia, Corte de perfil...")
                 av4, av5 = st.columns(2)
                 if av_escopo == "ACM":
                     with av4:
-                        av_qtd_cx = st.number_input("Qtd Caixas:", min_value=0, value=1, key="av_qtd_cx")
+                        av_qtd_cx = st.number_input("Qtd Caixas:", min_value=0, value=1, key=f"av_qtd_cx_{_iv}")
                     with av5:
-                        av_m2 = st.number_input("m²:", min_value=0.0, value=0.0, step=0.1, key="av_m2")
+                        av_m2 = st.number_input("m²:", min_value=0.0, value=0.0, step=0.1, key=f"av_m2_{_iv}")
                     av_peso = 0.0
                     av_unidade = "cx"
-                    av_dificuldade = st.selectbox("Dificuldade:", [1, 2, 3, 4, 5], index=2, key="av_dificuldade")
+                    av_dificuldade = st.selectbox("Dificuldade:", [1, 2, 3, 4, 5], index=2, key=f"av_dificuldade_{_iv}")
                 elif av_escopo == "Esquadria-Vidro":
                     with av4:
-                        av_qtd_cx = st.number_input("Quantidade (un):", min_value=0, value=1, key="av_qtd_cx")
+                        av_qtd_cx = st.number_input("Quantidade (un):", min_value=0, value=1, key=f"av_qtd_cx_{_iv}")
                     with av5:
-                        av_peso = st.number_input("Peso (kg):", min_value=0.0, value=0.0, step=0.1, key="av_peso")
+                        av_peso = st.number_input("Peso (kg):", min_value=0.0, value=0.0, step=0.1, key=f"av_peso_{_iv}")
                     av_m2 = 0.0
                     av_unidade = "un"
                     av_dificuldade = 1
                 else:
                     with av4:
-                        av_unidade = st.selectbox("Unidade:", ["un", "kg", "m", "m²", "cx", "pç"], key="av_unidade")
+                        av_unidade = st.selectbox("Unidade:", ["un", "kg", "m", "m²", "cx", "pç"], key=f"av_unidade_{_iv}")
                     with av5:
-                        av_qtd_cx = st.number_input("Quantidade:", min_value=0, value=1, key="av_qtd_cx")
+                        av_qtd_cx = st.number_input("Quantidade:", min_value=0, value=1, key=f"av_qtd_cx_{_iv}")
                     av_m2  = 0.0
                     av_peso = 0.0
                     av_dificuldade = 1
@@ -7824,11 +7834,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             "unidade": av_unidade,
                             "dificuldade": int(av_dificuldade),
                         })
-                        # limpa os campos do item pra nao adicionar o mesmo lote duas vezes
-                        # sem querer (Obra/Projeto/Escopo e datas ficam como estao)
-                        for _k in ("av_desc", "av_qtd_cx", "av_m2", "av_peso",
-                                   "av_dificuldade", "av_unidade"):
-                            st.session_state.pop(_k, None)
+                        # limpa os campos do item (troca a key) pra nao adicionar o mesmo
+                        # item duas vezes sem querer. Cabecalho (Obra/Projeto/datas) fica.
+                        st.session_state["_av_iv"] += 1
                         st.rerun()
 
                 if st.session_state.av_itens:
@@ -7853,14 +7861,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 av6, av7 = st.columns(2)
                 with av6:
                     av_dt_ini = st.date_input("Entrada em produção:", value=datetime.now().date(),
-                                               format="DD/MM/YYYY", key="av_dt_ini")
+                                               format="DD/MM/YYYY", key=f"av_dt_ini_{_hv}")
                 with av7:
                     av_dt_fim = st.date_input("Data limite:", value=(datetime.now() + timedelta(days=7)).date(),
-                                               format="DD/MM/YYYY", key="av_dt_fim")
+                                               format="DD/MM/YYYY", key=f"av_dt_fim_{_hv}")
 
-                av_pav     = st.text_input("Pavimentos / Destino:", key="av_pav", placeholder="Ex: Pav 10 ao 15")
+                av_pav     = st.text_input("Pavimentos / Destino:", key=f"av_pav_{_hv}", placeholder="Ex: Pav 10 ao 15")
                 av_destino = st.radio("Destino:", ["Envio para Obra", "Uso Interno"],
-                                       horizontal=True, key="av_destino")
+                                       horizontal=True, key=f"av_destino_{_hv}")
 
                 if st.button("💾 Cadastrar Lote", key="btn_av", type="primary", disabled=df_projetos.empty):
                     if not st.session_state.av_itens:
@@ -7910,13 +7918,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         registrar_auditoria(st.session_state.usuario_nome, "LOTE_SEM_FRENTE",
                             f"Projeto {av_projeto} — {len(st.session_state.av_itens)} itens — {av_obra} — {av_destino} — Pendente")
                         st.toast(f"Lote cadastrado como Pendente — {len(st.session_state.av_itens)} item(ns). Libere em 'Liberar OPs da Semana'.")
-                        # zera o formulario inteiro depois de cadastrar, pra comecar do
-                        # branco e nao cadastrar o mesmo lote duas vezes sem querer
-                        for _k in ("av_itens", "av_obra", "av_projeto", "av_escopo",
-                                   "av_desc", "av_qtd_cx", "av_m2", "av_peso",
-                                   "av_unidade", "av_dificuldade", "av_dt_ini",
-                                   "av_dt_fim", "av_pav", "av_destino"):
-                            st.session_state.pop(_k, None)
+                        # zera o formulario inteiro (troca a key de todos os campos) pra
+                        # comecar do branco e nao cadastrar o mesmo lote duas vezes sem querer
+                        st.session_state.av_itens = []
+                        st.session_state["_av_iv"] += 1
+                        st.session_state["_av_hv"] += 1
                         st.rerun()
 
             st.markdown("<br>", unsafe_allow_html=True)
