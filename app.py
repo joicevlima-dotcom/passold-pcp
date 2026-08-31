@@ -10837,7 +10837,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             if setor not in ["Master", "PCP"]:
                 st.error("⛔ Acesso negado.")
                 st.stop()
-            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Romaneios Devolvidos</h2><p>Controle de romaneios de OP e de Insumos que voltaram assinados da obra/produção</p></div><span class="page-icon">🗂️</span></div>', unsafe_allow_html=True)
+            st.markdown('<div class="page-header"><div class="page-header-left"><h2>Romaneios Devolvidos</h2><p>Controle de romaneios (OP, insumos, listas) e termos de ferramenta/máquina que voltaram assinados da obra/produção</p></div><span class="page-icon">🗂️</span></div>', unsafe_allow_html=True)
 
             status_rd = carregar_status_romaneios_devolvidos()
             filtro_rd = st.radio("Mostrar:", ["Pendentes", "Todos"], horizontal=True, key="rd_filtro_status")
@@ -10905,8 +10905,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         for _, row_grp in df_obra_rd.iterrows():
                             render_item(row_grp)
 
-            tab_rd_op, tab_rd_comp, tab_rd_ins, tab_rd_man, tab_rd_lm = st.tabs([
-                "📋 Romaneios de OP / Peças", "🧩 Romaneios de Componentes", "📦 Romaneios de Insumos", "🗒️ Romaneio Manual", "📑 Lista Mestra"
+            tab_rd_op, tab_rd_comp, tab_rd_ins, tab_rd_man, tab_rd_lm, tab_rd_termo = st.tabs([
+                "📋 Romaneios de OP / Peças", "🧩 Romaneios de Componentes", "📦 Romaneios de Insumos", "🗒️ Romaneio Manual", "📑 Lista Mestra", "🔧 Termos de Ferramenta/Máquina"
             ])
 
             with tab_rd_op:
@@ -11099,6 +11099,53 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             _render_item_rd_lm(row_rlm)
                     else:
                         _render_rd_grupo(df_rd_lm, 'obra', _render_item_rd_lm, 'lm')
+
+            with tab_rd_termo:
+                st.caption("Termos de ferramenta/máquina emitidos em 'Documentos'. Anexe aqui o termo assinado quando o "
+                           "equipamento voltar — aí ele passa a contar como devolvido.")
+                df_rd_termo = carregar_documentos_emitidos()
+                if not df_rd_termo.empty:
+                    df_rd_termo['_devolvido'] = df_rd_termo['id'].apply(lambda i: ('DOCUMENTO', int(i)) in status_rd)
+                    if filtro_rd == "Pendentes":
+                        df_rd_termo = df_rd_termo[~df_rd_termo['_devolvido']]
+                    if obra_selecionada:
+                        df_rd_termo = df_rd_termo[df_rd_termo['obra'] == obra_selecionada]
+                    df_rd_termo = df_rd_termo.sort_values('criado_em', ascending=False, na_position='last')
+                if df_rd_termo.empty:
+                    st.info("Nenhum termo pendente de devolução." if filtro_rd == "Pendentes" else "Nenhum termo de ferramenta/máquina emitido ainda.")
+                else:
+                    def _render_item_rd_termo(row_rt):
+                        doc_id_rt = int(row_rt['id'])
+                        itens_rt  = json.loads(row_rt.get('itens_json') or '[]')
+                        badge_rt  = "🟢 Devolvido assinado" if row_rt['_devolvido'] else "🔴 Pendente"
+                        prev_dev  = pd.to_datetime(row_rt.get('data_prevista_devolucao'), errors='coerce')
+                        atrasado_rt = (not row_rt['_devolvido']) and pd.notna(prev_dev) and prev_dev.date() < hoje_projeto().date()
+                        with st.container(border=True):
+                            crt1, crt2 = st.columns([4, 1])
+                            with crt1:
+                                titulo_rt = f"**{row_rt['tipo_documento']}** Nº {doc_id_rt:06d} — {row_rt['obra']}"
+                                if atrasado_rt:
+                                    titulo_rt += "  ⏰ **atrasado**"
+                                st.markdown(titulo_rt)
+                                data_env_rt = pd.to_datetime(row_rt.get('data_envio'), errors='coerce')
+                                st.caption(
+                                    f"Destinatário: {row_rt['destinatario']} ({_nn(row_rt.get('setor_destinatario'), '—')}) · "
+                                    f"{len(itens_rt)} item(ns) · enviado {data_env_rt.strftime('%d/%m/%Y') if pd.notna(data_env_rt) else '—'}"
+                                    + (f" · devolução prevista {prev_dev.strftime('%d/%m/%Y')}" if pd.notna(prev_dev) else "")
+                                )
+                                if itens_rt:
+                                    st.caption("Itens: " + ", ".join(
+                                        f"{it.get('descricao', '?')} ({float(it.get('quantidade', 1)):g})" for it in itens_rt
+                                    ))
+                            with crt2:
+                                st.markdown(badge_rt)
+                            _bloco_anexo_rd('DOCUMENTO', doc_id_rt, f"termo_{doc_id_rt}")
+
+                    if obra_selecionada:
+                        for _, row_rt in df_rd_termo.iterrows():
+                            _render_item_rd_termo(row_rt)
+                    else:
+                        _render_rd_grupo(df_rd_termo, 'obra', _render_item_rd_termo, 'termo')
 
     # ==================================================
     # SISTEMA DE MEDICAO — agora 100% no banco
@@ -13157,6 +13204,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-08-31", "Romaneios Devolvidos ganha a aba \"🔧 Termos de Ferramenta/Máquina\": os termos emitidos em Documentos agora entram no controle de devolução (anexar o termo assinado da volta = 🟢 devolvido; termo com devolução prevista vencida aparece como \"⏰ atrasado\")."),
                 ("2026-08-31", "Liberação de OP: ao escolher o Tipo de Escopo \"Terceirizada\", aparece o campo \"Equipe responsável\" (ACM ou Esquadrias). Isso muda o título do documento da OP (ex: \"ACM — TERCEIRIZADA\") e a seção onde a OP aparece nos relatórios (blocos \"TERCEIRIZADA · ACM\" e \"TERCEIRIZADA · ESQUADRIAS\" no Relatório Semanal). Os Painéis de Produção continuam sem mostrar OPs terceirizadas."),
                 ("2026-08-28", "Almoxarifado: a Produção agora acessa a tela para conferir componentes de OP e insumos (mudar status, ver indisponíveis, baixar relatórios). Excluir ou corrigir lançamentos errados continua só com Master/Almoxarifado."),
                 ("2026-08-24", "Primeira leva de ajustes pro celular: colunas empilham em vez de espremer, botões e menu maiores pro toque, e dá pra instalar o sistema na tela inicial como um app (veja \"📱 Instalar como app no celular\" em Sistema)."),
@@ -13410,16 +13458,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     ("romaneios_devolvidos", "🗂️ Romaneios Devolvidos", """
 **Quem acessa:** Master, PCP.
 
-**Para que serve:** Controlar os romaneios que voltam assinados da obra/produção — anexar a foto/PDF de confirmação de cada tipo (OP, Componentes, Insumos, Romaneio Manual, Lista Mestra).
+**Para que serve:** Controlar os romaneios que voltam assinados da obra/produção — anexar a foto/PDF de confirmação de cada tipo (OP, Componentes, Insumos, Romaneio Manual, Lista Mestra) e os termos de ferramenta/máquina que precisam voltar.
 
 **Passo a passo:**
 1. Escolha "Pendentes" ou "Todos" no filtro do topo.
-2. Escolha a aba certa pro tipo de romaneio (📋 OP/Peças, 🧩 Componentes, 📦 Insumos, 🗒️ Manual, 📑 Lista Mestra).
+2. Escolha a aba certa pro tipo de romaneio (📋 OP/Peças, 🧩 Componentes, 📦 Insumos, 🗒️ Manual, 📑 Lista Mestra, 🔧 Termos de Ferramenta/Máquina).
 3. Localize o item (agrupado por obra, se nenhuma obra estiver filtrada no menu lateral), abra "📎 Anexos", envie a foto/PDF assinado e clique "💾 Salvar".
 
 **Regras importantes:**
 - Um romaneio só aparece como "🟢 Devolvido assinado" depois que alguém anexa o comprovante — não existe um botão separado de "marcar como devolvido".
 - OP enviada em várias partes aparece como um card por envio parcial, cada um conferido separadamente.
+- Na aba "🔧 Termos de Ferramenta/Máquina" aparecem os termos emitidos em Documentos. Se o termo tem "devolução prevista" e a data já passou sem o termo assinado ter sido anexado, ele mostra "⏰ atrasado".
 """),
                 ]),
                 ("📊 Relatórios", [
@@ -13506,6 +13555,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 **Regras importantes:**
 - O botão de emitir só libera depois de escolher o projeto, informar o destinatário e adicionar pelo menos um item.
 - Excluir um documento do histórico é só pra Master.
+- O controle de devolução do equipamento é feito em **Romaneios Devolvidos**, aba "🔧 Termos de Ferramenta/Máquina" (só Master/PCP): é lá que se anexa o termo assinado da volta e se vê o que está atrasado.
 """),
                 ]),
                 ("⚙️ Sistema", [
