@@ -773,6 +773,10 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Romaneio_Emitido_Por TEXT")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Concluido_Em TIMESTAMP")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Possui_Lista_Componentes TEXT")
+        # Equipe (ACM / Esquadria-Vidro) de uma OP com Escopo='Terceirizada' — mesmo terceirizado,
+        # o servico e de um dos dois times. So muda o documento da OP e os relatorios; os Paineis
+        # de Producao continuam filtrando por Escopo e nao mostram terceirizada.
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Equipe_Terceirizada TEXT")
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_itens_detalhado_num_op ON itens_detalhado(Num_OP) WHERE Num_OP IS NOT NULL")
         # Escopo oficial (enum unico usado em toda a aplicacao): ACM / Esquadria-Vidro / Terceirizada.
         # Itens ligados a EDT herdam o Tipo_Escopo do cronograma (normalizado pro enum);
@@ -5163,6 +5167,11 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
 
     TITULOS_OP_ESCOPO = {"ACM": "ACM", "Esquadria-Vidro": "ESQUADRIAS", "Terceirizada": "TERCEIRIZADA"}
     titulo_escopo = TITULOS_OP_ESCOPO.get(tipo_escopo, tipo_escopo.upper())
+    # OP terceirizada com equipe definida: o titulo mostra o time + "TERCEIRIZADA"
+    # (ex: "ACM — TERCEIRIZADA"), pra ficar claro pra quem produz o material.
+    equipe_terc = normaliza_escopo(lote_row.get('Equipe_Terceirizada')) if tipo_escopo == "Terceirizada" else None
+    if equipe_terc:
+        titulo_escopo = f"{TITULOS_OP_ESCOPO.get(equipe_terc, equipe_terc.upper())} — TERCEIRIZADA"
 
     # ── CABEÇALHO ──────────────────────────────────────────
     ws.merge_cells("A1:F1")
@@ -5213,6 +5222,9 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
         info_row(ws, linha+1, "QTD FOLHAS PROJ:", campos_extras.get('qtd_folhas', '—'))
         linha += 2
     else:  # Terceirizada
+        if equipe_terc:
+            info_row(ws, linha, "EQUIPE:", TITULOS_OP_ESCOPO.get(equipe_terc, equipe_terc.upper()))
+            linha += 1
         info_row(ws, linha,   "EMPRESA RESP.:",   campos_extras.get('empresa', '—'))
         linha += 1
 
@@ -7761,6 +7773,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     st.session_state["_av_iv"] = 0
                 _hv = st.session_state["_av_hv"]
                 _iv = st.session_state["_av_iv"]
+                av_equipe_terc = None   # so usado quando av_escopo == "Terceirizada"
                 if df_projetos.empty:
                     st.info("Cadastre uma Obra e um Projeto em 'Cadastrar Obra' antes de lançar uma OP.")
                     av_obra, av_projeto, av_escopo = None, None, None
@@ -7786,6 +7799,19 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         opcoes_escopo_av = ["ACM", "Esquadria-Vidro", "Terceirizada"]
                         idx_escopo_av = opcoes_escopo_av.index(escopos_obra[0]) if len(escopos_obra) == 1 else 0
                         av_escopo = st.selectbox("Tipo de Escopo:", opcoes_escopo_av, index=idx_escopo_av, key=f"av_escopo_{_hv}")
+
+                    # Terceirizada nao e um time de producao — o servico ainda e de ACM ou de
+                    # Esquadrias. A equipe escolhida aqui muda o titulo do documento da OP e a
+                    # secao onde a OP aparece nos relatorios; nao entra nos Paineis de Producao.
+                    if av_escopo == "Terceirizada":
+                        _mapa_equipe_terc = {"ACM": "ACM", "Esquadrias": "Esquadria-Vidro"}
+                        _lbl_equipe_terc = st.selectbox(
+                            "Equipe responsável:", list(_mapa_equipe_terc.keys()),
+                            key=f"av_equipe_terc_{_hv}",
+                            help="Mesmo sendo terceirizado, o serviço é de ACM ou de Esquadrias. "
+                                 "Define o título do documento da OP e a seção dela nos relatórios."
+                        )
+                        av_equipe_terc = _mapa_equipe_terc[_lbl_equipe_terc]
 
                     st.caption("Este item entra como **Pendente** e recebe o número da OP na liberação, em 'Liberar OPs da Semana'.")
 
@@ -7888,8 +7914,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     (Obra_Vinculada, EDT_Vinculado, Cod_Lote, Num_OP, Tipo_Material,
                                      Qtd_Caixas, M2_Item, Peso_Kg, Data_Producao_Programada, Data_Limite_Obra,
                                      Data_Despacho, Romaneio_Chapas, Status_Item, Dificuldade,
-                                     Fase_Produtiva, Enviado_Logistica, Escopo, Numero_Projeto, Uso_Interno)
-                                    VALUES (%s,'AVULSO',%s,NULL,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente',%s,%s,%s,%s,%s,%s)
+                                     Fase_Produtiva, Enviado_Logistica, Escopo, Numero_Projeto, Uso_Interno,
+                                     Equipe_Terceirizada)
+                                    VALUES (%s,'AVULSO',%s,NULL,%s,%s,%s,%s,%s,%s,%s,%s,'Pendente',%s,%s,%s,%s,%s,%s,%s)
                                 """, (
                                     av_obra,
                                     cod_lote_av,
@@ -7906,7 +7933,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     1 if av_destino == "Envio para Obra" else 0,
                                     av_escopo,
                                     av_projeto,
-                                    av_destino == "Uso Interno"
+                                    av_destino == "Uso Interno",
+                                    av_equipe_terc if av_escopo == "Terceirizada" else None
                                 ))
                             conn_av2.commit()
                             _limpar_cache_geral()
@@ -7915,8 +7943,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             st.error(f"Erro: {e}")
                         finally:
                             liberar_conexao(conn_av2)
+                        _tag_equipe_aud = f" — Terceirizada/{av_equipe_terc}" if av_escopo == "Terceirizada" and av_equipe_terc else ""
                         registrar_auditoria(st.session_state.usuario_nome, "LOTE_SEM_FRENTE",
-                            f"Projeto {av_projeto} — {len(st.session_state.av_itens)} itens — {av_obra} — {av_destino} — Pendente")
+                            f"Projeto {av_projeto} — {len(st.session_state.av_itens)} itens — {av_obra} — {av_destino}{_tag_equipe_aud} — Pendente")
                         st.toast(f"Lote cadastrado como Pendente — {len(st.session_state.av_itens)} item(ns). Libere em 'Liberar OPs da Semana'.")
                         # zera o formulario inteiro (troca a key de todos os campos) pra
                         # comecar do branco e nao cadastrar o mesmo lote duas vezes sem querer
@@ -8090,6 +8119,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         "material": row_lote.get('Tipo_Material') or "PERFIL EM ALUMINIO"
                                     })
                                 else:
+                                    _eq_terc = normaliza_escopo(row_lote.get('Equipe_Terceirizada'))
+                                    _titulo_eq = {"ACM": "ACM — TERCEIRIZADA", "Esquadria-Vidro": "ESQUADRIAS — TERCEIRIZADA"}.get(_eq_terc)
+                                    if _titulo_eq:
+                                        st.caption(f"Equipe responsável definida no cadastro do lote — o documento sai com o título **{_titulo_eq}**.")
                                     empresa  = st.text_input("Empresa Responsável:", key="op_empresa")
                                     mat_terc = st.text_input("Material:", key="op_mat_terc")
                                     campos_extras.update({"empresa": empresa, "material": mat_terc})
@@ -12332,17 +12365,26 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     dt = pd.to_datetime(serie, errors='coerce')
                     return dt.dt.strftime('%d/%m/%Y').where(dt.notna(), '—')
 
-                def _preparar_bloco_semanal(df_secao, escopo_valor, apenas_concluidos, df_saldo_pecas):
+                def _preparar_bloco_semanal(df_secao, escopo_valor, apenas_concluidos, df_saldo_pecas, equipe_terc=None):
                     """Monta as linhas de UM bloco (uma seção x um escopo) do Relatório Semanal.
                     apenas_concluidos=True usa o valor total medido da OP (Concluído já saiu por
                     inteiro); False desconta o que já foi enviado em envios parciais, igual ao
-                    Relatório Geral — assim RESTANTE reflete o saldo real, não o tamanho cheio da OP."""
+                    Relatório Geral — assim RESTANTE reflete o saldo real, não o tamanho cheio da OP.
+
+                    escopo_valor='Terceirizada' + equipe_terc='ACM'/'Esquadria-Vidro' pega só as OPs
+                    terceirizadas daquela equipe; equipe_terc=None pega as terceirizadas sem equipe
+                    definida (OPs antigas). As terceirizadas nunca entram nos blocos ACM/Esquadrias."""
                     df_e = df_secao[df_secao['Escopo'] == escopo_valor].copy()
+                    if escopo_valor == 'Terceirizada':
+                        col_eq = (df_e['Equipe_Terceirizada'].map(normaliza_escopo)
+                                  if 'Equipe_Terceirizada' in df_e.columns
+                                  else pd.Series(index=df_e.index, dtype=object))
+                        df_e = df_e[col_eq.isna()] if equipe_terc is None else df_e[col_eq == equipe_terc]
                     if df_e.empty:
                         return pd.DataFrame()
                     df_e = df_e.merge(df_saldo_pecas, left_on='id', right_on='lote_id', how='left')
 
-                    eh_kg = escopo_valor == 'Esquadria-Vidro'
+                    eh_kg = escopo_valor == 'Esquadria-Vidro' or (escopo_valor == 'Terceirizada' and equipe_terc == 'Esquadria-Vidro')
                     col_base = 'Peso_Kg' if eh_kg else 'M2_Item'
                     col_real = 'peso_op_real' if eh_kg else 'm2_op_real'
                     label_medida = 'KG' if eh_kg else 'M²'
@@ -12514,9 +12556,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             ("PARCIAL", df_parcial_rs, False),
                             ("EM PRODUÇÃO", df_producao_rs, False),
                         ]:
-                            for escopo_val, escopo_nome in [("ACM", "ACM"), ("Esquadria-Vidro", "ESQUADRIAS"), ("Terceirizada", "TERCEIRIZADA")]:
+                            for escopo_val, escopo_nome in [("ACM", "ACM"), ("Esquadria-Vidro", "ESQUADRIAS")]:
                                 df_pronto_rs = _preparar_bloco_semanal(df_sec, escopo_val, apenas_concl, df_saldo_rs)
                                 blocos_rs.append((f"{titulo_sec} - {escopo_nome}", df_pronto_rs))
+                            # Terceirizada: um bloco por equipe (ACM / Esquadrias) + um pras OPs sem equipe definida
+                            for eq_val, eq_nome in [("ACM", "TERCEIRIZADA · ACM"),
+                                                    ("Esquadria-Vidro", "TERCEIRIZADA · ESQUADRIAS"),
+                                                    (None, "TERCEIRIZADA")]:
+                                df_pronto_terc = _preparar_bloco_semanal(df_sec, "Terceirizada", apenas_concl, df_saldo_rs, equipe_terc=eq_val)
+                                blocos_rs.append((f"{titulo_sec} - {eq_nome}", df_pronto_terc))
 
                         if all(df.empty for _, df in blocos_rs):
                             st.warning("Nenhum item encontrado para os filtros selecionados.")
@@ -12550,6 +12598,20 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 with rel_f3:
                     escopo_labels_rel = {"ACM": "ACM", "Esquadrias": "Esquadria-Vidro", "Terceirizada": "Terceirizada"}
                     filtro_escopo_rel = st.selectbox("Escopo:", ["Todos"] + list(escopo_labels_rel.keys()), key="rel_escopo")
+
+                def _filtra_escopo_rel(df):
+                    """Aplica o filtro de Escopo. ACM/Esquadrias tambem trazem as OPs terceirizadas
+                    daquela equipe (Escopo='Terceirizada' + Equipe_Terceirizada); 'Terceirizada'
+                    traz todas as terceirizadas, independente da equipe."""
+                    if filtro_escopo_rel == "Todos" or df.empty:
+                        return df
+                    alvo = escopo_labels_rel[filtro_escopo_rel]
+                    if alvo == "Terceirizada":
+                        return df[df['Escopo'] == "Terceirizada"]
+                    eq = (df['Equipe_Terceirizada'].map(normaliza_escopo)
+                          if 'Equipe_Terceirizada' in df.columns
+                          else pd.Series(index=df.index, dtype=object))
+                    return df[(df['Escopo'] == alvo) | ((df['Escopo'] == "Terceirizada") & (eq == alvo))]
 
                 rel_f4, rel_f5, rel_f6 = st.columns([2, 2, 2])
                 with rel_f4:
@@ -12593,8 +12655,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         df_rel = df_rel[df_rel['Obra_Vinculada'] == filtro_obra_rel]
                     if filtro_status_rel != "Todos":
                         df_rel = df_rel[df_rel['Status_Item'] == filtro_status_rel]
-                    if filtro_escopo_rel != "Todos":
-                        df_rel = df_rel[df_rel['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
+                    df_rel = _filtra_escopo_rel(df_rel)
                     col_data_map = {
                         "Entrada em Produção": "Data_Producao_Programada",
                         "Data Limite": "Data_Limite_Obra",
@@ -12621,8 +12682,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         df_paradas_extra = df_paradas_extra[df_paradas_extra['Obra_Vinculada'] == filtro_obra_rel]
                     if filtro_status_rel != "Todos":
                         df_paradas_extra = df_paradas_extra[df_paradas_extra['Status_Item'] == filtro_status_rel]
-                    if filtro_escopo_rel != "Todos":
-                        df_paradas_extra = df_paradas_extra[df_paradas_extra['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
+                    df_paradas_extra = _filtra_escopo_rel(df_paradas_extra)
                     if not mostrar_concluidos and filtro_status_rel != "Concluido":
                         df_paradas_extra = df_paradas_extra[df_paradas_extra['Status_Item'] != 'Concluido']
                     if not df_paradas_extra.empty:
@@ -12638,8 +12698,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         df_producao_extra = df_producao_extra[df_producao_extra['Obra_Vinculada'] == filtro_obra_rel]
                     if filtro_status_rel not in ("Todos", "Concluido"):
                         df_producao_extra = df_producao_extra[df_producao_extra['Status_Item'] == filtro_status_rel]
-                    if filtro_escopo_rel != "Todos":
-                        df_producao_extra = df_producao_extra[df_producao_extra['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
+                    df_producao_extra = _filtra_escopo_rel(df_producao_extra)
                     if not df_producao_extra.empty:
                         df_rel = pd.concat([df_rel, df_producao_extra], ignore_index=True).drop_duplicates(subset='id', keep='first')
 
@@ -12933,8 +12992,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     df_avulsas = df_banco_micro_rel[df_banco_micro_rel['EDT_Vinculado'].str.startswith('AVULSO', na=False)].copy() if not df_banco_micro_rel.empty else pd.DataFrame()
                     if filtro_obra_rel != "Todas" and not df_avulsas.empty:
                         df_avulsas = df_avulsas[df_avulsas['Obra_Vinculada'] == filtro_obra_rel]
-                    if filtro_escopo_rel != "Todos" and not df_avulsas.empty and 'Escopo' in df_avulsas.columns:
-                        df_avulsas = df_avulsas[df_avulsas['Escopo'] == escopo_labels_rel[filtro_escopo_rel]]
+                    if not df_avulsas.empty and 'Escopo' in df_avulsas.columns:
+                        df_avulsas = _filtra_escopo_rel(df_avulsas)
                     if df_avulsas.empty:
                         st.info("Nenhuma OP sem frente encontrada.")
                     else:
@@ -13098,6 +13157,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-08-31", "Liberação de OP: ao escolher o Tipo de Escopo \"Terceirizada\", aparece o campo \"Equipe responsável\" (ACM ou Esquadrias). Isso muda o título do documento da OP (ex: \"ACM — TERCEIRIZADA\") e a seção onde a OP aparece nos relatórios (blocos \"TERCEIRIZADA · ACM\" e \"TERCEIRIZADA · ESQUADRIAS\" no Relatório Semanal). Os Painéis de Produção continuam sem mostrar OPs terceirizadas."),
                 ("2026-08-28", "Almoxarifado: a Produção agora acessa a tela para conferir componentes de OP e insumos (mudar status, ver indisponíveis, baixar relatórios). Excluir ou corrigir lançamentos errados continua só com Master/Almoxarifado."),
                 ("2026-08-24", "Primeira leva de ajustes pro celular: colunas empilham em vez de espremer, botões e menu maiores pro toque, e dá pra instalar o sistema na tela inicial como um app (veja \"📱 Instalar como app no celular\" em Sistema)."),
                 ("2026-08-21", "Almoxarifado: agora dá pra corrigir descrição, quantidade e unidade de um item de insumo lançado errado (lápis na linha do item, aba Romaneios de Insumos)."),
@@ -13213,7 +13273,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 **Para que serve:** É a tela central de gestão de OPs — cadastrar lotes avulsos sem frente vinculada (ancoragem, corte de perfil etc.), lançar peças/romaneio de uma OP liberada, gerar a ficha da OP em Excel, cadastrar a lista de componentes de uma OP e liberar os lotes pendentes pra fábrica.
 
 **Passo a passo:**
-1. "➕ Liberação de OP" — pra materiais de apoio (ancoragem, prisília, corte de perfil): escolha Obra, Projeto e Tipo de Escopo, adicione os itens (descrição + quantidade) e clique "💾 Cadastrar Lote". Ele entra como Pendente.
+1. "➕ Liberação de OP" — pra materiais de apoio (ancoragem, prisília, corte de perfil): escolha Obra, Projeto e Tipo de Escopo, adicione os itens (descrição + quantidade) e clique "💾 Cadastrar Lote". Ele entra como Pendente. Se o Tipo de Escopo for "Terceirizada", escolha também a "Equipe responsável" (ACM ou Esquadrias) — isso define o título do documento da OP e a seção dela nos relatórios.
 2. "📋 Lotes Pendentes" — lista o que está aguardando liberação; clique "✅ Liberar esta OP" pra gerar o número da OP e mandar pra fábrica.
 3. "✏️ Lançar Peças da OP" — escolha a OP liberada, confira o saldo da etapa vinculada, e lance as peças colando o romaneio ("📋 Colar Romaneio") ou digitando manualmente ("✏️ Manual"). Marque o status dos componentes (Aguardando Projetista / Componentes OK).
 4. No mesmo card, use "📄 Gerar Ordem de Produção" pra emitir a ficha da OP em Excel, e a seção de anexos pra guardar arquivos.
