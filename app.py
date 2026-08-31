@@ -9812,9 +9812,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     )
                 st.markdown("---")
 
-            tab_alm_op, tab_alm_ins = st.tabs(["📋 Romaneios com Vínculo a OP", "📦 Romaneios de Insumos"])
+            # Antes eram st.tabs — mas o Streamlit executa o corpo das DUAS abas em todo
+            # rerun (so esconde a inativa com CSS), entao conferir um item de insumo
+            # re-renderizava tambem a aba inteira de componentes de OP (centenas de widgets).
+            # Com st.radio so o ramo escolhido roda. Validado em repro isolado antes de aplicar.
+            alm_view = st.radio(
+                "Ver:", ["📋 Romaneios com Vínculo a OP", "📦 Romaneios de Insumos"],
+                horizontal=True, key="alm_view", label_visibility="collapsed"
+            )
 
-            with tab_alm_op:
+            if alm_view == "📋 Romaneios com Vínculo a OP":
                 df_ops_comp = carregar_todas_ops_com_componentes()
 
                 if df_ops_comp.empty:
@@ -9858,12 +9865,20 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         elif n_conf == n_total: icone = "✅"
                         else:                   icone = "⏳"
 
-                        with st.expander(
-                            f"{icone} OP: {op_row['num_op']} — {op_row['cod_lote']} | {op_row['obra_vinculada']}"
+                        _hdr_op = (
+                            f"{icone} **OP: {op_row['num_op']}** — {op_row['cod_lote']} | {op_row['obra_vinculada']}"
                             f"{' (Proj. ' + str(op_row['numero_projeto']) + ')' if op_row.get('numero_projeto') else ''}  "
-                            f"({n_conf}/{n_total} conferidos{f' — {n_indisp} FALTANDO' if n_indisp > 0 else ''})",
-                            expanded=False, key=f"alm_comp_expander_{int(op_row['item_id'])}"
-                        ):
+                            f"· {n_conf}/{n_total} conferidos{f' — {n_indisp} FALTANDO' if n_indisp > 0 else ''}"
+                        )
+                        with st.container(border=True):
+                            _hc_op = st.columns([8.5, 2])
+                            _hc_op[0].markdown(_hdr_op)
+                            # So monta a lista pesada de componentes quando o toggle esta ligado.
+                            # Streamlit executa o corpo de um expander fechado do mesmo jeito — com
+                            # centenas de itens era isso que travava a tela. 'continue' sai do 'with'
+                            # e pula pro proximo item do laco.
+                            if not _hc_op[1].toggle("🔍 Conferir / emitir", key=f"alm_comp_open_{int(op_row['item_id'])}"):
+                                continue
                             hc = st.columns([4, 2, 2, 3, 2])
                             for col_h, label in zip(hc, ["COMPONENTE", "QTD", "UN", "STATUS", "AÇÃO"]):
                                 col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
@@ -9951,7 +9966,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         args=(item_id_op, op_row['num_op'], op_row['obra_vinculada'], st.session_state.usuario_nome)
                                     )
 
-            with tab_alm_ins:
+            elif alm_view == "📦 Romaneios de Insumos":
                 df_todos_ins = carregar_todos_itens_insumos()
                 if not df_todos_ins.empty:
                     n_aguard_ins = len(df_todos_ins[df_todos_ins['status_item'] == 'Aguardando Conferencia'])
@@ -10084,14 +10099,23 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         elif n_total_ins and n_conf_ins == n_total_ins:   icone_ins = "✅"
                         else:                                             icone_ins = "⏳"
 
-                        with st.expander(
-                            f"{icone_ins} {pd.to_datetime(saida_row['data_saida']).strftime('%d/%m/%Y')} — "
+                        _hdr_ins = (
+                            f"{icone_ins} **{pd.to_datetime(saida_row['data_saida']).strftime('%d/%m/%Y')}** — "
                             f"{_nn(saida_row.get('obra'), 'Sem obra')}"
                             f"{' (Proj. ' + str(saida_row['numero_projeto']) + ')' if pd.notna(saida_row.get('numero_projeto')) else ''}"
-                            f" — {_nn(saida_row.get('destino'), '—')} "
-                            f"({n_conf_ins}/{n_total_ins} conferidos{f' — {n_indisp_ins} FALTANDO' if n_indisp_ins > 0 else ''}) — por {saida_row['registrado_por']}",
-                            expanded=False, key=f"alm_ins_expander_{int(saida_row['id'])}"
-                        ):
+                            f" — {_nn(saida_row.get('destino'), '—')}  ·  "
+                            f"{n_conf_ins}/{n_total_ins} conferidos{f' — {n_indisp_ins} FALTANDO' if n_indisp_ins > 0 else ''}  ·  por {saida_row['registrado_por']}"
+                        )
+                        with st.container(border=True):
+                            _hc_ins = st.columns([8.5, 2])
+                            _hc_ins[0].markdown(_hdr_ins)
+                            # So monta a lista pesada de itens (selectbox/obs/comentarios por item,
+                            # botoes de romaneio/arquivar/excluir) quando o toggle esta ligado.
+                            # Streamlit executa o corpo de um expander fechado do mesmo jeito — com
+                            # centenas de itens ativos era isso que travava a tela. 'continue' sai do
+                            # 'with' e pula pra proxima saida do laco.
+                            if not _hc_ins[1].toggle("🔍 Conferir / emitir", key=f"alm_ins_open_{int(saida_row['id'])}"):
+                                continue
                             pode_editar_item_ins = setor in ["Master", "Almoxarifado"]
                             hci = st.columns([4, 1.5, 1, 2.5, 2.5, 0.8]) if pode_editar_item_ins else st.columns([4, 2, 2, 3, 2])
                             labels_ins_header = ["INSUMO", "QTD", "UN", "STATUS", "AÇÃO", ""] if pode_editar_item_ins else ["INSUMO", "QTD", "UN", "STATUS", "AÇÃO"]
@@ -13204,6 +13228,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-08-31", "Almoxarifado mais leve: as duas listas (Vínculo a OP / Insumos) viraram um seletor \"Ver:\" (só a escolhida carrega), e cada OP/saída virou um cartão com toggle \"🔍 Conferir / emitir\" — a lista pesada de itens só monta quando você abre o cartão. Com muitas saídas ativas a tela deixa de travar a cada clique."),
                 ("2026-08-31", "Romaneios Devolvidos ganha a aba \"🔧 Termos de Ferramenta/Máquina\": os termos emitidos em Documentos agora entram no controle de devolução (anexar o termo assinado da volta = 🟢 devolvido; termo com devolução prevista vencida aparece como \"⏰ atrasado\")."),
                 ("2026-08-31", "Liberação de OP: ao escolher o Tipo de Escopo \"Terceirizada\", aparece o campo \"Equipe responsável\" (ACM ou Esquadrias). Isso muda o título do documento da OP (ex: \"ACM — TERCEIRIZADA\") e a seção onde a OP aparece nos relatórios (blocos \"TERCEIRIZADA · ACM\" e \"TERCEIRIZADA · ESQUADRIAS\" no Relatório Semanal). Os Painéis de Produção continuam sem mostrar OPs terceirizadas."),
                 ("2026-08-28", "Almoxarifado: a Produção agora acessa a tela para conferir componentes de OP e insumos (mudar status, ver indisponíveis, baixar relatórios). Excluir ou corrigir lançamentos errados continua só com Master/Almoxarifado."),
@@ -13416,10 +13441,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
 **Passo a passo:**
 1. Use o toggle "❌ Ver só os Indisponíveis" pra um raio-x rápido do que está faltando.
-2. Aba "📋 Romaneios com Vínculo a OP": abra a OP desejada, marque o status de cada componente (Aguardando Conferência / Disponível / Parcial / Indisponível — parcial pede a quantidade enviada), adicione observação se precisar. Quando tudo estiver conferido, clique "🖨️ Gerar Romaneio" e depois "⬇️ Baixar Romaneio".
-3. Aba "📦 Romaneios de Insumos": pra material sem OP vinculada (parafuso, broca etc.), registre uma nova saída em "➕ Nova Saída de Insumos" (obra e projeto são obrigatórios), depois confira os itens da mesma forma que os componentes.
+2. Escolha "📋 Romaneios com Vínculo a OP" ou "📦 Romaneios de Insumos" no seletor "Ver:".
+3. Em "📋 Romaneios com Vínculo a OP": cada OP é um cartão; ligue o toggle "🔍 Conferir / emitir" pra abrir a lista de componentes, marque o status de cada um (Aguardando Conferência / Disponível / Parcial / Indisponível — parcial pede a quantidade enviada), adicione observação se precisar. Quando tudo estiver conferido, clique "🖨️ Gerar Romaneio" e depois "⬇️ Baixar Romaneio".
+4. Em "📦 Romaneios de Insumos": pra material sem OP vinculada (parafuso, broca etc.), registre uma nova saída em "➕ Nova Saída de Insumos" (obra e projeto são obrigatórios); depois cada saída é um cartão com o mesmo toggle "🔍 Conferir / emitir" pra abrir e conferir os itens.
 
 **Regras importantes:**
+- Só abra o cartão (toggle "🔍 Conferir / emitir") da OP/saída em que você está trabalhando — deixar vários abertos ao mesmo tempo deixa a tela mais lenta. Fechar volta a lista leve.
 - Mudar o status ou a quantidade parcial já salva na hora — não tem botão "salvar" separado.
 - Excluir uma saída de insumos lançada errada só é permitido pra Master/Almoxarifado, com confirmação.
 - Lançou um item de insumo errado (descrição, quantidade ou unidade)? Master/Almoxarifado podem corrigir clicando no lápis (✏️) na linha do item, na aba "📦 Romaneios de Insumos".
