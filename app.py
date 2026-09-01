@@ -9479,6 +9479,23 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     df_envios_hist_log = carregar_envios_op_historico()
                     contagem_envios_hist_log = df_envios_hist_log['lote_id'].value_counts() if not df_envios_hist_log.empty else pd.Series(dtype=int)
 
+                    # "Data que ficou pronto": pra OP completa e' o Concluido_Em; pro envio
+                    # parcial (que deixa Concluido_Em NULL) e' a data do ultimo envio registrado.
+                    _ult_envio_por_lote = {}
+                    if not df_envios_hist_log.empty and 'enviado_em' in df_envios_hist_log.columns:
+                        _ev = df_envios_hist_log.copy()
+                        _ev['enviado_em'] = pd.to_datetime(_ev['enviado_em'], errors='coerce')
+                        _ult_envio_por_lote = _ev.groupby('lote_id')['enviado_em'].max().to_dict()
+
+                    def _data_pronto_de(r):
+                        d = r.get('Concluido_Em')
+                        if pd.isna(d):
+                            d = _ult_envio_por_lote.get(int(r['id']))
+                        return pd.to_datetime(d, errors='coerce')
+
+                    df_conc_log = df_conc_log.copy()
+                    df_conc_log['_data_pronto'] = df_conc_log.apply(_data_pronto_de, axis=1)
+
                     def _render_op_pronta(row_c):
                         df_pecas_c = _pecas_por_lote_log.get(int(row_c['id']))
                         if df_pecas_c is None:
@@ -9519,6 +9536,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         st.caption(f"🔩 {len(df_pecas_c)} peça(s) | Total: {int(df_pecas_c['qtd_total'].sum())} un")
                                 else:
                                     st.caption("⚠️ Sem peças lançadas")
+                                dt_pronto_c = row_c.get('_data_pronto')
+                                if pd.notna(dt_pronto_c):
+                                    st.caption(f"✅ Ficou pronto em {pd.to_datetime(dt_pronto_c).strftime('%d/%m/%Y')}")
                             with cc2:
                                 end_r = st.text_input("Endereço:", key=f"end_rom_{row_c['id']}",
                                                        placeholder="Endereço da obra")
@@ -9584,11 +9604,47 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         st.toast(f"Romaneio emitido — OP {num_op_c} baixada!")
                                         st.rerun()
 
-                    if obra_selecionada:
+                    modo_org_op = st.radio(
+                        "Organizar por:", ["📅 Data que ficou pronto", "🏗️ Obra"],
+                        horizontal=True, key="log_op_org",
+                        help="\"Data que ficou pronto\" agrupa as OPs pelo dia em que foram finalizadas na produção "
+                             "(ou pela data do último envio, no caso de OP parcial)."
+                    )
+
+                    if modo_org_op.startswith("📅"):
+                        _hoje_d_log = hoje_projeto().date()
+                        def _bucket_data_pronto(dt):
+                            if pd.isna(dt):
+                                return (9, "🗓️ Sem data registrada")
+                            d = pd.to_datetime(dt).date()
+                            delta = (_hoje_d_log - d).days
+                            if delta <= 0:
+                                return (0, "📅 Hoje")
+                            if delta == 1:
+                                return (1, "📅 Ontem")
+                            if delta <= 7:
+                                return (2, "📅 Últimos 7 dias")
+                            if delta <= 30:
+                                return (3, "📅 Entre 8 e 30 dias atrás")
+                            return (4, "📅 Há mais de 30 dias")
+
+                        _bk = df_conc_log['_data_pronto'].apply(_bucket_data_pronto)
+                        df_conc_log['_bk_ord'] = _bk.apply(lambda t: t[0])
+                        df_conc_log['_bk_label'] = _bk.apply(lambda t: t[1])
+                        for ord_b in sorted(df_conc_log['_bk_ord'].unique()):
+                            grp_bk = df_conc_log[df_conc_log['_bk_ord'] == ord_b].sort_values('_data_pronto', ascending=False)
+                            label_b = grp_bk.iloc[0]['_bk_label']
+                            n_parc_bk = int((grp_bk['Status_Item'] == 'Parcialmente Concluido').sum())
+                            titulo_bk = f"{label_b} — {len(grp_bk)} OP(s)"
+                            if n_parc_bk:
+                                titulo_bk += f"  🟠 {n_parc_bk} parcial(is)"
+                            with st.expander(titulo_bk, expanded=(ord_b <= 1), key=f"log_op_bucket_{ord_b}"):
+                                for _, row_c in grp_bk.iterrows():
+                                    _render_op_pronta(row_c)
+                    elif obra_selecionada:
                         for _, row_c in df_conc_log.iterrows():
                             _render_op_pronta(row_c)
                     else:
-                        df_conc_log = df_conc_log.copy()
                         df_conc_log['_parcial'] = df_conc_log['Status_Item'] == 'Parcialmente Concluido'
                         resumo_op = (df_conc_log.groupby('Obra_Vinculada')
                                      .agg(qtd=('id', 'count'), parciais=('_parcial', 'sum'))
@@ -13257,6 +13313,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-09-01", "Logística, lista \"✅ OPs Prontas — Emitir Romaneio\": novo seletor \"Organizar por:\" — dá pra agrupar as OPs pela data em que ficaram prontas na produção (Hoje, Ontem, Últimos 7 dias...) em vez de só por obra, e cada cartão agora mostra \"✅ Ficou pronto em DD/MM\"."),
                 ("2026-09-01", "Qualidade das fotos anexadas: quem usa iPhone tinha a foto convertida (e perdendo qualidade) antes mesmo de chegar no sistema, porque nenhum lugar aceitava o formato nativo do iPhone (HEIC). Agora todo anexo de foto (Romaneios Devolvidos, Documentos, Kanban, Liberar OP) aceita HEIC direto e a conversão pra JPEG é feita aqui, em qualidade alta."),
                 ("2026-08-31", "Almoxarifado mais leve: as duas listas (Vínculo a OP / Insumos) viraram um seletor \"Ver:\" (só a escolhida carrega), e cada OP/saída virou um cartão com toggle \"🔍 Conferir / emitir\" — a lista pesada de itens só monta quando você abre o cartão. Com muitas saídas ativas a tela deixa de travar a cada clique."),
                 ("2026-08-31", "Romaneios Devolvidos ganha a aba \"🔧 Termos de Ferramenta/Máquina\": os termos emitidos em Documentos agora entram no controle de devolução (anexar o termo assinado da volta = 🟢 devolvido; termo com devolução prevista vencida aparece como \"⏰ atrasado\")."),
@@ -13460,6 +13517,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 4. "🗂️ Histórico de Despachos" mostra tudo que já saiu, com % de pontualidade.
 
 **Regras importantes:**
+- Na lista "✅ OPs Prontas", o seletor "Organizar por:" alterna entre agrupar pela **data que ficou pronto** (Hoje, Ontem, Últimos 7 dias, Entre 8 e 30 dias, Há mais de 30 dias — pra saber de bate-pronto o que a produção finalizou hoje) e agrupar por **obra**. Cada cartão mostra a data em que aquela OP ficou pronta.
 - O romaneio inclui só as peças do último envio, não o histórico acumulado do lote.
 - Dá pra reverter uma baixa de romaneio feita errado, no expander "Romaneios já baixados".
 - Envio agendado pra depois do prazo aparece com aviso "Fora do prazo!" mesmo antes de despachar.
