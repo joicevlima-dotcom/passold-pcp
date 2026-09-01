@@ -3083,7 +3083,7 @@ def _carimbar_imagem(conteudo: bytes, texto: str) -> bytes:
     margem = 12
     draw.text((img.width - largura_txt - margem, margem), texto, fill=(210, 30, 30), font=font)
     out = io.BytesIO()
-    img.save(out, format=fmt)
+    img.save(out, format=fmt, quality=92, optimize=True)  # sem quality= o PIL usa o default (75) pra JPEG -- perda visivel
     return out.getvalue()
 
 def _carimbar_num_op(nome: str, conteudo: bytes, num_op: str) -> bytes:
@@ -3101,6 +3101,31 @@ def _carimbar_num_op(nome: str, conteudo: bytes, num_op: str) -> bytes:
     except Exception:
         pass  # se o carimbo falhar por qualquer motivo, guarda o arquivo original em vez de travar o upload
     return conteudo
+
+def _normalizar_imagem_heic(nome: str, tipo: str, conteudo: bytes) -> tuple[str, str, bytes]:
+    """iPhone tira foto em HEIC por padrao. Como nenhum uploader do sistema aceita HEIC
+    (so png/jpg/jpeg), sem isso era o proprio iOS que convertia a foto pra JPEG antes de
+    enviar -- e essa conversao do sistema, em cima de uma foto que ja veio comprimida como
+    HEIC, perdia qualidade visivel (reclamado pela Joice em Romaneios Devolvidos, 2026-09-01).
+    Agora o uploader aceita .heic/.heif tambem, e a conversao pra JPEG e' feita aqui, uma vez
+    so, em qualidade alta (92) -- em vez de depender do que o aparelho decidir fazer.
+    Pra qualquer outro formato, devolve (nome, tipo, conteudo) sem alteracao nenhuma."""
+    ext = nome.rsplit('.', 1)[-1].lower() if '.' in nome else ''
+    if ext not in ('heic', 'heif'):
+        return nome, tipo, conteudo
+    try:
+        import io
+        import pillow_heif
+        from PIL import Image, ImageOps
+        pillow_heif.register_heif_opener()
+        img = Image.open(io.BytesIO(conteudo))
+        img = ImageOps.exif_transpose(img)  # HEIC guarda rotacao no EXIF -- sem isso a foto pode sair deitada
+        out = io.BytesIO()
+        img.convert("RGB").save(out, format="JPEG", quality=92, optimize=True)
+        novo_nome = nome.rsplit('.', 1)[0] + '.jpg'
+        return novo_nome, "image/jpeg", out.getvalue()
+    except Exception:
+        return nome, tipo, conteudo  # se a conversao falhar por qualquer motivo, guarda o HEIC original em vez de travar o upload
 
 def _buscar_num_op_item(item_id: int) -> str | None:
     conn = conectar_banco()
@@ -6732,7 +6757,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if setor in ["Master", "PCP", "Engenharia", "Producao"]:
                                     uploaded_list_acm = st.file_uploader(
                                         "Anexar arquivo(s) (PDF, Excel, imagem):",
-                                        type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg"],
+                                        type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg", "heic", "heif"],
                                         key=_uploader_key(f"upload_acm_{row['id']}"),
                                         accept_multiple_files=True
                                     )
@@ -6742,8 +6767,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             progress_acm = st.progress(0.0)
                                             prontos_acm = []
                                             for i_acm, uploaded in enumerate(uploaded_list_acm, start=1):
-                                                conteudo_acm = _carimbar_num_op(uploaded.name, uploaded.read(), num_op_acm)
-                                                prontos_acm.append((uploaded.name, uploaded.type or "", conteudo_acm))
+                                                nome_acm, tipo_acm, bytes_acm = _normalizar_imagem_heic(uploaded.name, uploaded.type or "", uploaded.read())
+                                                conteudo_acm = _carimbar_num_op(nome_acm, bytes_acm, num_op_acm)
+                                                prontos_acm.append((nome_acm, tipo_acm, conteudo_acm))
                                                 progress_acm.progress(i_acm / len(uploaded_list_acm), text=f"Processando {i_acm}/{len(uploaded_list_acm)}...")
                                             n_salvos_acm = salvar_arquivos_op_lote(int(row['id']), prontos_acm, st.session_state.usuario_nome)
                                             progress_acm.empty()
@@ -7392,7 +7418,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if setor in ["Master", "PCP", "Engenharia", "Producao"]:
                                     uploaded_list_esq = st.file_uploader(
                                         "Anexar arquivo(s) (PDF, Excel, imagem):",
-                                        type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg"],
+                                        type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg", "heic", "heif"],
                                         key=_uploader_key(f"upload_esq_{row['id']}"),
                                         accept_multiple_files=True
                                     )
@@ -7402,8 +7428,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                             progress_esq = st.progress(0.0)
                                             prontos_esq = []
                                             for i_esq, uploaded in enumerate(uploaded_list_esq, start=1):
-                                                conteudo_esq = _carimbar_num_op(uploaded.name, uploaded.read(), num_op_esq)
-                                                prontos_esq.append((uploaded.name, uploaded.type or "", conteudo_esq))
+                                                nome_esq, tipo_esq, bytes_esq = _normalizar_imagem_heic(uploaded.name, uploaded.type or "", uploaded.read())
+                                                conteudo_esq = _carimbar_num_op(nome_esq, bytes_esq, num_op_esq)
+                                                prontos_esq.append((nome_esq, tipo_esq, conteudo_esq))
                                                 progress_esq.progress(i_esq / len(uploaded_list_esq), text=f"Processando {i_esq}/{len(uploaded_list_esq)}...")
                                             n_salvos_esq = salvar_arquivos_op_lote(int(row['id']), prontos_esq, st.session_state.usuario_nome)
                                             progress_esq.empty()
@@ -8286,7 +8313,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             if setor in ["Master", "PCP", "Engenharia", "Producao"]:
                                 uploaded_list = st.file_uploader(
                                     "Anexar arquivo(s) (PDF, Excel, imagem):",
-                                    type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg"],
+                                    type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg", "heic", "heif"],
                                     key=_uploader_key(f"upload_arq_{lote_id}"),
                                     accept_multiple_files=True
                                 )
@@ -8295,8 +8322,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         progress_op = st.progress(0.0)
                                         prontos_op = []
                                         for i_op, uploaded in enumerate(uploaded_list, start=1):
-                                            conteudo_op = _carimbar_num_op(uploaded.name, uploaded.read(), row_lote['Num_OP'])
-                                            prontos_op.append((uploaded.name, uploaded.type or "", conteudo_op))
+                                            nome_op, tipo_op, bytes_op = _normalizar_imagem_heic(uploaded.name, uploaded.type or "", uploaded.read())
+                                            conteudo_op = _carimbar_num_op(nome_op, bytes_op, row_lote['Num_OP'])
+                                            prontos_op.append((nome_op, tipo_op, conteudo_op))
                                             progress_op.progress(i_op / len(uploaded_list), text=f"Processando {i_op}/{len(uploaded_list)}...")
                                         n_salvos = salvar_arquivos_op_lote(lote_id, prontos_op, st.session_state.usuario_nome)
                                         progress_op.empty()
@@ -10871,16 +10899,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 with st.expander(f"📎 Anexos ({len(arqs_rd)})", expanded=False):
                     up_rd_list = st.file_uploader(
                         "Anexar romaneio(s) assinado(s) (foto ou PDF):",
-                        type=["pdf", "png", "jpg", "jpeg"], key=_uploader_key(f"rd_up_{key_prefix}"),
+                        type=["pdf", "png", "jpg", "jpeg", "heic", "heif"], key=_uploader_key(f"rd_up_{key_prefix}"),
                         accept_multiple_files=True
                     )
                     if up_rd_list:
                         if st.button(f"💾 Salvar {len(up_rd_list)} arquivo(s)", key=f"rd_btn_{key_prefix}", type="primary"):
                             n_ok_rd = 0
                             for up_rd in up_rd_list:
+                                nome_rd, tipo_rd, bytes_rd_up = _normalizar_imagem_heic(up_rd.name, up_rd.type or "", up_rd.read())
                                 ok_rd = salvar_arquivo_romaneio_devolvido(
-                                    tipo_origem, origem_id, up_rd.name, up_rd.type or "",
-                                    up_rd.read(), st.session_state.usuario_nome
+                                    tipo_origem, origem_id, nome_rd, tipo_rd,
+                                    bytes_rd_up, st.session_state.usuario_nome
                                 )
                                 if ok_rd:
                                     n_ok_rd += 1
@@ -11947,12 +11976,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         if pode_editar_kanban:
                             uploaded_kanban = st.file_uploader(
                                 "Anexar arquivo(s) — RC física, solicitação etc.:",
-                                type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "doc", "docx"],
+                                type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "doc", "docx", "heic", "heif"],
                                 key=_uploader_key(f"kanban_upload_{card_id}"), accept_multiple_files=True
                             )
                             if uploaded_kanban:
                                 if st.button(f"💾 Salvar {len(uploaded_kanban)} arquivo(s)", key=f"kanban_btn_salvar_anexo_{card_id}"):
-                                    prontos_kanban = [(f.name, f.type or "", f.read()) for f in uploaded_kanban]
+                                    prontos_kanban = [_normalizar_imagem_heic(f.name, f.type or "", f.read()) for f in uploaded_kanban]
                                     n_salvos_kanban = salvar_anexos_kanban_lote(card_id, prontos_kanban, st.session_state.usuario_nome)
                                     _limpar_cache_kanban()
                                     _resetar_uploader(f"kanban_upload_{card_id}")
@@ -12143,7 +12172,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         st.caption("Nenhum item adicionado ainda.")
 
                     doc_observacoes = st.text_area("Observações (opcional):", key="doc_observacoes")
-                    doc_fotos = st.file_uploader("📷 Fotos (opcional):", type=["png", "jpg", "jpeg"],
+                    doc_fotos = st.file_uploader("📷 Fotos (opcional):", type=["png", "jpg", "jpeg", "heic", "heif"],
                                                   accept_multiple_files=True, key=_uploader_key("doc_fotos_up"))
 
                     if not doc_destinatario.strip():
@@ -12157,7 +12186,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         )
                         if documento_id:
                             if doc_fotos:
-                                prontos_doc = [(f.name, f.type or "", f.read()) for f in doc_fotos]
+                                prontos_doc = [_normalizar_imagem_heic(f.name, f.type or "", f.read()) for f in doc_fotos]
                                 salvar_fotos_documento_lote(documento_id, prontos_doc, st.session_state.usuario_nome)
                             registrar_auditoria(st.session_state.usuario_nome, "DOCUMENTO_EMITIDO",
                                 f"{doc_tipo} #{documento_id} — Obra: {doc_obra} — Destinatário: {doc_destinatario}")
@@ -13228,6 +13257,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-09-01", "Qualidade das fotos anexadas: quem usa iPhone tinha a foto convertida (e perdendo qualidade) antes mesmo de chegar no sistema, porque nenhum lugar aceitava o formato nativo do iPhone (HEIC). Agora todo anexo de foto (Romaneios Devolvidos, Documentos, Kanban, Liberar OP) aceita HEIC direto e a conversão pra JPEG é feita aqui, em qualidade alta."),
                 ("2026-08-31", "Almoxarifado mais leve: as duas listas (Vínculo a OP / Insumos) viraram um seletor \"Ver:\" (só a escolhida carrega), e cada OP/saída virou um cartão com toggle \"🔍 Conferir / emitir\" — a lista pesada de itens só monta quando você abre o cartão. Com muitas saídas ativas a tela deixa de travar a cada clique."),
                 ("2026-08-31", "Romaneios Devolvidos ganha a aba \"🔧 Termos de Ferramenta/Máquina\": os termos emitidos em Documentos agora entram no controle de devolução (anexar o termo assinado da volta = 🟢 devolvido; termo com devolução prevista vencida aparece como \"⏰ atrasado\")."),
                 ("2026-08-31", "Liberação de OP: ao escolher o Tipo de Escopo \"Terceirizada\", aparece o campo \"Equipe responsável\" (ACM ou Esquadrias). Isso muda o título do documento da OP (ex: \"ACM — TERCEIRIZADA\") e a seção onde a OP aparece nos relatórios (blocos \"TERCEIRIZADA · ACM\" e \"TERCEIRIZADA · ESQUADRIAS\" no Relatório Semanal). Os Painéis de Produção continuam sem mostrar OPs terceirizadas."),
