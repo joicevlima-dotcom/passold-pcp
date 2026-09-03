@@ -12506,11 +12506,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
             # ── Relatório Semanal (Concluído + Parcial + Em Produção, num Excel só) ──
             st.markdown("---")
-            with st.expander("📅 Relatório Semanal — Concluído + Parcial + Em Produção", expanded=True, key="rel_semanal_expander"):
+            with st.expander("📅 Relatório Semanal — ACM e Esquadrias em abas separadas", expanded=True, key="rel_semanal_expander"):
                 st.caption(
-                    "Gera um Excel único com 3 seções — Concluído no período escolhido, Parcial (situação "
-                    "atual) e Em Produção (situação atual, sem filtro de data — traz tudo que ainda não saiu, "
-                    "mesmo o que entrou em produção antes do período) — cada uma dividida em ACM e Esquadrias."
+                    "Gera um Excel com uma aba pra ACM e outra pra Esquadrias (OP terceirizada com equipe "
+                    "definida entra na aba do time; as sem equipe ganham uma aba \"TERCEIRIZADA\" à parte). "
+                    "Cada aba traz 3 seções na ordem Parcial → Em Produção → Concluído: o período De/Até filtra "
+                    "só a de Concluído (pela Data de Conclusão), enquanto Parcial e Em Produção mostram a "
+                    "situação atual completa, mesmo o que entrou em produção antes do período. O cabeçalho de "
+                    "\"Em Produção\" traz o total de m² (ACM) ou kg (Esquadrias)."
                 )
                 rs1, rs2, rs3 = st.columns(3)
                 with rs1:
@@ -12602,12 +12605,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     })
                     return out.reset_index(drop=True)
 
-                def gerar_excel_relatorio_semanal(blocos, titulo_obra):
-                    """blocos: lista de (titulo_do_bloco, dataframe_pronto) na ordem de exibição.
-                    Blocos com dataframe vazio sao pulados — nao gera secao sem nenhum item."""
+                def gerar_excel_relatorio_semanal(abas, titulo_obra):
+                    """abas: lista de (nome_aba, blocos), onde blocos é lista de
+                    (titulo_do_bloco, dataframe_pronto) na ordem de exibição. Cada aba com pelo
+                    menos um bloco não-vazio vira uma planilha; blocos vazios são pulados."""
                     wb_s = Workbook()
-                    ws_s = wb_s.active
-                    ws_s.title = "Relatório Semanal"
 
                     cor_header_dark   = "0F172A"
                     cor_header_accent = "1A56DB"
@@ -12620,80 +12622,109 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     cor_texto_escuro  = "1E293B"
                     thin_s  = Side(style='thin', color="E2E8F0")
                     borda_s = Border(left=thin_s, right=thin_s, top=thin_s, bottom=thin_s)
+                    larguras_s = [16, 22, 26, 16, 9, 12, 14, 14, 12, 12, 12, 16, 26, 10]
 
-                    max_cols = max((len(df.columns) for _, df in blocos if not df.empty), default=10)
-                    ultima_letra = get_column_letter(max_cols)
+                    def _num_br(v):
+                        # 330.41 -> "330,41" ; 1234.5 -> "1.234,50"
+                        return f"{float(v):,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
 
-                    ws_s.merge_cells(f"A1:{ultima_letra}1")
-                    ws_s["A1"] = "PASSOLD — SISTEMAS DE FACHADAS"
-                    ws_s["A1"].font = Font(name="Calibri", bold=True, size=16, color=cor_texto_branco)
-                    ws_s["A1"].fill = PatternFill("solid", fgColor=cor_header_dark)
-                    ws_s["A1"].alignment = Alignment(horizontal="center", vertical="center")
-                    ws_s.row_dimensions[1].height = 32
+                    def _escrever_aba(ws_s, blocos):
+                        max_cols = max((len(df.columns) for _, df in blocos if not df.empty),
+                                       default=len(larguras_s))
+                        ultima_letra = get_column_letter(max_cols)
 
-                    ws_s.merge_cells(f"A2:{ultima_letra}2")
-                    periodo_txt = f"Concluído {rs_dt_ini.strftime('%d/%m/%Y')} a {rs_dt_fim.strftime('%d/%m/%Y')}"
-                    ws_s["A2"] = (f"Relatório Semanal de Produção  |  Obra: {titulo_obra}  |  {periodo_txt}  |  "
-                                   f"Gerado em: {datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M')}")
-                    ws_s["A2"].font = Font(name="Calibri", size=10, color="94A3B8", italic=True)
-                    ws_s["A2"].fill = PatternFill("solid", fgColor=cor_sub)
-                    ws_s["A2"].alignment = Alignment(horizontal="center", vertical="center")
-                    ws_s.row_dimensions[2].height = 20
+                        ws_s.merge_cells(f"A1:{ultima_letra}1")
+                        ws_s["A1"] = "PASSOLD — SISTEMAS DE FACHADAS"
+                        ws_s["A1"].font = Font(name="Calibri", bold=True, size=16, color=cor_texto_branco)
+                        ws_s["A1"].fill = PatternFill("solid", fgColor=cor_header_dark)
+                        ws_s["A1"].alignment = Alignment(horizontal="center", vertical="center")
+                        ws_s.row_dimensions[1].height = 32
 
-                    linha = 4
-                    for titulo_bloco, df_bloco in blocos:
-                        if df_bloco.empty:
-                            continue
-                        ultima_letra_bloco = get_column_letter(len(df_bloco.columns))
+                        ws_s.merge_cells(f"A2:{ultima_letra}2")
+                        periodo_txt = f"Concluído {rs_dt_ini.strftime('%d/%m/%Y')} a {rs_dt_fim.strftime('%d/%m/%Y')}"
+                        ws_s["A2"] = (f"Relatório Semanal de Produção  |  Obra: {titulo_obra}  |  {periodo_txt}  |  "
+                                       f"Gerado em: {datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M')}")
+                        ws_s["A2"].font = Font(name="Calibri", size=10, color="94A3B8", italic=True)
+                        ws_s["A2"].fill = PatternFill("solid", fgColor=cor_sub)
+                        ws_s["A2"].alignment = Alignment(horizontal="center", vertical="center")
+                        ws_s.row_dimensions[2].height = 20
 
-                        ws_s.merge_cells(f"A{linha}:{ultima_letra_bloco}{linha}")
-                        cel_secao = ws_s[f"A{linha}"]
-                        cel_secao.value = titulo_bloco
-                        cel_secao.font = Font(name="Calibri", bold=True, size=12, color=cor_texto_branco)
-                        cel_secao.fill = PatternFill("solid", fgColor=cor_secao)
-                        cel_secao.alignment = Alignment(horizontal="left", vertical="center", indent=1)
-                        ws_s.row_dimensions[linha].height = 24
-                        linha += 1
+                        linha = 4
+                        for titulo_bloco, df_bloco in blocos:
+                            if df_bloco.empty:
+                                continue
+                            n_cols_bloco = len(df_bloco.columns)
 
-                        cabecalhos = list(df_bloco.columns)
-                        for col_idx, cab in enumerate(cabecalhos, start=1):
-                            cell = ws_s.cell(row=linha, column=col_idx, value=cab)
-                            cell.font = Font(name="Calibri", bold=True, size=10, color=cor_texto_branco)
-                            cell.fill = PatternFill("solid", fgColor=cor_header_accent)
-                            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-                            cell.border = borda_s
-                        ws_s.row_dimensions[linha].height = 22
-                        linha += 1
+                            # Total de m²/kg só no cabeçalho da seção "Em Produção" (pedido da Joice)
+                            total_txt = None
+                            if titulo_bloco.startswith("EM PRODUÇÃO"):
+                                col_total = next((c for c in df_bloco.columns if c.startswith("TOTAL ")), None)
+                                if col_total:
+                                    unidade = col_total.split(" ", 1)[1]
+                                    soma = pd.to_numeric(df_bloco[col_total], errors='coerce').fillna(0).sum()
+                                    total_txt = f"{unidade} EM PRODUÇÃO: {_num_br(soma)}"
 
-                        idx_limite = cabecalhos.index('LIMITE') if 'LIMITE' in cabecalhos else None
-                        idx_status = cabecalhos.index('STATUS') if 'STATUS' in cabecalhos else None
-                        for i_row, row_data in enumerate(df_bloco.itertuples(index=False)):
-                            is_par = (i_row % 2 == 0)
-                            limite_val = str(row_data[idx_limite]) if idx_limite is not None else ""
-                            status_val = str(row_data[idx_status]) if idx_status is not None else ""
-                            atrasado = False
-                            try:
-                                lim_dt = datetime.strptime(limite_val, '%d/%m/%Y')
-                                atrasado = lim_dt < hoje_projeto() and status_val not in ['Concluído', 'Concluido']
-                            except Exception:
-                                pass
-                            bg = cor_atrasado if atrasado else (cor_linha_par if is_par else cor_linha_impar)
-                            for col_idx, valor in enumerate(row_data, start=1):
-                                cell = ws_s.cell(row=linha, column=col_idx, value=valor)
-                                cell.font = Font(name="Calibri", size=10, color=cor_texto_escuro)
-                                cell.fill = PatternFill("solid", fgColor=bg)
-                                cell.alignment = Alignment(horizontal="center", vertical="center")
-                                cell.border = borda_s
-                            ws_s.row_dimensions[linha].height = 18
+                            for c in range(1, n_cols_bloco + 1):
+                                ws_s.cell(row=linha, column=c).fill = PatternFill("solid", fgColor=cor_secao)
+                            cel_secao = ws_s.cell(row=linha, column=1, value=titulo_bloco)
+                            cel_secao.font = Font(name="Calibri", bold=True, size=12, color=cor_texto_branco)
+                            cel_secao.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+                            if total_txt:
+                                cel_total = ws_s.cell(row=linha, column=n_cols_bloco, value=total_txt)
+                                cel_total.font = Font(name="Calibri", bold=True, size=11, color=cor_texto_branco)
+                                cel_total.alignment = Alignment(horizontal="right", vertical="center", indent=1)
+                            ws_s.row_dimensions[linha].height = 24
                             linha += 1
 
-                        ws_s.cell(row=linha, column=1, value=f"{len(df_bloco)} registro(s)").font = Font(
-                            name="Calibri", size=9, italic=True, color="64748B")
-                        linha += 2
+                            cabecalhos = list(df_bloco.columns)
+                            for col_idx, cab in enumerate(cabecalhos, start=1):
+                                cell = ws_s.cell(row=linha, column=col_idx, value=cab)
+                                cell.font = Font(name="Calibri", bold=True, size=10, color=cor_texto_branco)
+                                cell.fill = PatternFill("solid", fgColor=cor_header_accent)
+                                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                                cell.border = borda_s
+                            ws_s.row_dimensions[linha].height = 22
+                            linha += 1
 
-                    larguras_s = [16, 22, 26, 16, 9, 12, 14, 14, 12, 12, 12, 16, 26, 10]
-                    for i, larg in enumerate(larguras_s[:max_cols], start=1):
-                        ws_s.column_dimensions[get_column_letter(i)].width = larg
+                            idx_limite = cabecalhos.index('LIMITE') if 'LIMITE' in cabecalhos else None
+                            idx_status = cabecalhos.index('STATUS') if 'STATUS' in cabecalhos else None
+                            for i_row, row_data in enumerate(df_bloco.itertuples(index=False)):
+                                is_par = (i_row % 2 == 0)
+                                limite_val = str(row_data[idx_limite]) if idx_limite is not None else ""
+                                status_val = str(row_data[idx_status]) if idx_status is not None else ""
+                                atrasado = False
+                                try:
+                                    lim_dt = datetime.strptime(limite_val, '%d/%m/%Y')
+                                    atrasado = lim_dt < hoje_projeto() and status_val not in ['Concluído', 'Concluido']
+                                except Exception:
+                                    pass
+                                bg = cor_atrasado if atrasado else (cor_linha_par if is_par else cor_linha_impar)
+                                for col_idx, valor in enumerate(row_data, start=1):
+                                    cell = ws_s.cell(row=linha, column=col_idx, value=valor)
+                                    cell.font = Font(name="Calibri", size=10, color=cor_texto_escuro)
+                                    cell.fill = PatternFill("solid", fgColor=bg)
+                                    cell.alignment = Alignment(horizontal="center", vertical="center")
+                                    cell.border = borda_s
+                                ws_s.row_dimensions[linha].height = 18
+                                linha += 1
+
+                            ws_s.cell(row=linha, column=1, value=f"{len(df_bloco)} registro(s)").font = Font(
+                                name="Calibri", size=9, italic=True, color="64748B")
+                            linha += 2
+
+                        for i, larg in enumerate(larguras_s[:max_cols], start=1):
+                            ws_s.column_dimensions[get_column_letter(i)].width = larg
+
+                    sheets_criadas = 0
+                    for nome_aba, blocos in abas:
+                        if all(df.empty for _, df in blocos):
+                            continue
+                        ws_s = wb_s.active if sheets_criadas == 0 else wb_s.create_sheet()
+                        ws_s.title = str(nome_aba)[:31]
+                        _escrever_aba(ws_s, blocos)
+                        sheets_criadas += 1
+                    if sheets_criadas == 0:
+                        wb_s.active.title = "Relatório Semanal"
 
                     buf_s = io.BytesIO()
                     wb_s.save(buf_s)
@@ -12719,28 +12750,38 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         df_parcial_rs   = df_base_rs[df_base_rs['Status_Item'] == 'Parcialmente Concluido'].copy() if not df_base_rs.empty else pd.DataFrame()
                         df_producao_rs  = df_base_rs[df_base_rs['Status_Item'].isin(['Pendente', 'Liberado para Fabrica'])].copy() if not df_base_rs.empty else pd.DataFrame()
 
-                        blocos_rs = []
-                        for titulo_sec, df_sec, apenas_concl in [
-                            ("CONCLUÍDO", df_concluido_rs, True),
+                        # Concluído por último (pedido da Joice): Parcial → Em Produção → Concluído
+                        secoes_rs = [
                             ("PARCIAL", df_parcial_rs, False),
                             ("EM PRODUÇÃO", df_producao_rs, False),
-                        ]:
-                            for escopo_val, escopo_nome in [("ACM", "ACM"), ("Esquadria-Vidro", "ESQUADRIAS")]:
-                                df_pronto_rs = _preparar_bloco_semanal(df_sec, escopo_val, apenas_concl, df_saldo_rs)
-                                blocos_rs.append((f"{titulo_sec} - {escopo_nome}", df_pronto_rs))
-                            # Terceirizada: um bloco por equipe (ACM / Esquadrias) + um pras OPs sem equipe definida
-                            for eq_val, eq_nome in [("ACM", "TERCEIRIZADA · ACM"),
-                                                    ("Esquadria-Vidro", "TERCEIRIZADA · ESQUADRIAS"),
-                                                    (None, "TERCEIRIZADA")]:
-                                df_pronto_terc = _preparar_bloco_semanal(df_sec, "Terceirizada", apenas_concl, df_saldo_rs, equipe_terc=eq_val)
-                                blocos_rs.append((f"{titulo_sec} - {eq_nome}", df_pronto_terc))
+                            ("CONCLUÍDO", df_concluido_rs, True),
+                        ]
+                        blocos_acm, blocos_esq, blocos_terc = [], [], []
+                        for titulo_sec, df_sec, apenas_concl in secoes_rs:
+                            blocos_acm.append((f"{titulo_sec} - ACM",
+                                _preparar_bloco_semanal(df_sec, "ACM", apenas_concl, df_saldo_rs)))
+                            blocos_acm.append((f"{titulo_sec} - TERCEIRIZADA · ACM",
+                                _preparar_bloco_semanal(df_sec, "Terceirizada", apenas_concl, df_saldo_rs, equipe_terc="ACM")))
+                            blocos_esq.append((f"{titulo_sec} - ESQUADRIAS",
+                                _preparar_bloco_semanal(df_sec, "Esquadria-Vidro", apenas_concl, df_saldo_rs)))
+                            blocos_esq.append((f"{titulo_sec} - TERCEIRIZADA · ESQUADRIAS",
+                                _preparar_bloco_semanal(df_sec, "Terceirizada", apenas_concl, df_saldo_rs, equipe_terc="Esquadria-Vidro")))
+                            # Terceirizadas sem equipe definida (OPs antigas) — aba própria, só quando existirem
+                            blocos_terc.append((f"{titulo_sec} - TERCEIRIZADA",
+                                _preparar_bloco_semanal(df_sec, "Terceirizada", apenas_concl, df_saldo_rs, equipe_terc=None)))
 
-                        if all(df.empty for _, df in blocos_rs):
+                        abas_rs = [(nome, bl) for nome, bl in [
+                            ("ACM", blocos_acm), ("ESQUADRIAS", blocos_esq), ("TERCEIRIZADA", blocos_terc)
+                        ] if any(not d.empty for _, d in bl)]
+
+                        if not abas_rs:
                             st.warning("Nenhum item encontrado para os filtros selecionados.")
                             st.session_state.pop('_rel_semanal_bytes', None)
                         else:
-                            st.session_state['_rel_semanal_bytes'] = gerar_excel_relatorio_semanal(blocos_rs, rs_obra)
-                            st.session_state['_rel_semanal_resumo'] = [(t, len(d)) for t, d in blocos_rs if not d.empty]
+                            st.session_state['_rel_semanal_bytes'] = gerar_excel_relatorio_semanal(abas_rs, rs_obra)
+                            st.session_state['_rel_semanal_resumo'] = [
+                                (t, len(d)) for _, bl in abas_rs for t, d in bl if not d.empty
+                            ]
                             st.toast("Relatório semanal gerado!")
 
                 if st.session_state.get('_rel_semanal_bytes'):
@@ -13326,6 +13367,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-09-03", "Relatório Semanal agora sai com abas separadas no Excel — uma pra ACM, outra pra Esquadrias (e uma \"TERCEIRIZADA\" à parte quando houver OP terceirizada sem equipe definida). Dentro de cada aba as seções vêm na ordem Parcial, Em Produção e Concluído, e o cabeçalho de \"Em Produção\" mostra o total de m² (ACM) ou kg (Esquadrias)."),
                 ("2026-09-01", "Logística, lista \"✅ OPs Prontas — Emitir Romaneio\": novo seletor \"Organizar por:\". No padrão (\"🏗️ Obra (com data)\") as OPs ficam separadas por obra e, dentro de cada obra, por data que ficou pronto (Hoje, Ontem, Últimos 7 dias...). A opção \"📅 Só por data\" junta todas as obras numa linha do tempo só. Todo cartão agora mostra \"✅ Ficou pronto em DD/MM\"."),
                 ("2026-09-01", "Qualidade das fotos anexadas: quem usa iPhone tinha a foto convertida (e perdendo qualidade) antes mesmo de chegar no sistema, porque nenhum lugar aceitava o formato nativo do iPhone (HEIC). Agora todo anexo de foto (Romaneios Devolvidos, Documentos, Kanban, Liberar OP) aceita HEIC direto e a conversão pra JPEG é feita aqui, em qualidade alta."),
                 ("2026-08-31", "Almoxarifado mais leve: as duas listas (Vínculo a OP / Insumos) viraram um seletor \"Ver:\" (só a escolhida carrega), e cada OP/saída virou um cartão com toggle \"🔍 Conferir / emitir\" — a lista pesada de itens só monta quando você abre o cartão. Com muitas saídas ativas a tela deixa de travar a cada clique."),
@@ -13606,13 +13648,14 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 **Para que serve:** Gerar o relatório semanal pra diretoria e, quando precisar investigar algo pontual, filtrar/exportar qualquer recorte das OPs ativas.
 
 **Passo a passo:**
-1. Expander "📅 Relatório Semanal — Concluído + Parcial + Em Produção" (aberto direto na tela, é o mais usado): escolha Obra e o período de "Concluído de/até", clique "📊 Gerar Relatório Semanal" e baixe o Excel. Ele já sai com 3 seções (Concluído no período, Parcial, Em Produção), cada uma dividida em ACM e Esquadrias.
+1. Expander "📅 Relatório Semanal — ACM e Esquadrias em abas separadas" (aberto direto na tela, é o mais usado): escolha Obra e o período de "Concluído de/até", clique "📊 Gerar Relatório Semanal" e baixe o Excel. Ele sai com uma aba pra ACM e outra pra Esquadrias; cada aba tem 3 seções na ordem Parcial, Em Produção e Concluído (no período). OP terceirizada com equipe definida entra na aba do time; as sem equipe (OPs antigas) ganham uma aba "TERCEIRIZADA" à parte, só quando existirem.
 2. Pra qualquer outro recorte (um status específico, um intervalo de datas diferente, ver os gráficos/KPIs, OPs sem frente cadastradas), abra o expander "🔍 Relatório Geral clássico — filtros avançados, KPIs e gráficos": filtre por Obra, Status, Escopo e período, confira os gráficos e a tabela detalhada (linhas vermelhas = prazo vencido), e baixe em Excel se precisar.
 
 **Regras importantes:**
 - Em OPs Parcialmente Concluídas, o m²/kg mostrado é o saldo pendente (não o total do lote) — exceto quando o filtro de Status é "Concluido".
 - Esquadrias é medido em kg; os demais escopos em m².
 - No Relatório Semanal, o período De/Até filtra só a seção Concluído (pela Data de Conclusão) — Parcial e Em Produção sempre trazem a situação atual completa, mesmo itens que entraram em produção antes do período.
+- No Relatório Semanal, o cabeçalho da seção "Em Produção" (em cada aba) mostra o total de m² (ACM) ou kg (Esquadrias) que ainda está em produção.
 """),
                     ("produtividade", "📈 Produtividade", """
 **Quem acessa:** Master, Diretoria, PCP, Medição.
