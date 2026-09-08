@@ -11057,7 +11057,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         linha = lote_row.to_dict()
                         linha['_status_key'] = ('OP', lote_id_rd)
                         linha['_tipo_card'] = 'LOTE'
-                        linha['_data_envio'] = lote_row.get('Data_Despacho')
+                        if n_envios_lote == 1:
+                            # 1 envio registrado (Total ou 1 Parcial) -- usa a data e a qtd reais desse envio,
+                            # pra o card mostrar "em DD/MM/AAAA" igual aos de envio parcial.
+                            envio_unico = df_envios_op_hist[df_envios_op_hist['lote_id'] == lote_id_rd].iloc[0]
+                            linha['_data_envio'] = envio_unico['enviado_em']
+                            linha['_qtd_envio'] = envio_unico['qtd_itens']
+                        else:
+                            # lote antigo, sem historico de envio -- so resta a data de despacho planejada
+                            linha['_data_envio'] = lote_row.get('Data_Despacho')
+                            linha['_qtd_envio'] = None
                         linhas_rd_op.append(linha)
 
                 df_rd_op = pd.DataFrame(linhas_rd_op)
@@ -11081,11 +11090,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 if row_rd['_tipo_card'] == 'ENVIO':
                                     titulo_rd += f"  🔀 Parcial nº {int(row_rd['_numero_sequencial'])}"
                                 st.markdown(titulo_rd)
-                                if row_rd['_tipo_card'] == 'ENVIO':
-                                    data_env_rd = pd.to_datetime(row_rd['_data_envio']).strftime('%d/%m/%Y') if pd.notna(row_rd.get('_data_envio')) else '—'
-                                    st.caption(f"{row_rd.get('Tipo_Material','—')} · Envio de {int(row_rd.get('_qtd_envio') or 0)} peça(s) em {data_env_rd}")
+                                data_env_rd = pd.to_datetime(row_rd['_data_envio']).strftime('%d/%m/%Y') if pd.notna(row_rd.get('_data_envio')) else '—'
+                                qtd_env_rd = row_rd.get('_qtd_envio')
+                                if pd.notna(qtd_env_rd) and qtd_env_rd:
+                                    st.caption(f"{row_rd.get('Tipo_Material','—')} · Envio de {int(qtd_env_rd)} peça(s) em {data_env_rd}")
                                 else:
-                                    st.caption(f"{row_rd.get('Tipo_Material','—')}")
+                                    st.caption(f"{row_rd.get('Tipo_Material','—')} · Emitido em {data_env_rd}")
                             with crop2:
                                 st.markdown(badge_rd)
                             _bloco_anexo_rd(tipo_origem_rd, origem_id_rd, f"op_{tipo_origem_rd}_{origem_id_rd}")
@@ -11115,7 +11125,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             ccmp1, ccmp2 = st.columns([4, 1])
                             with ccmp1:
                                 st.markdown(f"**{row_rc['num_op']}** — {row_rc.get('obra','')}")
-                                st.caption(f"Emitido em {pd.to_datetime(row_rc['emitido_em']).strftime('%d/%m/%Y %H:%M')} por {row_rc.get('emitido_por','—')}")
+                                _dt_rc = pd.to_datetime(row_rc.get('emitido_em'), errors='coerce')
+                                st.caption(f"Emitido em {_dt_rc.strftime('%d/%m/%Y') if pd.notna(_dt_rc) else '—'} por {row_rc.get('emitido_por','—')}")
                             with ccmp2:
                                 st.markdown(badge_rc)
                             _bloco_anexo_rd('COMPONENTES', item_id_rc, f"comp_{item_id_rc}")
@@ -11144,7 +11155,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             cins1, cins2 = st.columns([4, 1])
                             with cins1:
                                 st.markdown(f"**Saída #{saida_id_rd}** — {row_ri.get('obra') or 'Sem obra vinculada'} · {row_ri.get('destino','')}")
-                                st.caption(f"{pd.to_datetime(row_ri['data_saida']).strftime('%d/%m/%Y')} · {int(row_ri.get('qtd_itens') or 0)} item(ns) · {row_ri.get('registrado_por','—')}")
+                                _dt_ri = pd.to_datetime(row_ri.get('data_saida'), errors='coerce')
+                                st.caption(f"Emitido em {_dt_ri.strftime('%d/%m/%Y') if pd.notna(_dt_ri) else '—'} · {int(row_ri.get('qtd_itens') or 0)} item(ns) · {row_ri.get('registrado_por','—')}")
                             with cins2:
                                 st.markdown(badge_ri)
                             _bloco_anexo_rd('INSUMO', saida_id_rd, f"ins_{saida_id_rd}")
@@ -11175,11 +11187,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         with st.container(border=True):
                             cman1, cman2 = st.columns([4, 1])
                             with cman1:
-                                titulo_rm = f"**{row_rm['obra_vinculada']}** — {pd.to_datetime(row_rm['data_recebimento']).strftime('%d/%m/%Y')}"
+                                titulo_rm = f"**{row_rm['obra_vinculada']}**"
                                 if tag_terc_rd:
                                     titulo_rm += f"  {tag_terc_rd}"
                                 st.markdown(titulo_rm)
-                                st.caption(f"Projeto {row_rm.get('numero_projeto') or '—'} · {row_rm.get('etapa') or 'Sem etapa'} · {int(row_rm.get('qtd_itens') or 0)} item(ns) · {row_rm.get('criado_por','—')}")
+                                _dt_rm = pd.to_datetime(row_rm.get('data_recebimento'), errors='coerce')
+                                st.caption(f"Recebido em {_dt_rm.strftime('%d/%m/%Y') if pd.notna(_dt_rm) else '—'} · Projeto {row_rm.get('numero_projeto') or '—'} · {row_rm.get('etapa') or 'Sem etapa'} · {int(row_rm.get('qtd_itens') or 0)} item(ns) · {row_rm.get('criado_por','—')}")
                                 if rm_terc_rd:
                                     st.caption(f"Empresa recebedora: **{row_rm.get('empresa_terceiro') or '—'}**")
                             with cman2:
@@ -11211,7 +11224,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             clm1, clm2 = st.columns([4, 1])
                             with clm1:
                                 st.markdown(f"**{row_rlm['titulo']}** — {row_rlm['obra']} · {row_rlm.get('numero_projeto') or '—'}")
-                                st.caption(f"{pd.to_datetime(row_rlm['data_envio']).strftime('%d/%m/%Y')} · {row_rlm.get('destino') or 'Sem destino'} · {int(row_rlm.get('qtd_itens') or 0)} item(ns) · {row_rlm.get('enviado_por','—')}")
+                                _dt_rlm = pd.to_datetime(row_rlm.get('data_envio'), errors='coerce')
+                                st.caption(f"Emitido em {_dt_rlm.strftime('%d/%m/%Y') if pd.notna(_dt_rlm) else '—'} · {row_rlm.get('destino') or 'Sem destino'} · {int(row_rlm.get('qtd_itens') or 0)} item(ns) · {row_rlm.get('enviado_por','—')}")
                             with clm2:
                                 st.markdown(badge_rlm)
                             _bloco_anexo_rd('LISTA_MESTRA', envio_id_rlm, f"lm_{envio_id_rlm}")
@@ -11251,8 +11265,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 st.markdown(titulo_rt)
                                 data_env_rt = pd.to_datetime(row_rt.get('data_envio'), errors='coerce')
                                 st.caption(
+                                    f"Emitido em {data_env_rt.strftime('%d/%m/%Y') if pd.notna(data_env_rt) else '—'} · "
                                     f"Destinatário: {row_rt['destinatario']} ({_nn(row_rt.get('setor_destinatario'), '—')}) · "
-                                    f"{len(itens_rt)} item(ns) · enviado {data_env_rt.strftime('%d/%m/%Y') if pd.notna(data_env_rt) else '—'}"
+                                    f"{len(itens_rt)} item(ns)"
                                     + (f" · devolução prevista {prev_dev.strftime('%d/%m/%Y')}" if pd.notna(prev_dev) else "")
                                 )
                                 if itens_rt:
@@ -13367,6 +13382,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-09-08", "Romaneios Devolvidos: todos os cards agora mostram a data em que o romaneio foi emitido, no mesmo formato em todas as abas (\"Emitido em DD/MM/AAAA\"). Antes só os romaneios de OP com envio parcial mostravam a data. Nos romaneios de OP com envio único a data passou a ser a do envio real (registrado na Logística), não mais a data de despacho planejada."),
                 ("2026-09-03", "Relatório Semanal agora sai com abas separadas no Excel — uma pra ACM, outra pra Esquadrias (e uma \"TERCEIRIZADA\" à parte quando houver OP terceirizada sem equipe definida). Dentro de cada aba as seções vêm na ordem Parcial, Em Produção e Concluído, e o cabeçalho de \"Em Produção\" mostra o total de m² (ACM) ou kg (Esquadrias)."),
                 ("2026-09-01", "Logística, lista \"✅ OPs Prontas — Emitir Romaneio\": novo seletor \"Organizar por:\". No padrão (\"🏗️ Obra (com data)\") as OPs ficam separadas por obra e, dentro de cada obra, por data que ficou pronto (Hoje, Ontem, Últimos 7 dias...). A opção \"📅 Só por data\" junta todas as obras numa linha do tempo só. Todo cartão agora mostra \"✅ Ficou pronto em DD/MM\"."),
                 ("2026-09-01", "Qualidade das fotos anexadas: quem usa iPhone tinha a foto convertida (e perdendo qualidade) antes mesmo de chegar no sistema, porque nenhum lugar aceitava o formato nativo do iPhone (HEIC). Agora todo anexo de foto (Romaneios Devolvidos, Documentos, Kanban, Liberar OP) aceita HEIC direto e a conversão pra JPEG é feita aqui, em qualidade alta."),
@@ -13638,6 +13654,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 **Regras importantes:**
 - Um romaneio só aparece como "🟢 Devolvido assinado" depois que alguém anexa o comprovante — não existe um botão separado de "marcar como devolvido".
 - OP enviada em várias partes aparece como um card por envio parcial, cada um conferido separadamente.
+- Todo card mostra a data em que o romaneio foi emitido ("Emitido em DD/MM/AAAA"; no Romaneio Manual é "Recebido em", que é a data preenchida no cadastro).
 - Na aba "🔧 Termos de Ferramenta/Máquina" aparecem os termos emitidos em Documentos. Se o termo tem "devolução prevista" e a data já passou sem o termo assinado ter sido anexado, ele mostra "⏰ atrasado".
 """),
                 ]),
