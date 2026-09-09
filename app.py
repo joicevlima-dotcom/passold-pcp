@@ -2565,10 +2565,55 @@ def salvar_lotes_micro(lotes: list):
     finally:
         liberar_conexao(conn)
 
+def _limpar_cache_producao():
+    """Caches que dependem de QUAIS lotes existem e do status deles. Ficam de fora
+    do _limpar_cache_geral de proposito: o calendario de producao e' um recalculo
+    caro (loop dia-a-dia por lote) e a maioria das telas que mexe no banco nao
+    precisa refazer essa conta -- mas exclusao de lote e mudanca de status precisam."""
+    for fn in [
+        _montar_calendario_producao,
+        carregar_todas_ops_com_componentes, carregar_todos_componentes_op,
+        carregar_todas_pecas_obra,
+    ]:
+        try:
+            fn.clear()
+        except Exception:
+            pass
+
 def deletar_lotes_por_edt_lote(obra, edt, cod_lote):
+    """Apaga o lote inteiro (todas as linhas com esse Cod_Lote) e devolve o saldo de
+    m2/kg pra frente. Retorna (ok, info): ok=True -> info e' o nº de itens apagados;
+    ok=False -> info e' a mensagem de erro. NAO chama st.error/st.rerun -- quem chama
+    decide o que mostrar; senao a mensagem some no rerun seguinte e a exclusao parece
+    ter dado certo mesmo quando o banco recusou (ex.: FK de solicitacoes_op)."""
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
+
+        # ids das linhas que vao sair -- usados pra limpar as tabelas-filhas que NAO
+        # tem ON DELETE CASCADE. Sem isso a OP fica fantasma na Logistica / nos
+        # componentes; pior: uma linha em solicitacoes_op (FK sem cascade) chega a
+        # BLOQUEAR o DELETE inteiro com erro de foreign key.
+        if edt and edt != 'AVULSO':
+            cursor.execute(
+                "SELECT id FROM itens_detalhado WHERE Obra_Vinculada=%s AND EDT_Vinculado=%s AND Cod_Lote=%s",
+                (obra, edt, cod_lote)
+            )
+        else:
+            cursor.execute(
+                "SELECT id FROM itens_detalhado WHERE Obra_Vinculada=%s AND Cod_Lote=%s",
+                (obra, cod_lote)
+            )
+        ids_lotes = [r[0] for r in cursor.fetchall()]
+
+        # limpa as filhas sem cascade ANTES de apagar o item. op_pecas,
+        # envios_op_historico e arquivos_op saem sozinhas pelo ON DELETE CASCADE.
+        if ids_lotes:
+            cursor.execute("DELETE FROM logistica_envios        WHERE item_id = ANY(%s)", (ids_lotes,))
+            cursor.execute("DELETE FROM componentes_op           WHERE item_id = ANY(%s)", (ids_lotes,))
+            cursor.execute("DELETE FROM romaneios_componentes_op WHERE item_id = ANY(%s)", (ids_lotes,))
+            cursor.execute("UPDATE solicitacoes_op SET item_id=NULL WHERE item_id = ANY(%s)", (ids_lotes,))
+
         if edt and edt != 'AVULSO':
             cursor.execute(
                 "SELECT COALESCE(SUM(M2_Item), 0), COALESCE(SUM(Peso_Kg), 0) FROM itens_detalhado "
@@ -2621,11 +2666,14 @@ def deletar_lotes_por_edt_lote(obra, edt, cod_lote):
                 "DELETE FROM itens_detalhado WHERE Obra_Vinculada=%s AND Cod_Lote=%s",
                 (obra, cod_lote)
             )
+        apagados = cursor.rowcount
         conn.commit()
         _limpar_cache_geral()
+        _limpar_cache_producao()
+        return True, apagados
     except Exception as e:
         conn.rollback()
-        st.error(f"Erro ao deletar lote: {e}")
+        return False, str(e)
     finally:
         liberar_conexao(conn)
 
@@ -8714,23 +8762,26 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         elif fora_da_janela and not confirmar_fora_janela:
                             st.error("Lote fora da janela da frente — marque a confirmação acima ou ajuste as datas/frente.")
                         else:
-                            deletar_lotes_por_edt_lote(obra_selecionada, edt_puro, cod_lote.strip())
-                            lote = gerar_lote_unico(
-                                data_alvo, int(dias_log), int(dias_fab),
-                                int(total_cx), float(total_m2),
-                                obra_selecionada, edt_puro, cod_lote.strip(), espec, txt_pav, dific,
-                                total_kg=float(total_kg),
-                                escopo=escopo_frente,
-                                numero_projeto=str(row_sel.get('Numero_Projeto') or '')
-                            )
-                            ok, msg = salvar_lotes_micro(lote)
-                            if ok:
-                                registrar_auditoria(st.session_state.usuario_nome, "GERAR_LOTE",
-                                f"Lote {cod_lote} — EDT {edt_puro} — {total_m2}m² — {total_kg}kg — Obra: {obra_selecionada}")
-                                st.session_state.lote_salvo_sucesso = True
-                                st.rerun()
+                            ok_limpa, info_limpa = deletar_lotes_por_edt_lote(obra_selecionada, edt_puro, cod_lote.strip())
+                            if not ok_limpa:
+                                st.error(f"Não deu pra regravar o lote '{cod_lote.strip()}' (limpando a versão anterior): {info_limpa}")
                             else:
-                                st.error(msg)
+                                lote = gerar_lote_unico(
+                                    data_alvo, int(dias_log), int(dias_fab),
+                                    int(total_cx), float(total_m2),
+                                    obra_selecionada, edt_puro, cod_lote.strip(), espec, txt_pav, dific,
+                                    total_kg=float(total_kg),
+                                    escopo=escopo_frente,
+                                    numero_projeto=str(row_sel.get('Numero_Projeto') or '')
+                                )
+                                ok, msg = salvar_lotes_micro(lote)
+                                if ok:
+                                    registrar_auditoria(st.session_state.usuario_nome, "GERAR_LOTE",
+                                    f"Lote {cod_lote} — EDT {edt_puro} — {total_m2}m² — {total_kg}kg — Obra: {obra_selecionada}")
+                                    st.session_state.lote_salvo_sucesso = True
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
 
                 st.markdown("---")
                 st.markdown("### Lotes Gerados")
@@ -8785,11 +8836,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     st.markdown("#### Remover Lote")
                     lote_del = st.selectbox("Lote para excluir:", df_obra['Cod_Lote'].unique().tolist(), key="sel_lote_del")
                     if st.button(f"Excluir {lote_del}", key="btn_excluir_lote_del"):
-                        deletar_lotes_por_edt_lote(obra_selecionada, None, lote_del)
-                        registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_LOTE",
-                            f"Lote {lote_del} excluído — Obra: {obra_selecionada}")
-                        st.toast(f"Lote {lote_del} removido!")
-                        st.rerun()
+                        ok_del, info_del = deletar_lotes_por_edt_lote(obra_selecionada, None, lote_del)
+                        if ok_del and info_del > 0:
+                            registrar_auditoria(st.session_state.usuario_nome, "EXCLUIR_LOTE",
+                                f"Lote {lote_del} excluído ({info_del} item(ns)) — Obra: {obra_selecionada}")
+                            st.toast(f"Lote {lote_del} removido!")
+                            st.rerun()
+                        elif ok_del:
+                            st.warning(f"Nenhum item encontrado para o lote **{lote_del}** nesta obra — nada foi excluído.")
+                        else:
+                            st.error(f"Não deu pra excluir o lote **{lote_del}**: {info_del}")
                 else:
                     st.info("Nenhum lote fatiado ainda.")
 
