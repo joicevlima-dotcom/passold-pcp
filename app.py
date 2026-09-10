@@ -891,6 +891,9 @@ def inicializar_banco_de_dados():
                 senha TEXT
             )
         """)
+        # setores_extras: acessos adicionais liberados por pessoa, alem do setor base
+        # (CSV, mesmo formato do kanban_quadros.setores_acesso). NULL/vazio = so o base.
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS setores_extras TEXT")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS solicitacoes_prazo (
                 id SERIAL PRIMARY KEY,
@@ -1897,11 +1900,32 @@ def _kanban_setores_lista(setores_acesso) -> list:
         return []
     return [s.strip() for s in str(setores_acesso).split(",") if s.strip()]
 
-def _kanban_quadro_visivel(setores_acesso, setor_usuario: str) -> bool:
-    if setor_usuario == "Master":
+def _setores_do_usuario(setor_base: str, setores_extras_csv=None) -> list:
+    """Lista de setores efetivos de um usuário: o setor base + os extras liberados
+    no cadastro (coluna usuarios.setores_extras, CSV — mesmo formato do Kanban),
+    sem duplicar. Sem nenhum extra, retorna [setor_base] e o sistema se comporta
+    exatamente como antes de existir multi-setor."""
+    efetivos = [setor_base] if setor_base else []
+    for s in _kanban_setores_lista(setores_extras_csv):
+        if s and s not in efetivos:
+            efetivos.append(s)
+    return efetivos
+
+def tem_setor(*setores) -> bool:
+    """True se o usuário logado pertence a QUALQUER um dos setores informados
+    (setor base OU um dos extras). Master entra em tudo. Use no lugar dos antigos
+    `setor in [...]` / `setor == ...` — com a lista de setores efetivos contendo
+    só o base, o resultado é idêntico ao comportamento antigo."""
+    meus = st.session_state.get("usuario_setores") or [st.session_state.get("usuario_setor", "")]
+    return "Master" in meus or any(s in meus for s in setores)
+
+def _kanban_quadro_visivel(setores_acesso, setor_usuario) -> bool:
+    # setor_usuario pode ser uma string (setor base) ou a lista de setores efetivos.
+    meus = setor_usuario if isinstance(setor_usuario, (list, tuple, set)) else [setor_usuario]
+    if "Master" in meus:
         return True
     setores = _kanban_setores_lista(setores_acesso)
-    return not setores or setor_usuario in setores
+    return not setores or any(s in meus for s in setores)
 
 def criar_quadro(nome: str, descricao: str, setores_acesso: list, criado_por: str):
     conn = conectar_banco()
@@ -3010,10 +3034,10 @@ def verificar_login(usuario, senha):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT nome, setor, senha FROM usuarios WHERE usuario=%s", (usuario,))
+        cursor.execute("SELECT nome, setor, senha, setores_extras FROM usuarios WHERE usuario=%s", (usuario,))
         resultado = cursor.fetchone()
         if resultado and verificar_senha(senha, resultado[2]):
-            return resultado[0], resultado[1]
+            return resultado[0], resultado[1], resultado[3]
         return None
     except Exception:
         return None
@@ -3056,6 +3080,33 @@ def redefinir_senha_usuario(usuario_alvo: str, senha_nova: str) -> tuple[bool, s
     except Exception as e:
         conn.rollback()
         return False, f"Erro ao redefinir senha: {e}"
+    finally:
+        liberar_conexao(conn)
+
+# Setores que podem ser dados como acesso EXTRA (alem do base). "Master" fica de fora
+# de proposito -- acesso de administrador nao se concede como "adjacente".
+_SETORES_EXTRAS_DISPONIVEIS = ["Producao", "Esquadria", "Engenharia", "Diretoria",
+                               "Logistica", "Almoxarifado", "Medicao", "PCP", "Compras"]
+
+def atualizar_acesso_usuario(usuario: str, setor_base: str, setores_extras: list) -> tuple[bool, str]:
+    """Troca o setor base e/ou os setores extras de um usuário já existente."""
+    extras_limpos = [s for s in (setores_extras or []) if s and s != setor_base and s != "Master"]
+    extras_str = ",".join(dict.fromkeys(extras_limpos)) or None
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE usuarios SET setor=%s, setores_extras=%s WHERE usuario=%s",
+            (setor_base, extras_str, usuario)
+        )
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return False, "Usuário não encontrado."
+        conn.commit()
+        return True, "Acessos atualizados! O usuário vê a mudança no próximo login."
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro ao atualizar acessos: {e}"
     finally:
         liberar_conexao(conn)
 
@@ -5935,6 +5986,7 @@ if 'autenticado' not in st.session_state:
     st.session_state.autenticado      = False
     st.session_state.usuario_nome     = ""
     st.session_state.usuario_setor    = ""
+    st.session_state.usuario_setores  = []
     st.session_state.usuario_login    = ""
     st.session_state.ultima_atividade = None
 
@@ -5943,6 +5995,7 @@ if st.session_state.autenticado and verificar_timeout_sessao():
     st.session_state.autenticado      = False
     st.session_state.usuario_nome     = ""
     st.session_state.usuario_setor    = ""
+    st.session_state.usuario_setores  = []
     st.session_state.usuario_login    = ""
     st.session_state.ultima_atividade = None
     st.warning(f"⏱️ Sessão encerrada por inatividade ({TIMEOUT_SESSAO_HORAS}h). Faça login novamente.")
@@ -5986,9 +6039,12 @@ if not st.session_state.autenticado:
                         st.session_state.autenticado      = True
                         st.session_state.usuario_nome     = dados[0]
                         st.session_state.usuario_setor    = dados[1]
+                        st.session_state.usuario_setores  = _setores_do_usuario(dados[1], dados[2] if len(dados) > 2 else None)
                         st.session_state.usuario_login    = usuario_limpo
                         st.session_state.ultima_atividade = datetime.now()
-                        registrar_auditoria(usuario_limpo, "LOGIN", f"Login bem-sucedido — {dados[1]}")
+                        _extras_log = [s for s in st.session_state.usuario_setores if s != dados[1]]
+                        registrar_auditoria(usuario_limpo, "LOGIN",
+                            f"Login bem-sucedido — {dados[1]}" + (f" (+{', '.join(_extras_log)})" if _extras_log else ""))
                         st.rerun()
                     else:
                         registrar_tentativa_falha(usuario_limpo)
@@ -6006,6 +6062,11 @@ df_banco_micro = carregar_micro()
 df_projetos = carregar_projetos()
 
 setor = st.session_state.usuario_setor
+# Sessao aberta antes do deploy do multi-setor nao tem 'usuario_setores' ainda --
+# reconstroi na hora com pelo menos o setor base pra nada quebrar ate o proximo login.
+if not st.session_state.get("usuario_setores"):
+    st.session_state.usuario_setores = [setor] if setor else []
+setores_usuario = st.session_state.usuario_setores
 
 # ── Mapeamento de páginas por setor ──────────────────────────────────────────
 GRUPOS_NAV = {
@@ -6120,7 +6181,7 @@ with st.sidebar:
             st.rerun()
 
     for grupo, itens in GRUPOS_NAV.items():
-        itens_grupo = [(k, v[0]) for k, v in itens.items() if setor in v[1]]
+        itens_grupo = [(k, v[0]) for k, v in itens.items() if tem_setor(*v[1])]
         if not itens_grupo:
             continue
         grupo_label = grupo.split("  ")[1] if "  " in grupo else grupo
@@ -6138,7 +6199,8 @@ with st.sidebar:
     st.markdown("<hr>", unsafe_allow_html=True)
     ultima_at  = st.session_state.get("ultima_atividade")
     timeout_em = ultima_at + timedelta(hours=TIMEOUT_SESSAO_HORAS) if ultima_at else None
-    st.caption(f"👤 {st.session_state.usuario_nome}  ·  {setor}")
+    _extras_cap = [s for s in setores_usuario if s != setor]
+    st.caption(f"👤 {st.session_state.usuario_nome}  ·  {setor}" + (f"  (+ {', '.join(_extras_cap)})" if _extras_cap else ""))
     if timeout_em:
         st.caption(f"⏱️ Sessão até {timeout_em.strftime('%H:%M')}")
 
@@ -6178,7 +6240,7 @@ _ICONES_ACAO = {
     "LOGIN": "🔐", "LOGOUT": "🚪",
     "LIBERAR_OPS": "🔓", "LANCAMENTO_PECAS": "📦",
     "EXCLUIR_FRENTE": "🗑️", "EXCLUIR_OBRA": "🗑️",
-    "CRIAR_USUARIO": "👤", "OP_AVULSA": "📋",
+    "CRIAR_USUARIO": "👤", "EDITAR_ACESSO_USUARIO": "🔑", "REMOVER_USUARIO": "👤", "OP_AVULSA": "📋",
     "SOLICITAR_OP": "📝", "VINCULAR_SOLICITACAO_OP": "🔗",
     "GERAR_LOTE": "⚙️", "EXCLUIR_LOTE": "🗑️",
     "CADASTRAR_OBRA": "🏗️", "CADASTRAR_FRENTE": "📐",
@@ -6704,7 +6766,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         dias_restantes = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel).days
                                         st.markdown(f"<span style='color:#3B82F6;font-size:12px;'>Em producao — {dias_restantes} dias ate o prazo</span>", unsafe_allow_html=True)
                                 with ca:
-                                    if setor in ["Producao", "Master"]:
+                                    if tem_setor("Producao"):
                                         if em_parada_op:
                                             if st.button("▶ Retomar", key=f"retomar_{row['id']}", use_container_width=True):
                                                 salvar_parada_op(row['id'], False, '', st.session_state.usuario_nome)
@@ -6722,7 +6784,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         if st.button("✅ Pronto", key=f"baixa_{row['id']}", type="primary", use_container_width=True):
                                             st.session_state[f"modal_pronto_{row['id']}"] = not st.session_state.get(f"modal_pronto_{row['id']}", False)
                                             st.rerun()
-                                    elif setor not in ["Producao", "Master"]:
+                                    elif not tem_setor("Producao"):
                                         st.markdown("<div style='text-align:center;color:#94A3B8;font-size:12px;padding:8px;'>Em producao</div>", unsafe_allow_html=True)
 
                             # ── EDITAR QTD CAIXAS / M² ────────────────────────
@@ -6802,7 +6864,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             arqs_op = _arqs_por_lote_acm.get(int(row['id']), [])
                             label_arq_acm = f"📎 {len(arqs_op)} arquivo(s) anexado(s)" if arqs_op else "📎 Anexar arquivo"
                             with st.expander(label_arq_acm, expanded=False):
-                                if setor in ["Master", "PCP", "Engenharia", "Producao"]:
+                                if tem_setor("PCP", "Engenharia", "Producao"):
                                     uploaded_list_acm = st.file_uploader(
                                         "Anexar arquivo(s) (PDF, Excel, imagem):",
                                         type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg", "heic", "heif"],
@@ -6830,7 +6892,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         ca1, ca2, ca3, ca4 = st.columns([4, 1, 1, 1])
                                         ca1.markdown(f"📄 **{html_escape(arq_nome)}**  \n<small style='color:#94A3B8'>{html_escape(arq_enviado_por)}</small>", unsafe_allow_html=True)
                                         _bloco_baixar_arquivo(arq_id, arq_nome, arq_tipo, "acm", col_link=ca2, col_download=ca3)
-                                        if setor in ["Master", "PCP"]:
+                                        if tem_setor("PCP"):
                                             with ca4:
                                                 if st.button("🗑️", key=f"acm_del_arq_{arq_id}"):
                                                     deletar_arquivo_op(arq_id)
@@ -7365,7 +7427,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         dias_rest = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel_esq).days
                                         st.markdown(f"<span style='color:#3B82F6;font-size:12px;'>Em producao — {dias_rest} dias ate o prazo</span>", unsafe_allow_html=True)
                                 with ca:
-                                    if setor in ["Producao", "Master"]:
+                                    if tem_setor("Producao"):
                                         if em_parada_esq:
                                             if st.button("▶ Retomar", key=f"esq_retomar_{row['id']}", use_container_width=True):
                                                 salvar_parada_op(row['id'], False, '', st.session_state.usuario_nome)
@@ -7383,7 +7445,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         if st.button("✅ Pronto", key=f"esq_baixa_{row['id']}", type="primary", use_container_width=True):
                                             st.session_state[f"esq_modal_{row['id']}"] = not st.session_state.get(f"esq_modal_{row['id']}", False)
                                             st.rerun()
-                                    elif setor not in ["Producao", "Master"]:
+                                    elif not tem_setor("Producao"):
                                         st.markdown("<div style='text-align:center;color:#94A3B8;font-size:12px;padding:8px;'>Em producao</div>", unsafe_allow_html=True)
 
                             # ── EDITAR QTD CAIXAS / M² ────────────────────────
@@ -7463,7 +7525,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             arqs_esq = _arqs_por_lote_esq.get(int(row['id']), [])
                             label_arq_esq = f"📎 {len(arqs_esq)} arquivo(s) anexado(s)" if arqs_esq else "📎 Anexar arquivo"
                             with st.expander(label_arq_esq, expanded=False):
-                                if setor in ["Master", "PCP", "Engenharia", "Producao"]:
+                                if tem_setor("PCP", "Engenharia", "Producao"):
                                     uploaded_list_esq = st.file_uploader(
                                         "Anexar arquivo(s) (PDF, Excel, imagem):",
                                         type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg", "heic", "heif"],
@@ -7502,7 +7564,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         ca1, ca2, ca3, ca4 = st.columns([4, 1, 1, 1])
                                         ca1.markdown(f"📄 **{html_escape(arq_nome)}**  \n<small style='color:#94A3B8'>{html_escape(arq_enviado_por)}</small>", unsafe_allow_html=True)
                                         _bloco_baixar_arquivo(arq_id, arq_nome, arq_tipo, "esq", col_link=ca2, col_download=ca3)
-                                        if setor in ["Master", "PCP"]:
+                                        if tem_setor("PCP"):
                                             with ca4:
                                                 if st.button("🗑️", key=f"esq_del_arq_{arq_id}"):
                                                     deletar_arquivo_op(arq_id)
@@ -7830,7 +7892,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
     # ==================================================
     elif nome_aba == "Liberar OPs da Semana":
         with aba_objeto:
-            if setor not in ["Master", "PCP"]:
+            if not tem_setor("PCP"):
                 st.error("⛔ Acesso negado.")
                 st.stop()
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Ordens de Produção</h2><p>Gerencie e libere Ordens de Produção para a fábrica</p></div><span class="page-icon">🔓</span></div>', unsafe_allow_html=True)
@@ -8358,7 +8420,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         arqs_existentes = carregar_arquivos_op(lote_id)
                         label_arq = f"📎 Arquivos da OP ({len(arqs_existentes)})" if arqs_existentes else "📎 Arquivos da OP"
                         with st.expander(label_arq, expanded=False):
-                            if setor in ["Master", "PCP", "Engenharia", "Producao"]:
+                            if tem_setor("PCP", "Engenharia", "Producao"):
                                 uploaded_list = st.file_uploader(
                                     "Anexar arquivo(s) (PDF, Excel, imagem):",
                                     type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "dwg", "heic", "heif"],
@@ -8401,7 +8463,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     col_a.markdown(f"📄 **{html_escape(arq_nome)}**")
                                     col_b.caption(f"{arq_enviado_por} — {pd.to_datetime(arq_enviado_em).strftime('%d/%m/%Y %H:%M')}")
                                     _bloco_baixar_arquivo(arq_id, arq_nome, arq_tipo, "op", col_link=col_link, col_download=col_c)
-                                    if setor in ["Master", "PCP"]:
+                                    if tem_setor("PCP"):
                                         if st.button("🗑️ Remover", key=f"del_arq_{arq_id}"):
                                             deletar_arquivo_op(arq_id)
                                             st.toast("Arquivo removido.")
@@ -9410,7 +9472,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             n_pend  = len(df_sols[df_sols['status'] == 'Pendente de Aprovacao']) if not df_sols.empty else 0
             with st.expander(f"Solicitacoes de Prazo{f' — {n_pend} pendente(s)' if n_pend else ''}", expanded=False):
                 nao_lib = [f for f in frentes if f['situacao_key'] != 'concluido']
-                if setor in ["Engenharia", "Master"] and nao_lib:
+                if tem_setor("Engenharia") and nao_lib:
                     st.markdown("#### Nova Solicitacao")
                     cs1, cs2 = st.columns(2)
                     with cs1:
@@ -10269,7 +10331,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             # 'with' e pula pra proxima saida do laco.
                             if not _hc_ins[1].toggle("🔍 Conferir / emitir", key=f"alm_ins_open_{int(saida_row['id'])}"):
                                 continue
-                            pode_editar_item_ins = setor in ["Master", "Almoxarifado"]
+                            pode_editar_item_ins = tem_setor("Almoxarifado")
                             hci = st.columns([4, 1.5, 1, 2.5, 2.5, 0.8]) if pode_editar_item_ins else st.columns([4, 2, 2, 3, 2])
                             labels_ins_header = ["INSUMO", "QTD", "UN", "STATUS", "AÇÃO", ""] if pode_editar_item_ins else ["INSUMO", "QTD", "UN", "STATUS", "AÇÃO"]
                             for col_h, label in zip(hci, labels_ins_header):
@@ -10426,7 +10488,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         st.rerun()
 
                             # ── Excluir saída lançada errada ──
-                            if setor in ["Master", "Almoxarifado"]:
+                            if tem_setor("Almoxarifado"):
                                 st.markdown("<br>", unsafe_allow_html=True)
                                 confirm_key_del_ins = f"confirm_del_saida_ins_{saida_row['id']}"
                                 if not st.session_state.get(confirm_key_del_ins):
@@ -10643,7 +10705,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 key=f"dl_rom_manual_{rm_row['id']}"
                             )
                         with rmb2:
-                            if setor in ["Master", "Almoxarifado"]:
+                            if tem_setor("Almoxarifado"):
                                 if st.button("🗑️ Excluir", key=f"del_rom_manual_{rm_row['id']}"):
                                     excluir_romaneio_manual(int(rm_row['id']))
                                     st.toast("Romaneio removido.")
@@ -10975,7 +11037,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                                 key=f"dl_envio_lm_{envio_id}"
                                             )
-                                        if setor in ["Master", "Almoxarifado"]:
+                                        if tem_setor("Almoxarifado"):
                                             confirm_key_lm = f"confirm_estorno_lm_{envio_id}"
                                             if not st.session_state.get(confirm_key_lm):
                                                 if st.button("↩️ Estornar", key=f"btn_estornar_lm_{envio_id}",
@@ -10998,7 +11060,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                                     st.session_state.pop(confirm_key_lm, None)
                                                     st.rerun()
 
-                        if setor in ["Master", "Almoxarifado"]:
+                        if tem_setor("Almoxarifado"):
                             st.markdown("---")
                             if st.button("🗑️ Excluir Lista Mestra", key=f"btn_del_lista_lm_{lista_id}"):
                                 if excluir_lista_mestra(lista_id):
@@ -11011,7 +11073,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
     # ==================================================
     elif nome_aba == "Romaneios Devolvidos":
         with aba_objeto:
-            if setor not in ["Master", "PCP"]:
+            if not tem_setor("PCP"):
                 st.error("⛔ Acesso negado.")
                 st.stop()
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Romaneios Devolvidos</h2><p>Controle de romaneios (OP, insumos, listas) e termos de ferramenta/máquina que voltaram assinados da obra/produção</p></div><span class="page-icon">🗂️</span></div>', unsafe_allow_html=True)
@@ -11618,7 +11680,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             if df_quadros.empty:
                 df_quadros_visiveis = df_quadros
             else:
-                df_quadros_visiveis = df_quadros[df_quadros['setores_acesso'].apply(lambda s: _kanban_quadro_visivel(s, setor))]
+                df_quadros_visiveis = df_quadros[df_quadros['setores_acesso'].apply(lambda s: _kanban_quadro_visivel(s, setores_usuario))]
 
             if "kanban_quadro_atual" not in st.session_state:
                 st.session_state.kanban_quadro_atual = None
@@ -12429,7 +12491,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 with st.form("form_user"):
                     nu = st.text_input("Login:").lower().strip()
                     nn = st.text_input("Nome:")
-                    ns = st.selectbox("Setor:", ["Producao", "Engenharia", "Diretoria", "Logistica", "Almoxarifado", "Medicao", "PCP", "Compras", "Master"])
+                    ns = st.selectbox("Setor base:", ["Producao", "Engenharia", "Diretoria", "Logistica", "Almoxarifado", "Medicao", "PCP", "Compras", "Master"])
+                    ns_extras = st.multiselect(
+                        "Acessos extras (opcional):", _SETORES_EXTRAS_DISPONIVEIS,
+                        help="Setores adicionais que essa pessoa também pode acessar, além do setor base. "
+                             "Ex: base Compras + extra Almoxarifado. Não dá acesso de Master."
+                    )
                     np = st.text_input("Senha:", type="password")
                     st.caption("Mínimo 8 caracteres, ao menos 1 número e 1 letra maiúscula.")
                     if st.form_submit_button("Salvar"):
@@ -12449,13 +12516,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             conn = conectar_banco()
                             try:
                                 cursor = conn.cursor()
+                                _extras_novo = [s for s in ns_extras if s and s != ns and s != "Master"]
+                                _extras_novo_str = ",".join(dict.fromkeys(_extras_novo)) or None
                                 cursor.execute(
-                                    "INSERT INTO usuarios (usuario, nome, setor, senha) VALUES (%s,%s,%s,%s)",
-                                    (nu, nn, ns, hash_senha(np))
+                                    "INSERT INTO usuarios (usuario, nome, setor, senha, setores_extras) VALUES (%s,%s,%s,%s,%s)",
+                                    (nu, nn, ns, hash_senha(np), _extras_novo_str)
                                 )
                                 conn.commit()
                                 registrar_auditoria(st.session_state.usuario_nome, "CRIAR_USUARIO",
-                                    f"Novo usuário: {nu} — Setor: {ns}")
+                                    f"Novo usuário: {nu} — Setor: {ns}" + (f" (+{_extras_novo_str})" if _extras_novo_str else ""))
                                 st.success(f"{nn} criado!")
                                 st.rerun()
                             except Exception as e:
@@ -12466,10 +12535,45 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
             conn_cfg = conectar_banco()
             try:
-                df_u = pd.read_sql_query("SELECT id, usuario, nome, setor FROM usuarios ORDER BY id", conn_cfg)
+                df_u = pd.read_sql_query(
+                    "SELECT id, usuario, nome, setor, COALESCE(setores_extras,'') AS setores_extras FROM usuarios ORDER BY id",
+                    conn_cfg
+                )
             finally:
                 liberar_conexao(conn_cfg)
-            st.dataframe(df_u, hide_index=True, use_container_width=True)
+            st.dataframe(
+                df_u.rename(columns={"setor": "setor base", "setores_extras": "acessos extras"}),
+                hide_index=True, use_container_width=True
+            )
+
+            # ── Editar acessos de um usuário ───────────────────
+            with st.expander("Editar acessos de um usuário"):
+                ed_u = st.selectbox("Usuário:", df_u['usuario'].tolist(), key="sel_editar_acesso_u")
+                _linha_u = df_u[df_u['usuario'] == ed_u].iloc[0]
+                _base_atual = _linha_u['setor']
+                _extras_atuais = _kanban_setores_lista(_linha_u['setores_extras'])
+                with st.form("form_editar_acesso"):
+                    _opcoes_base = ["Producao", "Engenharia", "Diretoria", "Logistica", "Almoxarifado", "Medicao", "PCP", "Compras", "Master"]
+                    if _base_atual and _base_atual not in _opcoes_base:
+                        _opcoes_base = [_base_atual] + _opcoes_base
+                    ed_base = st.selectbox("Setor base:", _opcoes_base,
+                                           index=_opcoes_base.index(_base_atual) if _base_atual in _opcoes_base else 0,
+                                           disabled=(ed_u == 'master'))
+                    ed_extras = st.multiselect("Acessos extras:", _SETORES_EXTRAS_DISPONIVEIS,
+                                               default=[s for s in _extras_atuais if s in _SETORES_EXTRAS_DISPONIVEIS],
+                                               disabled=(ed_u == 'master'))
+                    if st.form_submit_button("Salvar acessos"):
+                        if ed_u == 'master':
+                            st.warning("A conta master não é editável aqui.")
+                        else:
+                            ok_ac, msg_ac = atualizar_acesso_usuario(ed_u, ed_base, ed_extras)
+                            if ok_ac:
+                                registrar_auditoria(st.session_state.usuario_nome, "EDITAR_ACESSO_USUARIO",
+                                    f"{ed_u}: base {ed_base}" + (f" + {', '.join(ed_extras)}" if ed_extras else " (sem extras)"))
+                                st.success(msg_ac)
+                                st.rerun()
+                            else:
+                                st.error(msg_ac)
 
             if len(df_u) > 1:
                 del_u = st.selectbox("Remover usuario:", df_u['usuario'].tolist(), key="sel_usuario_del")
@@ -13438,6 +13542,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-09-10", "Configurações → usuários: agora cada pessoa tem um \"setor base\" e pode receber \"acessos extras\" de outros setores, sem virar Master. Ex: o pessoal do Compras pode ganhar acesso ao Almoxarifado; alguém da Medição pode ganhar acesso aos Romaneios Devolvidos. Dá pra editar os acessos de quem já existe (a pessoa vê a mudança no próximo login). Quem não tem nenhum acesso extra continua exatamente como antes."),
                 ("2026-09-08", "Romaneios Devolvidos: todos os cards agora mostram a data em que o romaneio foi emitido, no mesmo formato em todas as abas (\"Emitido em DD/MM/AAAA\"). Antes só os romaneios de OP com envio parcial mostravam a data. Nos romaneios de OP com envio único a data passou a ser a do envio real (registrado na Logística), não mais a data de despacho planejada."),
                 ("2026-09-03", "Relatório Semanal agora sai com abas separadas no Excel — uma pra ACM, outra pra Esquadrias (e uma \"TERCEIRIZADA\" à parte quando houver OP terceirizada sem equipe definida). Dentro de cada aba as seções vêm na ordem Parcial, Em Produção e Concluído, e o cabeçalho de \"Em Produção\" mostra o total de m² (ACM) ou kg (Esquadrias)."),
                 ("2026-09-01", "Logística, lista \"✅ OPs Prontas — Emitir Romaneio\": novo seletor \"Organizar por:\". No padrão (\"🏗️ Obra (com data)\") as OPs ficam separadas por obra e, dentro de cada obra, por data que ficou pronto (Hoje, Ontem, Últimos 7 dias...). A opção \"📅 Só por data\" junta todas as obras numa linha do tempo só. Todo cartão agora mostra \"✅ Ficou pronto em DD/MM\"."),
@@ -13830,11 +13935,16 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 **Para que serve:** Administração do sistema — usuários, senhas, log de auditoria e reset geral.
 
 **Passo a passo:**
-1. "Cadastrar Novo Usuário": informe login, nome, setor e senha (mínimo 8 caracteres, com 1 maiúscula e 1 número).
-2. Pra remover um usuário, selecione na lista e clique em excluir (a conta "master" nunca pode ser removida).
-3. "🔑 Redefinir senha de usuário": escolha o usuário, informe a nova senha duas vezes.
-4. "📋 Log de Auditoria": veja os últimos 200 registros de ações do sistema, com filtro por tipo de ação.
-5. "⚠️ Reset Geral": apaga TODOS os dados do sistema — só libera depois de digitar "CONFIRMAR" no campo.
+1. "Cadastrar Novo Usuário": informe login, nome, **setor base**, **acessos extras** (opcional) e senha (mínimo 8 caracteres, com 1 maiúscula e 1 número).
+2. "Editar acessos de um usuário": troque o setor base ou os acessos extras de quem já existe. A pessoa vê a mudança no próximo login.
+3. Pra remover um usuário, selecione na lista e clique em excluir (a conta "master" nunca pode ser removida).
+4. "🔑 Redefinir senha de usuário": escolha o usuário, informe a nova senha duas vezes.
+5. "📋 Log de Auditoria": veja os últimos 200 registros de ações do sistema, com filtro por tipo de ação.
+6. "⚠️ Reset Geral": apaga TODOS os dados do sistema — só libera depois de digitar "CONFIRMAR" no campo.
+
+**Sobre setor base e acessos extras:**
+- O **setor base** define o que a pessoa vê por padrão e aparece na legenda/relatórios.
+- Os **acessos extras** somam telas e ações de outros setores (ex: base Compras + extra Almoxarifado = vê e usa o Almoxarifado também). Não é possível dar acesso de Master como extra.
 
 **Regras importantes:**
 - Reset Geral não tem volta — use com extremo cuidado.
