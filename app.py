@@ -359,6 +359,7 @@ div[data-testid="stAlert"] { border-radius: var(--radius-sm) !important; }
 .bar-ok      { border-left:4px solid var(--success); background:var(--success-light); padding:12px 16px; border-radius:var(--radius-sm); margin-bottom:8px; box-shadow:var(--shadow-xs); }
 .bar-warn    { border-left:4px solid var(--warning); background:var(--warning-light); padding:12px 16px; border-radius:var(--radius-sm); margin-bottom:8px; box-shadow:var(--shadow-xs); }
 .bar-danger  { border-left:4px solid var(--danger);  background:var(--danger-light);  padding:12px 16px; border-radius:var(--radius-sm); margin-bottom:8px; box-shadow:var(--shadow-xs); }
+.bar-info    { border-left:4px solid var(--accent); background:var(--accent-light); padding:12px 16px; border-radius:var(--radius-sm); margin-bottom:8px; box-shadow:var(--shadow-xs); }
 .bar-neutral { border-left:4px solid var(--text-muted); background:var(--bg); padding:12px 16px; border-radius:var(--radius-sm); margin-bottom:8px; box-shadow:var(--shadow-xs); }
 
 /* ── Pipeline de OP ─────────────────────────── */
@@ -6725,16 +6726,40 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         _coms_por_lote_acm = carregar_comentarios_varios('lote_producao', _ids_lotes_acm)
                         def _render_lote_dia_acm(row):
                             # Parcialmente Concluido sempre pode concluir o restante
-                            eh_parcial    = row.get('Status_Item', '') == 'Parcialmente Concluido'
-                            pode_concluir = bool(row.get('_pode_concluir', False)) or eh_parcial
-                            atrasado      = dia_sel > pd.to_datetime(row['Data_Limite_Obra']).date()
+                            eh_parcial     = row.get('Status_Item', '') == 'Parcialmente Concluido'
+                            pode_concluir  = bool(row.get('_pode_concluir', False)) or eh_parcial
+                            atrasado       = dia_sel > pd.to_datetime(row['Data_Limite_Obra']).date()
+                            em_parada_op   = bool(row.get('Em_Parada', False))
+                            _motivo_op_raw = row.get('Motivo_Parada')
+                            motivo_op      = html_escape(str(_motivo_op_raw)) if pd.notna(_motivo_op_raw) else ''
                             dt_i = pd.to_datetime(row['Data_Producao_Programada']).strftime('%d/%m/%Y')
                             dt_f = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
-                            border_color = "#DC2626" if atrasado else ("#D97706" if eh_parcial else ("#1A56DB" if pode_concluir else "#3B82F6"))
-                            bg_color     = "#FEF2F2" if atrasado else ("#FFFBEB" if eh_parcial else ("#FFF7ED" if pode_concluir else "#F8FAFC"))
+
+                            # Status em destaque no topo do card: so o que foge do normal
+                            # (parada/atraso/parcial/pronto) ganha cor -- em producao dentro
+                            # do prazo fica neutro de proposito, pra nao competir visualmente
+                            # com o que realmente precisa de atencao.
+                            if em_parada_op:
+                                bar_class, txt_var = "bar-danger", "--danger"
+                                status_txt = f"⛔ EM PARADA — {motivo_op}" if motivo_op else "⛔ EM PARADA"
+                            elif atrasado:
+                                dias_atraso = (dia_sel - pd.to_datetime(row['Data_Limite_Obra']).date()).days
+                                bar_class, txt_var = "bar-danger", "--danger"
+                                status_txt = f"🔴 ATRASADO — {dias_atraso} dia(s) após o prazo"
+                            elif eh_parcial:
+                                bar_class, txt_var = "bar-warn", "--warning"
+                                status_txt = "🟠 ENVIO PARCIAL — ainda há peças pendentes"
+                            elif pode_concluir:
+                                bar_class, txt_var = "bar-info", "--accent"
+                                status_txt = "🔵 PRONTO PRA CONCLUIR — última semana"
+                            else:
+                                dias_restantes = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel).days
+                                bar_class, txt_var = "bar-neutral", "--text-muted"
+                                status_txt = f"EM PRODUÇÃO — {dias_restantes} dia(s) até o prazo"
+
                             st.markdown(
-                                f"<div style='border-left:4px solid {border_color};background:{bg_color};"
-                                f"padding:12px 16px;border-radius:6px;margin-bottom:4px;'></div>",
+                                f"<div class='{bar_class}'><span style='color:var({txt_var});"
+                                f"font-weight:700;font-size:13px;'>{status_txt}</span></div>",
                                 unsafe_allow_html=True
                             )
                             with st.container(border=True):
@@ -6750,21 +6775,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     st.caption(f"Periodo: {dt_i} a {dt_f} &nbsp;|&nbsp; {row['Romaneio_Chapas']}")
                                     op_txt = row['Num_OP'] if row.get('Num_OP') else "Aguardando OP"
                                     st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {row.get('Fase_Produtiva', '—')}")
-                                    em_parada_op = bool(row.get('Em_Parada', False))
-                                    _motivo_op_raw = row.get('Motivo_Parada')
-                                    motivo_op    = html_escape(str(_motivo_op_raw)) if pd.notna(_motivo_op_raw) else ''
-                                    if em_parada_op:
-                                        st.markdown(f"<span style='color:#DC2626;font-size:12px;font-weight:700;'>⛔ EM PARADA — {motivo_op}</span>", unsafe_allow_html=True)
-                                    elif atrasado:
-                                        dias_atraso = (dia_sel - pd.to_datetime(row['Data_Limite_Obra']).date()).days
-                                        st.markdown(f"<span style='color:#DC2626;font-size:12px;font-weight:700;'>🔴 ATRASADO — {dias_atraso} dia(s) após o prazo</span>", unsafe_allow_html=True)
-                                    elif eh_parcial:
-                                        st.markdown("<span style='color:#D97706;font-size:12px;font-weight:700;'>🟠 Envio parcial registrado — ainda há peças pendentes</span>", unsafe_allow_html=True)
-                                    elif pode_concluir:
-                                        st.markdown("<span style='color:#1A56DB;font-size:12px;font-weight:600;'>Ultima semana — liberado para concluir</span>", unsafe_allow_html=True)
-                                    else:
-                                        dias_restantes = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel).days
-                                        st.markdown(f"<span style='color:#3B82F6;font-size:12px;'>Em producao — {dias_restantes} dias ate o prazo</span>", unsafe_allow_html=True)
                                 with ca:
                                     if tem_setor("Producao"):
                                         if em_parada_op:
