@@ -7397,17 +7397,39 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         _arqs_por_lote_esq = carregar_arquivos_op_varios(_ids_lotes_esq)
                         _coms_por_lote_esq = carregar_comentarios_varios('lote_producao', _ids_lotes_esq)
                         def _render_lote_dia_esq(row):
-                            eh_parcial = row.get('Status_Item', '') == 'Parcialmente Concluido'
-                            pode_concluir = bool(row.get('_pode_concluir', False)) or eh_parcial
-                            atrasado = dia_sel_esq > pd.to_datetime(row['Data_Limite_Obra']).date()
+                            eh_parcial      = row.get('Status_Item', '') == 'Parcialmente Concluido'
+                            pode_concluir   = bool(row.get('_pode_concluir', False)) or eh_parcial
+                            atrasado        = dia_sel_esq > pd.to_datetime(row['Data_Limite_Obra']).date()
+                            em_parada_esq   = bool(row.get('Em_Parada', False))
+                            _motivo_esq_raw = row.get('Motivo_Parada')
+                            motivo_esq      = html_escape(str(_motivo_esq_raw)) if pd.notna(_motivo_esq_raw) else ''
                             dt_i = pd.to_datetime(row['Data_Producao_Programada']).strftime('%d/%m/%Y')
                             dt_f = pd.to_datetime(row['Data_Limite_Obra']).strftime('%d/%m/%Y')
-                            border_color = "#DC2626" if atrasado else ("#D97706" if eh_parcial else ("#1A56DB" if pode_concluir else "#3B82F6"))
-                            bg_color = "#FEF2F2" if atrasado else ("#FFFBEB" if eh_parcial else ("#FFF7ED" if pode_concluir else "#F8FAFC"))
+
+                            # Status em destaque no topo do card -- mesmo padrao do Painel ACM.
+                            if em_parada_esq:
+                                bar_class, txt_var = "bar-danger", "--danger"
+                                status_txt = f"⛔ EM PARADA — {motivo_esq}" if motivo_esq else "⛔ EM PARADA"
+                            elif atrasado:
+                                dias_atraso = (dia_sel_esq - pd.to_datetime(row['Data_Limite_Obra']).date()).days
+                                bar_class, txt_var = "bar-danger", "--danger"
+                                status_txt = f"🔴 ATRASADO — {dias_atraso} dia(s) após o prazo"
+                            elif eh_parcial:
+                                bar_class, txt_var = "bar-warn", "--warning"
+                                status_txt = "🟠 ENVIO PARCIAL — ainda há peças pendentes"
+                            elif pode_concluir:
+                                bar_class, txt_var = "bar-info", "--accent"
+                                status_txt = "🔵 PRONTO PRA CONCLUIR — última semana"
+                            else:
+                                dias_rest = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel_esq).days
+                                bar_class, txt_var = "bar-neutral", "--text-muted"
+                                status_txt = f"EM PRODUÇÃO — {dias_rest} dia(s) até o prazo"
+
                             st.markdown(
-                                f"<div style='border-left:4px solid {border_color};background:{bg_color};"
-                                f"padding:12px 16px;border-radius:6px;margin-bottom:4px;'></div>",
-                                unsafe_allow_html=True)
+                                f"<div class='{bar_class}'><span style='color:var({txt_var});"
+                                f"font-weight:700;font-size:13px;'>{status_txt}</span></div>",
+                                unsafe_allow_html=True
+                            )
                             with st.container(border=True):
                                 cd, ca = st.columns([4, 1])
                                 with cd:
@@ -7421,21 +7443,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     st.caption(f"Periodo: {dt_i} a {dt_f} &nbsp;|&nbsp; {row['Romaneio_Chapas']}")
                                     op_txt = row['Num_OP'] if row.get('Num_OP') else "Aguardando OP"
                                     st.caption(f"OP: {op_txt} &nbsp;|&nbsp; {row.get('Fase_Produtiva', '—')}")
-                                    em_parada_esq = bool(row.get('Em_Parada', False))
-                                    _motivo_esq_raw = row.get('Motivo_Parada')
-                                    motivo_esq    = html_escape(str(_motivo_esq_raw)) if pd.notna(_motivo_esq_raw) else ''
-                                    if em_parada_esq:
-                                        st.markdown(f"<span style='color:#DC2626;font-size:12px;font-weight:700;'>⛔ EM PARADA — {motivo_esq}</span>", unsafe_allow_html=True)
-                                    elif atrasado:
-                                        dias_atraso = (dia_sel_esq - pd.to_datetime(row['Data_Limite_Obra']).date()).days
-                                        st.markdown(f"<span style='color:#DC2626;font-size:12px;font-weight:700;'>🔴 ATRASADO — {dias_atraso} dia(s) após o prazo</span>", unsafe_allow_html=True)
-                                    elif eh_parcial:
-                                        st.markdown("<span style='color:#D97706;font-size:12px;font-weight:700;'>Envio parcial registrado — ainda há peças pendentes</span>", unsafe_allow_html=True)
-                                    elif pode_concluir:
-                                        st.markdown("<span style='color:#1A56DB;font-size:12px;font-weight:600;'>Ultima semana — liberado para concluir</span>", unsafe_allow_html=True)
-                                    else:
-                                        dias_rest = (pd.to_datetime(row['Data_Limite_Obra']).date() - dia_sel_esq).days
-                                        st.markdown(f"<span style='color:#3B82F6;font-size:12px;'>Em producao — {dias_rest} dias ate o prazo</span>", unsafe_allow_html=True)
                                 with ca:
                                     if tem_setor("Producao"):
                                         if em_parada_esq:
