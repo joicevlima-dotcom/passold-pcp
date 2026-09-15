@@ -3823,20 +3823,13 @@ def gerar_romaneio_manual_xlsx(obra: str, data_recebimento, itens_df, criado_por
         linha += 1
 
     linha += 1
-    ws.merge_cells(start_row=linha, start_column=1, end_row=linha, end_column=5)
-    ws.cell(linha, 1, "TOTAL DE ITENS:").font = Font(name="Arial", size=11, bold=True)
-    ws.cell(linha, 6, len(itens_df)).font = Font(name="Arial", size=11, bold=True)
-    for c in range(1, 8):
-        ws.cell(linha, c).border = borda
-
-    linha += 2
     linha = _inserir_aviso_conferencia(ws, linha, "G")
 
     linha += 1
     assinaturas = (
         [("Conferência interna", False), ("Recebimento terceiro", True), ("Assinatura motorista", False)]
         if terceirizado else
-        [("Recebedor na Obra", True), ("Conferência Almoxarifado", False), ("Assinatura motorista", False)]
+        [("Recebedor na Obra", True), ("Conferência interna", False), ("Assinatura motorista", False)]
     )
     _inserir_assinaturas(ws, linha, assinaturas, col_fim_bloco=4, col_data=6)
 
