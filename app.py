@@ -774,6 +774,7 @@ def inicializar_banco_de_dados():
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Romaneio_Emitido_Por TEXT")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Concluido_Em TIMESTAMP")
         cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Possui_Lista_Componentes TEXT")
+        cursor.execute("ALTER TABLE itens_detalhado ADD COLUMN IF NOT EXISTS Possui_Projeto TEXT")
         # Equipe (ACM / Esquadria-Vidro) de uma OP com Escopo='Terceirizada' — mesmo terceirizado,
         # o servico e de um dos dois times. So muda o documento da OP e os relatorios; os Paineis
         # de Producao continuam filtrando por Escopo e nao mostram terceirizada.
@@ -5325,8 +5326,9 @@ def gerar_op_xlsx(lote_row, pecas_df, macro_row, campos_extras: dict) -> bytes:
     info_row(ws, linha+5, "ETAPA/PAVIMENTOS:",etapa_pav)
     info_row(ws, linha+6, "MATERIAL:",        campos_extras.get('material', _nn(lote_row.get('Tipo_Material'), '—')))
     info_row(ws, linha+7, "POSSUI LISTA DE COMPONENTES:", campos_extras.get('possui_componentes') or _nn(lote_row.get('Possui_Lista_Componentes'), '—'))
+    info_row(ws, linha+8, "POSSUI PROJETO:", campos_extras.get('possui_projeto') or _nn(lote_row.get('Possui_Projeto'), '—'))
 
-    linha = linha_inicio + 9
+    linha = linha_inicio + 10
 
     # ── CAMPOS ESPECÍFICOS POR TIPO ────────────────────────
     if tipo_escopo == "ACM":
@@ -5534,7 +5536,7 @@ def gerar_romaneio_xlsx(lote_row, pecas_df, endereco_obra: str, digitado_por: st
     linha_perguntas_ini = linha
     perguntas = [
         ("Possui lista de componentes?", lote_row.get('Possui_Lista_Componentes')),
-        ("Envio de projeto/imagem complementar?", None),
+        ("Envio de projeto/imagem complementar?", lote_row.get('Possui_Projeto')),
     ]
     for pergunta, resposta in perguntas:
         ws.cell(linha, 1, pergunta).font = Font(name="Calibri", size=11)
@@ -8235,6 +8237,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                 idx_comp_op = opcoes_comp_op.index(comp_atual_op) if comp_atual_op in opcoes_comp_op else 1
                                 possui_comp_op = st.radio("Possui lista de componentes?", opcoes_comp_op,
                                                            index=idx_comp_op, horizontal=True, key="op_possui_comp")
+                                proj_atual_op = row_lote.get('Possui_Projeto')
+                                idx_proj_op = opcoes_comp_op.index(proj_atual_op) if proj_atual_op in opcoes_comp_op else 1
+                                possui_proj_op = st.radio("Possui projeto?", opcoes_comp_op,
+                                                           index=idx_proj_op, horizontal=True, key="op_possui_proj")
                                 with st.expander("✏️ Personalizar campos LOTE / ETAPA da ficha (opcional)", expanded=False):
                                     st.caption("Deixe em branco pra usar o texto padrão (resumido automaticamente).")
                                     lote_custom  = st.text_input("Texto do campo LOTE:", key="op_lote_custom")
@@ -8243,6 +8249,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     "observacoes": obs_op, "material": row_lote.get('Tipo_Material', ''),
                                     "lote_label": lote_custom.strip(), "etapa_pav": etapa_custom.strip(),
                                     "possui_componentes": possui_comp_op,
+                                    "possui_projeto": possui_proj_op,
                                 }
                                 if tipo_esc_edt == "ACM":
                                     gf1, gf2 = st.columns(2)
@@ -8279,8 +8286,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     try:
                                         cursor_pc = conn_pc.cursor()
                                         cursor_pc.execute(
-                                            "UPDATE itens_detalhado SET Possui_Lista_Componentes=%s WHERE id=%s",
-                                            (possui_comp_op, lote_id)
+                                            "UPDATE itens_detalhado SET Possui_Lista_Componentes=%s, Possui_Projeto=%s WHERE id=%s",
+                                            (possui_comp_op, possui_proj_op, lote_id)
                                         )
                                         conn_pc.commit()
                                         _limpar_cache_geral()
