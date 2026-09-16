@@ -3373,7 +3373,8 @@ def _bloco_visualizar_imagem(nome: str, conteudo: bytes, alvo_botao, flag_key: s
         st.image(conteudo, caption=nome, width=400)
 
 def _bloco_baixar_arquivo(arq_id: int, arq_nome: str, arq_tipo: str, key_prefix: str,
-                           col_link=None, col_download=None, rotulo: str = "⬇️"):
+                           col_link=None, col_download=None, rotulo: str = "⬇️",
+                           carregador=None):
     """Botao de abrir/baixar 1 anexo SEM puxar o conteudo do banco ate o clique.
 
     Antes, toda vez que a tela renderizava (Painel TV, telas de producao), o app
@@ -3382,7 +3383,13 @@ def _bloco_baixar_arquivo(arq_id: int, arq_nome: str, arq_tipo: str, key_prefix:
     roda de qualquer jeito. Com lotes cheios de PDF/imagem grande isso pesava bastante
     na renderizacao. Agora so busca o conteudo quando a pessoa clica pra ver aquele
     arquivo especifico; o primeiro clique carrega (via carregar_conteudo_arquivo, que
-    ja e' cacheado) e revela o link/botao de download de verdade na mesma passada."""
+    ja e' cacheado) e revela o link/botao de download de verdade na mesma passada.
+
+    carregador: por padrao busca em arquivos_op (carregar_conteudo_arquivo). Pra anexo
+    de outra tabela (ex: romaneio devolvido), passar a funcao certa aqui -- passar o
+    arq_id sem trocar o carregador busca a linha ERRADA em arquivos_op (mesmo id,
+    tabela diferente), entregando um arquivo trocado sem erro nenhum."""
+    carregador = carregador or carregar_conteudo_arquivo
     alvo = col_download if col_download is not None else st
     flag_key = f"ver_arq_{key_prefix}_{arq_id}"
     if not st.session_state.get(flag_key):
@@ -3390,7 +3397,7 @@ def _bloco_baixar_arquivo(arq_id: int, arq_nome: str, arq_tipo: str, key_prefix:
             st.session_state[flag_key] = True
         else:
             return
-    conteudo_arq = carregar_conteudo_arquivo(arq_id)
+    conteudo_arq = carregador(arq_id)
     if not conteudo_arq:
         alvo.caption("Erro ao carregar.")
         return
@@ -7331,7 +7338,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         arq_id_rd, arq_nome_rd, arq_tipo_rd, arq_por_rd, arq_em_rd = arq_rd
                                         st.caption(f"{arq_por_rd} — {pd.to_datetime(arq_em_rd).strftime('%d/%m/%Y %H:%M')}")
                                         _bloco_baixar_arquivo(arq_id_rd, arq_nome_rd, arq_tipo_rd, f"tv_rd_{key_prefix}",
-                                                              rotulo=f"⬇️ {arq_nome_rd}")
+                                                              rotulo=f"⬇️ {arq_nome_rd}",
+                                                              carregador=carregar_conteudo_arquivo_romaneio_devolvido)
 
                     col_prod, col_pend, col_conc = st.columns(3)
                     colunas_tv = [
@@ -7994,7 +8002,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         arq_id_rd, arq_nome_rd, arq_tipo_rd, arq_por_rd, arq_em_rd = arq_rd
                                         st.caption(f"{arq_por_rd} — {pd.to_datetime(arq_em_rd).strftime('%d/%m/%Y %H:%M')}")
                                         _bloco_baixar_arquivo(arq_id_rd, arq_nome_rd, arq_tipo_rd, f"tvesq_rd_{key_prefix}",
-                                                              rotulo=f"⬇️ {arq_nome_rd}")
+                                                              rotulo=f"⬇️ {arq_nome_rd}",
+                                                              carregador=carregar_conteudo_arquivo_romaneio_devolvido)
 
                     col_prod_e, col_pend_e, col_conc_e = st.columns(3)
                     colunas_tv_esq = [
