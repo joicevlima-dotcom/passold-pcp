@@ -3508,6 +3508,7 @@ def salvar_arquivo_romaneio_devolvido(tipo_origem: str, origem_id: int, nome: st
         )
         conn.commit()
         carregar_arquivos_romaneio_devolvido.clear()
+        carregar_arquivos_romaneio_devolvido_varios.clear()
         carregar_status_romaneios_devolvidos.clear()
         return True
     except Exception as e:
@@ -3530,6 +3531,31 @@ def carregar_arquivos_romaneio_devolvido(tipo_origem: str, origem_id: int):
         return cursor.fetchall()
     except Exception:
         return []
+    finally:
+        liberar_conexao(conn)
+
+@st.cache_data(ttl=20)
+def carregar_arquivos_romaneio_devolvido_varios(tipo_origem: str, origem_ids: tuple):
+    """Versao em lote de carregar_arquivos_romaneio_devolvido pra 1 tipo_origem so (evita
+    N+1 quando uma tela precisa checar varios lotes de uma vez, tipo o Painel TV).
+    Retorna dict {origem_id: [(id, nome, tipo, enviado_por, enviado_em), ...]}."""
+    ids = tuple(int(i) for i in origem_ids)
+    resultado: dict[int, list] = {i: [] for i in ids}
+    if not ids:
+        return resultado
+    conn = conectar_banco()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT origem_id, id, nome_arquivo, tipo_arquivo, enviado_por, enviado_em FROM arquivos_romaneio_devolvido "
+            "WHERE tipo_origem=%s AND origem_id = ANY(%s) ORDER BY enviado_em DESC",
+            (tipo_origem, list(ids))
+        )
+        for origem_id, arq_id, nome, tipo, enviado_por, enviado_em in cursor.fetchall():
+            resultado.setdefault(int(origem_id), []).append((arq_id, nome, tipo, enviado_por, enviado_em))
+        return resultado
+    except Exception:
+        return resultado
     finally:
         liberar_conexao(conn)
 
@@ -3569,6 +3595,7 @@ def deletar_arquivo_romaneio_devolvido(arquivo_id: int):
         cursor.execute("DELETE FROM arquivos_romaneio_devolvido WHERE id=%s", (arquivo_id,))
         conn.commit()
         carregar_arquivos_romaneio_devolvido.clear()
+        carregar_arquivos_romaneio_devolvido_varios.clear()
         carregar_status_romaneios_devolvidos.clear()
         return True
     except Exception as e:
@@ -7218,6 +7245,32 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     # Anexos de todos os lotes da tela numa consulta so (antes era 1 por card)
                     _arqs_por_lote_tv = carregar_arquivos_op_varios(tuple(sorted(int(i) for i in df_tv['id'])))
 
+                    # Romaneio devolvido (assinado) dos lotes concluidos -- mesma logica de
+                    # chave da tela Romaneios Devolvidos (1 envio = ('OP', lote_id), varios
+                    # envios parciais = 1 ('OP_ENVIO', envio_id) por envio), so que buscando
+                    # os anexos de todos os lotes concluidos numa consulta so por tipo_origem.
+                    _envios_conc_tv = carregar_envios_op_historico()
+                    _n_envios_conc_tv = (_envios_conc_tv['lote_id'].value_counts()
+                                         if not _envios_conc_tv.empty else pd.Series(dtype=int))
+                    _origens_rd_tv = {}
+                    for _lid_tv in concluidos['id'].astype(int):
+                        if int(_n_envios_conc_tv.get(_lid_tv, 0)) > 1:
+                            _envios_lid_tv = _envios_conc_tv[_envios_conc_tv['lote_id'] == _lid_tv]
+                            _origens_rd_tv[_lid_tv] = [('OP_ENVIO', int(e)) for e in _envios_lid_tv['id']]
+                        else:
+                            _origens_rd_tv[_lid_tv] = [('OP', _lid_tv)]
+                    _ids_rd_op_tv       = [oid for keys in _origens_rd_tv.values() for tipo, oid in keys if tipo == 'OP']
+                    _ids_rd_op_envio_tv = [oid for keys in _origens_rd_tv.values() for tipo, oid in keys if tipo == 'OP_ENVIO']
+                    _arqs_rd_op_tv       = carregar_arquivos_romaneio_devolvido_varios('OP', tuple(_ids_rd_op_tv))
+                    _arqs_rd_op_envio_tv = carregar_arquivos_romaneio_devolvido_varios('OP_ENVIO', tuple(_ids_rd_op_envio_tv))
+
+                    def _arqs_romaneio_devolvido_tv(lote_id):
+                        arqs = []
+                        for tipo, oid in _origens_rd_tv.get(int(lote_id), []):
+                            fonte = _arqs_rd_op_tv if tipo == 'OP' else _arqs_rd_op_envio_tv
+                            arqs.extend(fonte.get(oid, []))
+                        return arqs
+
                     def _card_lote(row, key_prefix):
                         urg  = row['_urgencia']
                         cfg  = URG_CONFIG[urg]
@@ -7258,6 +7311,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     arq_id, arq_nome, arq_tipo, _, _ = arq
                                     _bloco_baixar_arquivo(arq_id, arq_nome, arq_tipo, f"tv_{key_prefix}",
                                                           rotulo=f"⬇️ {arq_nome}")
+                        if row['Status_Item'] == 'Concluido':
+                            arqs_rd_tv = _arqs_romaneio_devolvido_tv(row['id'])
+                            if arqs_rd_tv:
+                                with st.expander(f"📄 Romaneio devolvido ({len(arqs_rd_tv)})", expanded=False):
+                                    for arq_rd in arqs_rd_tv:
+                                        arq_id_rd, arq_nome_rd, arq_tipo_rd, arq_por_rd, arq_em_rd = arq_rd
+                                        st.caption(f"{arq_por_rd} — {pd.to_datetime(arq_em_rd).strftime('%d/%m/%Y %H:%M')}")
+                                        _bloco_baixar_arquivo(arq_id_rd, arq_nome_rd, arq_tipo_rd, f"tv_rd_{key_prefix}",
+                                                              rotulo=f"⬇️ {arq_nome_rd}")
 
                     col_prod, col_pend, col_conc = st.columns(3)
                     colunas_tv = [
@@ -7849,6 +7911,29 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     # Anexos de todos os lotes da tela numa consulta so (antes era 1 por card)
                     _arqs_por_lote_tv_esq = carregar_arquivos_op_varios(tuple(sorted(int(i) for i in df_tv_esq['id'])))
 
+                    # Romaneio devolvido (assinado) dos lotes concluidos -- mesma ideia do painel ACM
+                    _envios_conc_tv_esq = carregar_envios_op_historico()
+                    _n_envios_conc_tv_esq = (_envios_conc_tv_esq['lote_id'].value_counts()
+                                             if not _envios_conc_tv_esq.empty else pd.Series(dtype=int))
+                    _origens_rd_tv_esq = {}
+                    for _lid_tv_esq in concluidos_esq['id'].astype(int):
+                        if int(_n_envios_conc_tv_esq.get(_lid_tv_esq, 0)) > 1:
+                            _envios_lid_tv_esq = _envios_conc_tv_esq[_envios_conc_tv_esq['lote_id'] == _lid_tv_esq]
+                            _origens_rd_tv_esq[_lid_tv_esq] = [('OP_ENVIO', int(e)) for e in _envios_lid_tv_esq['id']]
+                        else:
+                            _origens_rd_tv_esq[_lid_tv_esq] = [('OP', _lid_tv_esq)]
+                    _ids_rd_op_tv_esq       = [oid for keys in _origens_rd_tv_esq.values() for tipo, oid in keys if tipo == 'OP']
+                    _ids_rd_op_envio_tv_esq = [oid for keys in _origens_rd_tv_esq.values() for tipo, oid in keys if tipo == 'OP_ENVIO']
+                    _arqs_rd_op_tv_esq       = carregar_arquivos_romaneio_devolvido_varios('OP', tuple(_ids_rd_op_tv_esq))
+                    _arqs_rd_op_envio_tv_esq = carregar_arquivos_romaneio_devolvido_varios('OP_ENVIO', tuple(_ids_rd_op_envio_tv_esq))
+
+                    def _arqs_romaneio_devolvido_tv_esq(lote_id):
+                        arqs = []
+                        for tipo, oid in _origens_rd_tv_esq.get(int(lote_id), []):
+                            fonte = _arqs_rd_op_tv_esq if tipo == 'OP' else _arqs_rd_op_envio_tv_esq
+                            arqs.extend(fonte.get(oid, []))
+                        return arqs
+
                     def _card_lote_esq(row, key_prefix):
                         urg  = row['_urgencia']
                         cfg  = URG_CONFIG_ESQ[urg]
@@ -7889,6 +7974,15 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     arq_id, arq_nome, arq_tipo, _, _ = arq
                                     _bloco_baixar_arquivo(arq_id, arq_nome, arq_tipo, f"tvesq_{key_prefix}",
                                                           rotulo=f"⬇️ {arq_nome}")
+                        if row['Status_Item'] == 'Concluido':
+                            arqs_rd_tv_esq = _arqs_romaneio_devolvido_tv_esq(row['id'])
+                            if arqs_rd_tv_esq:
+                                with st.expander(f"📄 Romaneio devolvido ({len(arqs_rd_tv_esq)})", expanded=False):
+                                    for arq_rd in arqs_rd_tv_esq:
+                                        arq_id_rd, arq_nome_rd, arq_tipo_rd, arq_por_rd, arq_em_rd = arq_rd
+                                        st.caption(f"{arq_por_rd} — {pd.to_datetime(arq_em_rd).strftime('%d/%m/%Y %H:%M')}")
+                                        _bloco_baixar_arquivo(arq_id_rd, arq_nome_rd, arq_tipo_rd, f"tvesq_rd_{key_prefix}",
+                                                              rotulo=f"⬇️ {arq_nome_rd}")
 
                     col_prod_e, col_pend_e, col_conc_e = st.columns(3)
                     colunas_tv_esq = [
