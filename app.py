@@ -3203,6 +3203,14 @@ def _carimbar_num_op(nome: str, conteudo: bytes, num_op: str) -> bytes:
         pass  # se o carimbo falhar por qualquer motivo, guarda o arquivo original em vez de travar o upload
     return conteudo
 
+def _eh_conteudo_heic(conteudo: bytes) -> bool:
+    """Detecta HEIC/HEIF pelos bytes magicos (caixa 'ftyp' do ISOBMFF), nao pelo nome do
+    arquivo -- alguns apps de compartilhamento/transferencia trocam a extensao pra .jpg
+    sem de fato converter a foto, e ai checar so a extensao deixa passar disfarcado."""
+    if len(conteudo) < 12 or conteudo[4:8] != b'ftyp':
+        return False
+    return conteudo[8:12] in (b'heic', b'heix', b'heim', b'heis', b'hevc', b'hevx', b'hevm', b'hevs', b'mif1', b'msf1')
+
 def _normalizar_imagem_heic(nome: str, tipo: str, conteudo: bytes) -> tuple[str, str, bytes]:
     """iPhone tira foto em HEIC por padrao. Como nenhum uploader do sistema aceita HEIC
     (so png/jpg/jpeg), sem isso era o proprio iOS que convertia a foto pra JPEG antes de
@@ -3210,9 +3218,13 @@ def _normalizar_imagem_heic(nome: str, tipo: str, conteudo: bytes) -> tuple[str,
     HEIC, perdia qualidade visivel (reclamado pela Joice em Romaneios Devolvidos, 2026-09-01).
     Agora o uploader aceita .heic/.heif tambem, e a conversao pra JPEG e' feita aqui, uma vez
     so, em qualidade alta (92) -- em vez de depender do que o aparelho decidir fazer.
+    Tambem confere a assinatura do arquivo, nao so a extensao: alguns compartilhamentos
+    entregam HEIC de verdade com nome ".jpg", e so pela extensao isso passava disfarcado
+    (reclamado pela Joice em Romaneios Devolvidos, 2026-09-16 -- baixava e o Windows dizia
+    "sem suporte pra esse formato").
     Pra qualquer outro formato, devolve (nome, tipo, conteudo) sem alteracao nenhuma."""
     ext = nome.rsplit('.', 1)[-1].lower() if '.' in nome else ''
-    if ext not in ('heic', 'heif'):
+    if ext not in ('heic', 'heif') and not _eh_conteudo_heic(conteudo):
         return nome, tipo, conteudo
     try:
         import io
@@ -3223,10 +3235,10 @@ def _normalizar_imagem_heic(nome: str, tipo: str, conteudo: bytes) -> tuple[str,
         img = ImageOps.exif_transpose(img)  # HEIC guarda rotacao no EXIF -- sem isso a foto pode sair deitada
         out = io.BytesIO()
         img.convert("RGB").save(out, format="JPEG", quality=92, optimize=True)
-        novo_nome = nome.rsplit('.', 1)[0] + '.jpg'
+        novo_nome = (nome.rsplit('.', 1)[0] if '.' in nome else nome) + '.jpg'
         return novo_nome, "image/jpeg", out.getvalue()
     except Exception:
-        return nome, tipo, conteudo  # se a conversao falhar por qualquer motivo, guarda o HEIC original em vez de travar o upload
+        return nome, tipo, conteudo  # se a conversao falhar por qualquer motivo, guarda o original em vez de travar o upload
 
 def _buscar_num_op_item(item_id: int) -> str | None:
     conn = conectar_banco()
