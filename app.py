@@ -7163,6 +7163,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 df_tv = carregar_micro()
                 if not df_tv.empty:
                     df_tv = df_tv[df_tv['Escopo'] == 'ACM']
+
+                obras_tv_acm = ["Todas as obras"] + sorted(df_tv['Obra_Vinculada'].dropna().unique().tolist()) if not df_tv.empty else ["Todas as obras"]
+                obra_tv_acm = st.selectbox("Filtrar por obra:", obras_tv_acm, key="tv_acm_obra")
+                if obra_tv_acm != "Todas as obras":
+                    df_tv = df_tv[df_tv['Obra_Vinculada'] == obra_tv_acm]
+
                 if df_tv.empty:
                     st.markdown("<div style='text-align:center;padding:60px;color:#94A3B8;font-size:20px;'>Nenhum lote cadastrado.</div>", unsafe_allow_html=True)
                 else:
@@ -7794,6 +7800,12 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                 df_tv_esq = carregar_micro()
                 if not df_tv_esq.empty:
                     df_tv_esq = df_tv_esq[df_tv_esq['Escopo'] == 'Esquadria-Vidro']
+
+                obras_tv_esq = ["Todas as obras"] + sorted(df_tv_esq['Obra_Vinculada'].dropna().unique().tolist()) if not df_tv_esq.empty else ["Todas as obras"]
+                obra_tv_esq = st.selectbox("Filtrar por obra:", obras_tv_esq, key="tv_esq_obra")
+                if obra_tv_esq != "Todas as obras":
+                    df_tv_esq = df_tv_esq[df_tv_esq['Obra_Vinculada'] == obra_tv_esq]
+
                 if df_tv_esq.empty:
                     st.markdown("<div style='text-align:center;padding:60px;color:#94A3B8;font-size:20px;'>Nenhum lote de Esquadrias/Vidro cadastrado.</div>", unsafe_allow_html=True)
                 else:
