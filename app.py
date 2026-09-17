@@ -10211,10 +10211,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     # consulta por componente toda vez que o expander dele estiver aberto.
                     _coms_por_comp = carregar_comentarios_varios('componente_op', tuple(todos_comps['id'])) if not todos_comps.empty else {}
 
-                    for _, op_row in df_ops_comp.iterrows():
+                    def _render_op_card_almox(op_row):
                         df_comp = _comps_por_item.get(int(op_row['item_id']), todos_comps.iloc[0:0])
                         if df_comp.empty:
-                            continue
+                            return
                         n_total   = len(df_comp)
                         n_conf    = len(df_comp[df_comp['status_item'] != 'Aguardando Conferencia'])
                         n_indisp  = len(df_comp[df_comp['status_item'] == 'Indisponivel'])
@@ -10234,10 +10234,11 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             _hc_op[0].markdown(_hdr_op)
                             # So monta a lista pesada de componentes quando o toggle esta ligado.
                             # Streamlit executa o corpo de um expander fechado do mesmo jeito — com
-                            # centenas de itens era isso que travava a tela. 'continue' sai do 'with'
-                            # e pula pro proximo item do laco.
+                            # centenas de itens era isso que travava a tela. 'return' sai da funcao
+                            # sem montar o resto (equivalente ao 'continue' de antes, so' que agora
+                            # cada card e' uma funcao, chamada de dentro ou fora de um agrupamento).
                             if not _hc_op[1].toggle("🔍 Conferir / emitir", key=f"alm_comp_open_{int(op_row['item_id'])}"):
-                                continue
+                                return
                             hc = st.columns([4, 2, 2, 3, 2])
                             for col_h, label in zip(hc, ["COMPONENTE", "QTD", "UN", "STATUS", "AÇÃO"]):
                                 col_h.markdown(f"<div style='font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.07em;'>{label}</div>", unsafe_allow_html=True)
@@ -10324,6 +10325,32 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         on_click=registrar_romaneio_componentes_emitido,
                                         args=(item_id_op, op_row['num_op'], op_row['obra_vinculada'], st.session_state.usuario_nome)
                                     )
+
+                    # Agrupar por obra -- mesmo padrao do filtro global de obra usado em
+                    # Logistica/Romaneios Devolvidos/Documentos: com uma obra especifica
+                    # selecionada na barra lateral, filtra e mostra a lista plana; com "Todas
+                    # as Obras", agrupa em expanders por obra (so o 1o vem aberto).
+                    df_ops_validas = df_ops_comp[
+                        df_ops_comp['item_id'].apply(lambda i: not _comps_por_item.get(int(i), todos_comps.iloc[0:0]).empty)
+                    ].copy()
+                    if not df_ops_validas.empty:
+                        df_ops_validas['obra_vinculada'] = df_ops_validas['obra_vinculada'].fillna('Sem obra vinculada')
+                    if obra_selecionada:
+                        df_ops_validas = df_ops_validas[df_ops_validas['obra_vinculada'] == obra_selecionada]
+
+                    if df_ops_validas.empty:
+                        st.caption("Nenhuma OP com componentes pra essa obra." if obra_selecionada else "Nenhuma OP com componentes cadastrada.")
+                    elif not obra_selecionada and df_ops_validas['obra_vinculada'].nunique() > 1:
+                        _resumo_obras_almox = (df_ops_validas.groupby('obra_vinculada').size()
+                                                .reset_index(name='qtd').sort_values('qtd', ascending=False))
+                        for i_obra_almox, ob_row_almox in enumerate(_resumo_obras_almox.itertuples(index=False)):
+                            with st.expander(f"🏗️ {ob_row_almox.obra_vinculada} — {int(ob_row_almox.qtd)} OP(s)",
+                                              expanded=(i_obra_almox == 0), key=f"almox_op_grupo_{ob_row_almox.obra_vinculada}"):
+                                for _, op_row in df_ops_validas[df_ops_validas['obra_vinculada'] == ob_row_almox.obra_vinculada].iterrows():
+                                    _render_op_card_almox(op_row)
+                    else:
+                        for _, op_row in df_ops_validas.iterrows():
+                            _render_op_card_almox(op_row)
 
             elif alm_view == "📦 Romaneios de Insumos":
                 df_todos_ins = carregar_todos_itens_insumos()
@@ -10447,7 +10474,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     if df_saidas_pend_ins.empty and not df_saidas.empty and not mostrar_conc_ins:
                         st.success("✅ Nenhuma saída pendente — tudo arquivado!")
 
-                    for _, saida_row in df_saidas_exibir_ins.iterrows():
+                    def _render_saida_card_almox(saida_row):
                         df_itens_saida = _itens_por_saida.get(int(saida_row['id']), _itens_ins_vazio)
                         n_total_ins = len(df_itens_saida)
                         n_conf_ins  = len(df_itens_saida[df_itens_saida['status_item'] != 'Aguardando Conferencia']) if n_total_ins else 0
@@ -10471,10 +10498,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                             # So monta a lista pesada de itens (selectbox/obs/comentarios por item,
                             # botoes de romaneio/arquivar/excluir) quando o toggle esta ligado.
                             # Streamlit executa o corpo de um expander fechado do mesmo jeito — com
-                            # centenas de itens ativos era isso que travava a tela. 'continue' sai do
-                            # 'with' e pula pra proxima saida do laco.
+                            # centenas de itens ativos era isso que travava a tela. 'return' sai da
+                            # funcao sem montar o resto (equivalente ao 'continue' de antes).
                             if not _hc_ins[1].toggle("🔍 Conferir / emitir", key=f"alm_ins_open_{int(saida_row['id'])}"):
-                                continue
+                                return
                             pode_editar_item_ins = tem_setor("Almoxarifado")
                             hci = st.columns([4, 1.5, 1, 2.5, 2.5, 0.8]) if pode_editar_item_ins else st.columns([4, 2, 2, 3, 2])
                             labels_ins_header = ["INSUMO", "QTD", "UN", "STATUS", "AÇÃO", ""] if pode_editar_item_ins else ["INSUMO", "QTD", "UN", "STATUS", "AÇÃO"]
@@ -10654,6 +10681,30 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         if st.button("Cancelar", key=f"btn_cancela_del_saida_ins_{saida_row['id']}"):
                                             st.session_state.pop(confirm_key_del_ins, None)
                                             st.rerun()
+
+                    # Agrupar por obra -- mesmo padrao da lista de OPs acima e das outras telas
+                    # (Logistica/Romaneios Devolvidos/Documentos): obra especifica selecionada
+                    # filtra e mostra plano; "Todas as Obras" agrupa em expanders (so o 1o aberto).
+                    df_saidas_almox = df_saidas_exibir_ins.copy()
+                    if not df_saidas_almox.empty:
+                        df_saidas_almox['obra'] = df_saidas_almox['obra'].fillna('Sem obra vinculada')
+                    if obra_selecionada:
+                        df_saidas_almox = df_saidas_almox[df_saidas_almox['obra'] == obra_selecionada]
+
+                    if df_saidas_almox.empty:
+                        if not df_saidas_exibir_ins.empty:
+                            st.caption("Nenhuma saída de insumos pra essa obra.")
+                    elif not obra_selecionada and df_saidas_almox['obra'].nunique() > 1:
+                        _resumo_obras_ins = (df_saidas_almox.groupby('obra').size()
+                                              .reset_index(name='qtd').sort_values('qtd', ascending=False))
+                        for i_obra_ins, ob_row_ins in enumerate(_resumo_obras_ins.itertuples(index=False)):
+                            with st.expander(f"🏗️ {ob_row_ins.obra} — {int(ob_row_ins.qtd)} saída(s)",
+                                              expanded=(i_obra_ins == 0), key=f"almox_ins_grupo_{ob_row_ins.obra}"):
+                                for _, saida_row in df_saidas_almox[df_saidas_almox['obra'] == ob_row_ins.obra].iterrows():
+                                    _render_saida_card_almox(saida_row)
+                    else:
+                        for _, saida_row in df_saidas_almox.iterrows():
+                            _render_saida_card_almox(saida_row)
 
     # ==================================================
     # ROMANEIO MANUAL (sem OP vinculada)
