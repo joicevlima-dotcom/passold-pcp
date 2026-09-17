@@ -10335,6 +10335,20 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     ].copy()
                     if not df_ops_validas.empty:
                         df_ops_validas['obra_vinculada'] = df_ops_validas['obra_vinculada'].fillna('Sem obra vinculada')
+                        # Aguardando (nenhum componente conferido ainda) fica no topo da lista --
+                        # e' o que precisa de atencao primeiro. sort_values 'stable' preserva a
+                        # ordem original (por Cod_Lote) dentro de cada prioridade.
+                        def _prioridade_op_almox(item_id):
+                            df_c = _comps_por_item.get(int(item_id), todos_comps.iloc[0:0])
+                            if df_c.empty:
+                                return 1
+                            n_t = len(df_c)
+                            n_c = len(df_c[df_c['status_item'] != 'Aguardando Conferencia'])
+                            n_i = len(df_c[df_c['status_item'] == 'Indisponivel'])
+                            n_p = len(df_c[df_c['status_item'] == 'Parcial'])
+                            return 0 if (n_i == 0 and n_p == 0 and n_c < n_t) else 1
+                        df_ops_validas['_prioridade'] = df_ops_validas['item_id'].apply(_prioridade_op_almox)
+                        df_ops_validas = df_ops_validas.sort_values('_prioridade', kind='stable')
                     if obra_selecionada:
                         df_ops_validas = df_ops_validas[df_ops_validas['obra_vinculada'] == obra_selecionada]
 
@@ -10688,6 +10702,18 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     df_saidas_almox = df_saidas_exibir_ins.copy()
                     if not df_saidas_almox.empty:
                         df_saidas_almox['obra'] = df_saidas_almox['obra'].fillna('Sem obra vinculada')
+                        # Aguardando (nenhum item conferido ainda) fica no topo, igual a lista de OPs.
+                        def _prioridade_saida_almox(saida_id):
+                            df_i = _itens_por_saida.get(int(saida_id), _itens_ins_vazio)
+                            n_t = len(df_i)
+                            if n_t == 0:
+                                return 1
+                            n_c = len(df_i[df_i['status_item'] != 'Aguardando Conferencia'])
+                            n_i = len(df_i[df_i['status_item'] == 'Indisponivel'])
+                            n_p = len(df_i[df_i['status_item'] == 'Parcial'])
+                            return 0 if (n_i == 0 and n_p == 0 and n_c < n_t) else 1
+                        df_saidas_almox['_prioridade'] = df_saidas_almox['id'].apply(_prioridade_saida_almox)
+                        df_saidas_almox = df_saidas_almox.sort_values('_prioridade', kind='stable')
                     if obra_selecionada:
                         df_saidas_almox = df_saidas_almox[df_saidas_almox['obra'] == obra_selecionada]
 
