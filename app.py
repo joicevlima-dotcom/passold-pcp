@@ -1885,10 +1885,15 @@ def carregar_fotos_dashboard(limite: int = 24):
     (sem paginar clique a clique) fica leve mesmo com dezenas de fotos."""
     conn = conectar_banco()
     try:
-        return pd.read_sql_query(
+        df = pd.read_sql_query(
             "SELECT id, nome_arquivo, tipo_arquivo, conteudo, legenda, enviado_por, enviado_em "
             "FROM fotos_dashboard ORDER BY enviado_em DESC LIMIT %s", conn, params=(limite,)
         )
+        # memoryview do psycopg2 nao e' picklable (cache_data usa pickle) -- converte pra
+        # bytes puro, mesmo cuidado de carregar_conteudo_arquivo/_romaneio_devolvido.
+        if not df.empty:
+            df['conteudo'] = df['conteudo'].apply(bytes)
+        return df
     except Exception:
         return pd.DataFrame()
     finally:
@@ -6628,6 +6633,73 @@ if nome_aba == "Dashboard":
             </div>
             """, unsafe_allow_html=True)
 
+        # ── Carrossel de fotos das obras ───────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("#### 📸 Fotos das Obras")
+
+        if setor == "Master":
+            with st.expander("➕ Adicionar foto", expanded=False):
+                foto_dash_up = st.file_uploader(
+                    "Foto da obra (aceita HEIC do iPhone):",
+                    type=["png", "jpg", "jpeg", "heic", "heif"], key=_uploader_key("dash_foto_up")
+                )
+                legenda_dash_up = st.text_input(
+                    "Legenda:", key=_uploader_key("dash_foto_legenda"),
+                    placeholder="Ex: Dona Lola — fachada Set/26"
+                )
+                if st.button("💾 Salvar foto", key="btn_salvar_foto_dash", type="primary"):
+                    if not foto_dash_up:
+                        st.error("Selecione uma foto.")
+                    elif not legenda_dash_up.strip():
+                        st.error("Escreva uma legenda.")
+                    else:
+                        nome_fd, tipo_fd, bytes_fd = _preparar_foto_dashboard(
+                            foto_dash_up.name, foto_dash_up.type or "", foto_dash_up.read()
+                        )
+                        if salvar_foto_dashboard(nome_fd, tipo_fd, bytes_fd, legenda_dash_up.strip(), st.session_state.usuario_nome):
+                            registrar_auditoria(st.session_state.usuario_nome, "DASHBOARD_FOTO_ADICIONAR", legenda_dash_up.strip())
+                            _resetar_uploader("dash_foto_up")
+                            _resetar_uploader("dash_foto_legenda")
+                            st.toast("✅ Foto adicionada!")
+                            st.rerun()
+
+        df_fotos_dash = carregar_fotos_dashboard()
+        if df_fotos_dash.empty:
+            if setor == "Master":
+                st.caption("Nenhuma foto ainda — adicione a primeira acima.")
+        else:
+            _cards_fotos_dash = "".join(
+                f"""
+                <div style="flex:0 0 auto;width:220px;">
+                    <img src="data:{foto_row['tipo_arquivo'] or 'image/jpeg'};base64,{base64.b64encode(bytes(foto_row['conteudo'])).decode()}"
+                         style="width:220px;height:160px;object-fit:cover;border-radius:10px;border:1px solid var(--border);display:block;">
+                    <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;padding:0 2px;">{html_escape(str(foto_row['legenda'])) if pd.notna(foto_row['legenda']) else ''}</div>
+                </div>
+                """
+                for _, foto_row in df_fotos_dash.iterrows()
+            )
+            st.markdown(
+                f'<div style="display:flex;gap:14px;overflow-x:auto;padding:4px 2px 12px;">{_cards_fotos_dash}</div>',
+                unsafe_allow_html=True
+            )
+
+            if setor == "Master":
+                with st.expander("🛠️ Gerenciar fotos", expanded=False):
+                    for _, foto_row in df_fotos_dash.iterrows():
+                        gfc1, gfc2, gfc3 = st.columns([1, 4, 1])
+                        with gfc1:
+                            st.image(bytes(foto_row['conteudo']), width=80)
+                        with gfc2:
+                            legenda_gf = str(foto_row['legenda']) if pd.notna(foto_row['legenda']) else '(sem legenda)'
+                            st.markdown(f"**{html_escape(legenda_gf)}**")
+                            st.caption(f"{foto_row['enviado_por']} — {pd.to_datetime(foto_row['enviado_em']).strftime('%d/%m/%Y')}")
+                        with gfc3:
+                            if st.button("🗑️", key=f"del_foto_dash_{foto_row['id']}"):
+                                if deletar_foto_dashboard(int(foto_row['id'])):
+                                    registrar_auditoria(st.session_state.usuario_nome, "DASHBOARD_FOTO_EXCLUIR", legenda_gf)
+                                    st.toast("Foto removida.")
+                                    st.rerun()
+
         st.markdown("<br>", unsafe_allow_html=True)
 
         col_esq, col_dir = st.columns([3, 2])
@@ -6717,73 +6789,6 @@ if nome_aba == "Dashboard":
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
-
-        # ── Carrossel de fotos das obras ───────────────────────────
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("#### 📸 Fotos das Obras")
-
-        if setor == "Master":
-            with st.expander("➕ Adicionar foto", expanded=False):
-                foto_dash_up = st.file_uploader(
-                    "Foto da obra (aceita HEIC do iPhone):",
-                    type=["png", "jpg", "jpeg", "heic", "heif"], key=_uploader_key("dash_foto_up")
-                )
-                legenda_dash_up = st.text_input(
-                    "Legenda:", key=_uploader_key("dash_foto_legenda"),
-                    placeholder="Ex: Dona Lola — fachada Set/26"
-                )
-                if st.button("💾 Salvar foto", key="btn_salvar_foto_dash", type="primary"):
-                    if not foto_dash_up:
-                        st.error("Selecione uma foto.")
-                    elif not legenda_dash_up.strip():
-                        st.error("Escreva uma legenda.")
-                    else:
-                        nome_fd, tipo_fd, bytes_fd = _preparar_foto_dashboard(
-                            foto_dash_up.name, foto_dash_up.type or "", foto_dash_up.read()
-                        )
-                        if salvar_foto_dashboard(nome_fd, tipo_fd, bytes_fd, legenda_dash_up.strip(), st.session_state.usuario_nome):
-                            registrar_auditoria(st.session_state.usuario_nome, "DASHBOARD_FOTO_ADICIONAR", legenda_dash_up.strip())
-                            _resetar_uploader("dash_foto_up")
-                            _resetar_uploader("dash_foto_legenda")
-                            st.toast("✅ Foto adicionada!")
-                            st.rerun()
-
-        df_fotos_dash = carregar_fotos_dashboard()
-        if df_fotos_dash.empty:
-            if setor == "Master":
-                st.caption("Nenhuma foto ainda — adicione a primeira acima.")
-        else:
-            _cards_fotos_dash = "".join(
-                f"""
-                <div style="flex:0 0 auto;width:220px;">
-                    <img src="data:{foto_row['tipo_arquivo'] or 'image/jpeg'};base64,{base64.b64encode(bytes(foto_row['conteudo'])).decode()}"
-                         style="width:220px;height:160px;object-fit:cover;border-radius:10px;border:1px solid var(--border);display:block;">
-                    <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;padding:0 2px;">{html_escape(str(foto_row['legenda'])) if pd.notna(foto_row['legenda']) else ''}</div>
-                </div>
-                """
-                for _, foto_row in df_fotos_dash.iterrows()
-            )
-            st.markdown(
-                f'<div style="display:flex;gap:14px;overflow-x:auto;padding:4px 2px 12px;">{_cards_fotos_dash}</div>',
-                unsafe_allow_html=True
-            )
-
-            if setor == "Master":
-                with st.expander("🛠️ Gerenciar fotos", expanded=False):
-                    for _, foto_row in df_fotos_dash.iterrows():
-                        gfc1, gfc2, gfc3 = st.columns([1, 4, 1])
-                        with gfc1:
-                            st.image(bytes(foto_row['conteudo']), width=80)
-                        with gfc2:
-                            legenda_gf = str(foto_row['legenda']) if pd.notna(foto_row['legenda']) else '(sem legenda)'
-                            st.markdown(f"**{html_escape(legenda_gf)}**")
-                            st.caption(f"{foto_row['enviado_por']} — {pd.to_datetime(foto_row['enviado_em']).strftime('%d/%m/%Y')}")
-                        with gfc3:
-                            if st.button("🗑️", key=f"del_foto_dash_{foto_row['id']}"):
-                                if deletar_foto_dashboard(int(foto_row['id'])):
-                                    registrar_auditoria(st.session_state.usuario_nome, "DASHBOARD_FOTO_EXCLUIR", legenda_gf)
-                                    st.toast("Foto removida.")
-                                    st.rerun()
 
 elif nome_aba not in abas_disponiveis:
     st.warning("Página não encontrada.")
