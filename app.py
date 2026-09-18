@@ -6631,8 +6631,32 @@ if nome_aba == "Dashboard":
                 if setor == "Master":
                     st.caption("Nenhuma foto ainda — adicione a primeira acima.")
             else:
-                # st.image (nao <img> cru) da' de proposito -- clique na foto abre ela
-                # em tamanho grande (lightbox nativo do Streamlit), tipo anuncio de Facebook.
+                if "dash_foto_idx" not in st.session_state:
+                    st.session_state.dash_foto_idx = None
+
+                @st.dialog("Foto da obra", width="large")
+                def _dialogo_foto_dash(_df_fotos):
+                    _idx_fd = st.session_state.dash_foto_idx
+                    _foto_fd = _df_fotos.iloc[_idx_fd]
+                    st.image(bytes(_foto_fd['conteudo']), use_container_width=True)
+                    _legenda_fd = str(_foto_fd['legenda']) if pd.notna(_foto_fd['legenda']) else ''
+                    st.caption(f"{_legenda_fd} — {_idx_fd + 1} de {len(_df_fotos)}")
+                    _cnav1, _cnav2 = st.columns(2)
+                    with _cnav1:
+                        if st.button("‹ Anterior", disabled=(_idx_fd == 0), use_container_width=True, key="dash_foto_ant"):
+                            st.session_state.dash_foto_idx -= 1
+                            st.rerun()
+                    with _cnav2:
+                        if st.button("Próxima ›", disabled=(_idx_fd == len(_df_fotos) - 1), use_container_width=True, key="dash_foto_prox"):
+                            st.session_state.dash_foto_idx += 1
+                            st.rerun()
+                    if st.button("Fechar", key="dash_foto_fechar", use_container_width=True):
+                        st.session_state.dash_foto_idx = None
+                        st.rerun()
+
+                # st.image (nao <img> cru) mostra a foto; o botao "Ampliar" abre a
+                # galeria de verdade (st.dialog com Anterior/Proxima) -- e' o que da'
+                # o "clica e passa pro lado" que a Joice pediu (tipo anuncio de Facebook).
                 _cols_fotos_dash = st.columns(2)
                 for _i_fd, (_, foto_row) in enumerate(df_fotos_dash.iterrows()):
                     with _cols_fotos_dash[_i_fd % 2]:
@@ -6640,6 +6664,12 @@ if nome_aba == "Dashboard":
                             bytes(foto_row['conteudo']), use_container_width=True,
                             caption=str(foto_row['legenda']) if pd.notna(foto_row['legenda']) else None
                         )
+                        if st.button("🔍", key=f"ampliar_foto_dash_{foto_row['id']}", use_container_width=True):
+                            st.session_state.dash_foto_idx = _i_fd
+                            st.rerun()
+
+                if st.session_state.dash_foto_idx is not None:
+                    _dialogo_foto_dash(df_fotos_dash)
 
                 if setor == "Master":
                     with st.expander("🛠️ Gerenciar fotos", expanded=False):
@@ -13772,7 +13802,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
-                ("2026-09-18", "Dashboard: reorganizado em duas colunas — números principais à esquerda, \"📸 Fotos das Obras\" à direita (clique numa foto pra abrir em tamanho grande). A faixa \"🚨 Alertas do Sistema\" saiu, já que a informação (lotes atrasados, OPs aguardando liberação) já aparece nos números."),
+                ("2026-09-18", "Dashboard: reorganizado em duas colunas — números principais à esquerda, \"📸 Fotos das Obras\" à direita. Clique no 🔍 de uma foto pra abrir uma galeria de verdade, com \"‹ Anterior\"/\"Próxima ›\" pra passear pelas fotos sem fechar. A faixa \"🚨 Alertas do Sistema\" saiu, já que a informação (lotes atrasados, OPs aguardando liberação) já aparece nos números."),
                 ("2026-09-18", "Logística: trocamos \"📋 Fila Prioritária\", \"🚛 Envios Agendados\" e \"🗂️ Histórico de Despachos\" (e os 4 cartões de métrica do topo, que dependiam delas) por um \"🗓️ Planejamento Semanal de Entregas\" — abas de Segunda a Sábado (cada uma mostra \"· N\" quando já tem entrega), onde dá pra adicionar a obra e uma observação livre (ex: \"insumos junto\") no dia da aba aberta, navegar entre semanas com ◀/▶ e remover com o 🗑️. Fica registrado por data, então também serve de histórico do que foi entregue em semanas passadas. \"✅ OPs Prontas — Emitir Romaneio\" continua exatamente igual."),
                 ("2026-09-10", "Configurações → usuários: agora cada pessoa tem um \"setor base\" e pode receber \"acessos extras\" de outros setores, sem virar Master. Ex: o pessoal do Compras pode ganhar acesso ao Almoxarifado; alguém da Medição pode ganhar acesso aos Romaneios Devolvidos. Dá pra editar os acessos de quem já existe (a pessoa vê a mudança no próximo login). Quem não tem nenhum acesso extra continua exatamente como antes."),
                 ("2026-09-08", "Romaneios Devolvidos: todos os cards agora mostram a data em que o romaneio foi emitido, no mesmo formato em todas as abas (\"Emitido em DD/MM/AAAA\"). Antes só os romaneios de OP com envio parcial mostravam a data. Nos romaneios de OP com envio único a data passou a ser a do envio real (registrado na Logística), não mais a data de despacho planejada."),
@@ -13823,7 +13853,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
 **Passo a passo:**
 - Ao entrar no sistema, o Dashboard abre em duas colunas: à esquerda, os 5 números principais (OPs aguardando liberação, liberadas em produção, concluídas, lotes com prazo vencido, obras ativas); à direita, "📸 Fotos das Obras".
-- Clique numa foto pra abrir ela em tamanho grande (mesmo mecanismo de "tela cheia" de qualquer foto do sistema). Master pode adicionar foto nova ("➕ Adicionar foto", aceita HEIC do iPhone) e organizar as existentes ("🛠️ Gerenciar fotos").
+- Clique no 🔍 embaixo de uma foto pra abrir a galeria: foto grande, com "‹ Anterior" e "Próxima ›" pra passar pelas outras sem fechar. Master pode adicionar foto nova ("➕ Adicionar foto", aceita HEIC do iPhone) e organizar as existentes ("🛠️ Gerenciar fotos").
 - Do lado esquerdo, mais abaixo, "Status dos Lotes" mostra a barra de proporção de cada status.
 - Do lado direito, "OPs por Obra" lista as obras por quantidade de OPs — clique na seta "▸" ao lado de uma obra pra abrir o detalhe (Em produção x Concluído). Clique de novo pra fechar.
 
