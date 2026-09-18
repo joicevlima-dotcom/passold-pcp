@@ -10147,7 +10147,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                         st.rerun()
 
             df_planej = carregar_planejamento_semanal(_dias_semana[0], _dias_semana[-1])
-            obras_planej = sorted(df_banco_macro['Obra'].unique().tolist()) if not df_banco_macro.empty else []
+            obras_planej = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
 
             # As colunas do dia ficam só com os cards -- nada de formulario ai dentro,
             # senao "Obra:"/"Observacao:"/"Adicionar" espremem numa coluna de ~1/6 da
