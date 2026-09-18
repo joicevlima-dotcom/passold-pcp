@@ -10154,45 +10154,57 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             df_planej = carregar_planejamento_semanal(_dias_semana[0], _dias_semana[-1])
             obras_planej = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
 
-            # As colunas do dia ficam só com os cards -- nada de formulario ai dentro,
-            # senao "Obra:"/"Observacao:"/"Adicionar" espremem numa coluna de ~1/6 da
-            # largura da tela e quebram letra por letra. O formulario fica unico, largura
-            # cheia, embaixo do quadro.
-            cols_planej = st.columns(6)
-            for _i, _dia in enumerate(_dias_semana):
-                with cols_planej[_i]:
-                    _marcador = "🔵 " if _dia == _hoje_pl else ""
-                    st.markdown(f"**{_marcador}{_nomes_dias[_i]}**")
-                    st.caption(_dia.strftime('%d/%m'))
-                    df_dia_planej = df_planej[df_planej['data'] == _dia]
-                    if df_dia_planej.empty:
-                        st.caption("—")
-                    for _, _item in df_dia_planej.iterrows():
-                        with st.container(border=True):
+            # Abas por dia (st.radio, nao st.tabs -- st.tabs roda o corpo de TODAS as
+            # abas em todo rerun, so escondendo a inativa com CSS; radio + if/elif so
+            # monta a aba escolhida, mesmo padrao ja usado no Almoxarifado). Options sao
+            # indices ESTAVEIS (0-5) -- se o texto (com "· N" mutavel) fosse a propria
+            # option, o Streamlit perde a selecao no rerun seguinte assim que a contagem
+            # daquele dia muda (o texto selecionado deixa de existir na lista nova).
+            _contagem_dia_planej = df_planej.groupby('data').size().to_dict() if not df_planej.empty else {}
+
+            def _fmt_dia_planej(_i):
+                _d = _dias_semana[_i]
+                _marcador = "🔵 " if _d == _hoje_pl else ""
+                _n = _contagem_dia_planej.get(_d, 0)
+                return f"{_marcador}{_nomes_dias[_i]} ({_d.strftime('%d/%m')})" + (f" · {_n}" if _n else "")
+
+            _idx_hoje_planej = _dias_semana.index(_hoje_pl) if _hoje_pl in _dias_semana else 0
+            _idx_dia_ativo = st.radio(
+                "Dia:", list(range(6)), index=_idx_hoje_planej, horizontal=True,
+                format_func=_fmt_dia_planej, key="log_planej_dia_tab", label_visibility="collapsed"
+            )
+            _dia_ativo = _dias_semana[_idx_dia_ativo]
+            _label_dia_ativo = _fmt_dia_planej(_idx_dia_ativo)
+
+            df_dia_planej = df_planej[df_planej['data'] == _dia_ativo] if not df_planej.empty else df_planej
+            if df_dia_planej.empty:
+                st.caption("Nenhuma entrega planejada pra esse dia ainda.")
+            else:
+                for _, _item in df_dia_planej.iterrows():
+                    with st.container(border=True):
+                        ci_pl, cd_pl = st.columns([6, 1])
+                        with ci_pl:
                             st.markdown(f"🏗️ **{_item['obra']}**")
                             if _item.get('observacao'):
                                 st.caption(_item['observacao'])
+                        with cd_pl:
                             if st.button("🗑️", key=f"del_planej_{_item['id']}", use_container_width=True):
                                 excluir_planejamento_semanal(int(_item['id']))
                                 st.rerun()
 
             st.write("")
-            with st.expander("➕ Adicionar obra a um dia", expanded=df_planej.empty, key="log_planej_add_expander"):
+            with st.expander(f"➕ Adicionar obra — {_label_dia_ativo}", expanded=df_dia_planej.empty, key="log_planej_add_expander"):
                 if not obras_planej:
                     st.caption("Cadastre uma obra primeiro.")
                 else:
-                    _opcoes_dia = {f"{_nomes_dias[i]} ({_dias_semana[i].strftime('%d/%m')})": _dias_semana[i] for i in range(6)}
-                    _idx_hoje = _dias_semana.index(_hoje_pl) if _hoje_pl in _dias_semana else 0
                     with st.form("log_planej_form", clear_on_submit=True):
-                        fp1, fp2, fp3 = st.columns(3)
+                        fp1, fp2 = st.columns(2)
                         with fp1:
-                            _dia_label = st.selectbox("Dia:", list(_opcoes_dia.keys()), index=_idx_hoje, key="log_planej_dia")
-                        with fp2:
                             _obra_nova = st.selectbox("Obra:", obras_planej, key="log_planej_obra")
-                        with fp3:
+                        with fp2:
                             _obs_nova = st.text_input("Observação:", key="log_planej_obs", placeholder="Ex: insumos junto")
                         if st.form_submit_button("Adicionar"):
-                            salvar_planejamento_semanal(_opcoes_dia[_dia_label], _obra_nova, _obs_nova, st.session_state.usuario_nome)
+                            salvar_planejamento_semanal(_dia_ativo, _obra_nova, _obs_nova, st.session_state.usuario_nome)
                             st.rerun()
 
     # ==================================================
@@ -14024,7 +14036,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
 **Passo a passo:**
 1. "✅ OPs Prontas — Emitir Romaneio": preencha o endereço (e a quantidade de volumes, se Esquadrias), clique "🖨️ Gerar Romaneio" e depois "⬇️ Baixar Romaneio" — o sistema já dá baixa na OP automaticamente ao baixar o arquivo. Mudou o endereço depois de gerar? Clique "🖨️ Gerar Romaneio" de novo antes de baixar. Sem peças lançadas, dá pra usar "Dar baixa (OP antiga, já emitido)".
-2. "🗓️ Planejamento Semanal de Entregas": abra "➕ Adicionar obra a um dia", escolha o dia (Segunda a Sábado), a obra e, se quiser, uma observação (ex: "insumos junto") e confirme — o card aparece na coluna do dia escolhido. Use "◀"/"▶" pra navegar entre semanas, e "Hoje" pra voltar rápido pra semana atual. Pra remover, clique no 🗑️ do card.
+2. "🗓️ Planejamento Semanal de Entregas": clique numa das abas de dia (Segunda a Sábado) pra ver só as entregas daquele dia — o número depois do "·" mostra quantas já tem. Abra "➕ Adicionar obra —", escolha a obra e, se quiser, uma observação (ex: "insumos junto") e confirme — entra no dia da aba aberta. Use "◀"/"▶" pra navegar entre semanas, e "Hoje" pra voltar rápido pra semana atual. Pra remover, clique no 🗑️ do card.
 
 **Regras importantes:**
 - Na lista "✅ OPs Prontas", o seletor "Organizar por:" tem duas opções: **"🏗️ Obra (com data)"** (padrão) separa por obra e, dentro de cada obra, por data que ficou pronto (Hoje, Ontem, Últimos 7 dias, Entre 8 e 30 dias, Há mais de 30 dias); **"📅 Só por data"** junta todas as obras e separa só pela data. Cada cartão mostra a data em que aquela OP ficou pronta.
