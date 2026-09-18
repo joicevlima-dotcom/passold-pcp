@@ -6699,7 +6699,12 @@ if nome_aba == "Dashboard":
         with col_fotos:
             st.markdown("##### 📸 Fotos das Obras")
 
-            if setor == "Master":
+            # Restrito ao login "master" especificamente, nao a todo mundo com
+            # setor Master (Daniel/Anderson/Davi tambem sao Master) -- pedido
+            # explicito da Joice pra só ela ver os controles de adicionar/gerenciar
+            # aqui no Dashboard; nao mexe no que "Master" significa no resto do app.
+            _eh_dona_dashboard = st.session_state.get("usuario_login") == "master"
+            if _eh_dona_dashboard:
                 with st.expander("➕ Adicionar foto", expanded=False):
                     foto_dash_up = st.file_uploader(
                         "Foto da obra (aceita HEIC do iPhone):",
@@ -6727,7 +6732,7 @@ if nome_aba == "Dashboard":
 
             df_fotos_dash = carregar_fotos_dashboard()
             if df_fotos_dash.empty:
-                if setor == "Master":
+                if _eh_dona_dashboard:
                     st.caption("Nenhuma foto ainda — adicione a primeira acima.")
             else:
                 # Carrossel de 1 foto por vez com setas do lado (tipo anuncio de
@@ -6764,7 +6769,7 @@ if nome_aba == "Dashboard":
                 _legenda_fd = str(_foto_fd['legenda']) if pd.notna(_foto_fd['legenda']) else ''
                 st.caption(f"{_legenda_fd} — {_idx_fd + 1} de {len(df_fotos_dash)}")
 
-                if setor == "Master":
+                if _eh_dona_dashboard:
                     with st.expander("🛠️ Gerenciar fotos", expanded=False):
                         for _, foto_row in df_fotos_dash.iterrows():
                             gfc1, gfc2, gfc3 = st.columns([1, 4, 1])
@@ -13728,6 +13733,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-09-18", "Dashboard: \"➕ Adicionar foto\" e \"🛠️ Gerenciar fotos\" agora aparecem só pro usuário \"master\" — os demais acessos veem o carrossel de fotos limpo, sem esses controles."),
                 ("2026-09-18", "Dashboard: \"Status dos Lotes\" e \"OPs por Obra\" saíram (sem uso). No lugar, o \"🗓️ Planejamento Semanal de Entregas\" da Logística agora também aparece aqui embaixo — mesmo calendário, só que só pra visualizar (adicionar/remover continua sendo feito na Logística)."),
                 ("2026-09-18", "Dashboard: reorganizado em duas colunas — números principais à esquerda, \"📸 Fotos das Obras\" à direita, num carrossel de uma foto por vez com setas \"‹\"/\"›\" do lado pra passear entre elas, sem precisar abrir nada. A foto agora tem altura fixa, acompanhando a altura da coluna de números ao lado. A faixa \"🚨 Alertas do Sistema\" saiu, já que a informação (lotes atrasados, OPs aguardando liberação) já aparece nos números. Também reduzimos o espaço vazio no topo de toda tela do sistema (não só o Dashboard), pra caber mais conteúdo sem precisar rolar a página."),
                 ("2026-09-18", "Logística: trocamos \"📋 Fila Prioritária\", \"🚛 Envios Agendados\" e \"🗂️ Histórico de Despachos\" (e os 4 cartões de métrica do topo, que dependiam delas) por um \"🗓️ Planejamento Semanal de Entregas\" — abas de Segunda a Sábado (cada uma mostra \"· N\" quando já tem entrega), onde dá pra adicionar a obra e uma observação livre (ex: \"insumos junto\") no dia da aba aberta, navegar entre semanas com ◀/▶ e remover com o 🗑️. Fica registrado por data, então também serve de histórico do que foi entregue em semanas passadas. \"✅ OPs Prontas — Emitir Romaneio\" continua exatamente igual."),
@@ -13780,7 +13786,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
 **Passo a passo:**
 - Ao entrar no sistema, o Dashboard abre em duas colunas: à esquerda, os 5 números principais (OPs aguardando liberação, liberadas em produção, concluídas, lotes com prazo vencido, obras ativas); à direita, "📸 Fotos das Obras".
-- As fotos aparecem uma de cada vez, com "‹"/"›" do lado pra passear entre elas. Master pode adicionar foto nova ("➕ Adicionar foto", aceita HEIC do iPhone) e organizar as existentes ("🛠️ Gerenciar fotos").
+- As fotos aparecem uma de cada vez, com "‹"/"›" do lado pra passear entre elas. Só o usuário "master" vê "➕ Adicionar foto" (aceita HEIC do iPhone) e "🛠️ Gerenciar fotos" — os demais, mesmo sendo Master, veem só o carrossel.
 - Embaixo, "🗓️ Planejamento Semanal de Entregas" espelha o calendário da Logística — clique numa aba de dia pra ver as entregas planejadas. É só visualização aqui; pra adicionar ou remover, use a tela de Logística.
 
 **Regras importantes:**
