@@ -2966,6 +2966,101 @@ def excluir_planejamento_semanal(item_id: int):
     finally:
         liberar_conexao(conn)
 
+def _renderizar_planejamento_semanal(df_projetos, editavel: bool, key_prefix: str, usuario_nome: str = None):
+    """Quadro do Planejamento Semanal (abas por dia + cards de obra/observacao).
+    Usado na Logistica (editavel=True, com form de adicionar e botao de excluir
+    por card) e espelhado no Dashboard (editavel=False, so leitura) -- mesma
+    funcao pras duas telas nao saírem de sincronia a cada ajuste visual."""
+    _key_offset = f"{key_prefix}_offset"
+    if _key_offset not in st.session_state:
+        st.session_state[_key_offset] = 0
+
+    _hoje_pl = hoje_projeto().date()
+    _seg_atual = _hoje_pl - timedelta(days=_hoje_pl.weekday())
+    _seg_semana = _seg_atual + timedelta(weeks=st.session_state[_key_offset])
+    _dias_semana = [_seg_semana + timedelta(days=i) for i in range(6)]
+    _nomes_dias = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
+
+    nav1, nav2, nav3, nav4 = st.columns([1, 3, 1, 1])
+    with nav1:
+        if st.button("◀", key=f"{key_prefix}_prev", use_container_width=True, help="Semana anterior"):
+            st.session_state[_key_offset] -= 1
+            st.rerun()
+    with nav2:
+        st.markdown(
+            f"<div style='text-align:center;font-weight:600;padding-top:6px;'>"
+            f"Semana de {_dias_semana[0].strftime('%d/%m')} a {_dias_semana[-1].strftime('%d/%m/%Y')}</div>",
+            unsafe_allow_html=True
+        )
+    with nav3:
+        if st.button("▶", key=f"{key_prefix}_next", use_container_width=True, help="Próxima semana"):
+            st.session_state[_key_offset] += 1
+            st.rerun()
+    with nav4:
+        if st.session_state[_key_offset] != 0:
+            if st.button("Hoje", key=f"{key_prefix}_hoje", use_container_width=True):
+                st.session_state[_key_offset] = 0
+                st.rerun()
+
+    df_planej = carregar_planejamento_semanal(_dias_semana[0], _dias_semana[-1])
+
+    # Options do radio sao indices ESTAVEIS (0-5) -- se o texto (com "· N"
+    # mutavel) fosse a propria option, o Streamlit perde a selecao no rerun
+    # seguinte assim que a contagem daquele dia muda.
+    _contagem_dia_planej = df_planej.groupby('data').size().to_dict() if not df_planej.empty else {}
+
+    def _fmt_dia_planej(_i):
+        _d = _dias_semana[_i]
+        _marcador = "🔵 " if _d == _hoje_pl else ""
+        _n = _contagem_dia_planej.get(_d, 0)
+        return f"{_marcador}{_nomes_dias[_i]} ({_d.strftime('%d/%m')})" + (f" · {_n}" if _n else "")
+
+    _idx_hoje_planej = _dias_semana.index(_hoje_pl) if _hoje_pl in _dias_semana else 0
+    _idx_dia_ativo = st.radio(
+        "Dia:", list(range(6)), index=_idx_hoje_planej, horizontal=True,
+        format_func=_fmt_dia_planej, key=f"{key_prefix}_dia_tab", label_visibility="collapsed"
+    )
+    _dia_ativo = _dias_semana[_idx_dia_ativo]
+    _label_dia_ativo = _fmt_dia_planej(_idx_dia_ativo)
+
+    df_dia_planej = df_planej[df_planej['data'] == _dia_ativo] if not df_planej.empty else df_planej
+    if df_dia_planej.empty:
+        st.caption("Nenhuma entrega planejada pra esse dia ainda.")
+    else:
+        for _, _item in df_dia_planej.iterrows():
+            with st.container(border=True):
+                if editavel:
+                    ci_pl, cd_pl = st.columns([6, 1])
+                    with ci_pl:
+                        st.markdown(f"🏗️ **{_item['obra']}**")
+                        if _item.get('observacao'):
+                            st.caption(_item['observacao'])
+                    with cd_pl:
+                        if st.button("🗑️", key=f"del_{key_prefix}_{_item['id']}", use_container_width=True):
+                            excluir_planejamento_semanal(int(_item['id']))
+                            st.rerun()
+                else:
+                    st.markdown(f"🏗️ **{_item['obra']}**")
+                    if _item.get('observacao'):
+                        st.caption(_item['observacao'])
+
+    if editavel:
+        obras_planej = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
+        st.write("")
+        with st.expander(f"➕ Adicionar obra — {_label_dia_ativo}", expanded=df_dia_planej.empty, key=f"{key_prefix}_add_expander"):
+            if not obras_planej:
+                st.caption("Cadastre uma obra primeiro.")
+            else:
+                with st.form(f"{key_prefix}_form", clear_on_submit=True):
+                    fp1, fp2 = st.columns(2)
+                    with fp1:
+                        _obra_nova = st.selectbox("Obra:", obras_planej, key=f"{key_prefix}_obra")
+                    with fp2:
+                        _obs_nova = st.text_input("Observação:", key=f"{key_prefix}_obs", placeholder="Ex: insumos junto")
+                    if st.form_submit_button("Adicionar"):
+                        salvar_planejamento_semanal(_dia_ativo, _obra_nova, _obs_nova, usuario_nome)
+                        st.rerun()
+
 def dar_baixa_romaneio(item_ids: list, usuario: str):
     """Marca OP(s) como romaneio emitido, tirando-as da fila de 'OPs Finalizadas — Emitir Romaneio'."""
     if not item_ids:
@@ -6686,95 +6781,10 @@ if nome_aba == "Dashboard":
                                         st.toast("Foto removida.")
                                         st.rerun()
 
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        col_esq, col_dir = st.columns([3, 2])
-
-        with col_esq:
-            st.markdown("#### 📋 Status dos Lotes")
-            if not df_micro_dash.empty:
-                cores_status = {
-                    'Concluido':               ('Concluído',  '#059669'),
-                    'Liberado para Fabrica':   ('Liberado',   '#1A56DB'),
-                    'Parcialmente Concluido':  ('Parcial',    '#D97706'),
-                    'Pendente':                ('Pendente',   '#94A3B8'),
-                    'Cancelado':               ('Cancelado',  '#DC2626'),
-                }
-                status_counts = df_micro_dash['Status_Item'].value_counts()
-                total_status  = int(status_counts.sum())
-                segmentos = [(s, int(status_counts.get(s, 0))) for s in cores_status if status_counts.get(s, 0) > 0]
-
-                barras_html = "".join(
-                    f'<div style="width:{qtd / total_status * 100:.2f}%;background:{cores_status[s][1]};'
-                    f'display:flex;align-items:center;justify-content:center;min-width:2px;">'
-                    + (f'<span style="font-size:11px;font-weight:700;color:#fff;">{round(qtd / total_status * 100)}%</span>'
-                       if qtd / total_status >= 0.08 else '')
-                    + '</div>'
-                    for s, qtd in segmentos
-                )
-                legenda_html = "".join(
-                    f'<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);">'
-                    f'<span style="width:8px;height:8px;border-radius:2px;background:{cores_status[s][1]};display:inline-block;"></span>'
-                    f'{cores_status[s][0]} — {qtd}</div>'
-                    for s, qtd in segmentos
-                )
-                st.markdown(f"""
-                <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;">
-                    <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;">{total_status} lotes no total</div>
-                    <div style="display:flex;height:28px;border-radius:6px;overflow:hidden;background:var(--bg);gap:2px;">
-                        {barras_html}
-                    </div>
-                    <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:16px;">
-                        {legenda_html}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown('<div class="empty-state"><div class="empty-icon">📊</div><h4>Sem dados</h4><p>Nenhum lote cadastrado ainda.</p></div>', unsafe_allow_html=True)
-
-        with col_dir:
-            st.markdown("#### 📦 OPs por Obra")
-            st.caption("OPs em aberto ou concluídas nos últimos 90 dias — clique numa obra pra ver o detalhe")
-            if not df_micro_dash.empty:
-                por_obra = df_micro_dash.groupby('Obra_Vinculada')['Cod_Lote'].nunique().reset_index(name='OPs')
-                por_obra = por_obra.sort_values('OPs', ascending=False)
-                max_ops = int(por_obra['OPs'].max()) or 1
-
-                if "dash_obra_sel" not in st.session_state:
-                    st.session_state.dash_obra_sel = None
-
-                for _, row_obra in por_obra.iterrows():
-                    obra_nome = row_obra['Obra_Vinculada']
-                    qtd_ops   = int(row_obra['OPs'])
-                    largura   = max(6, round(qtd_ops / max_ops * 100))
-                    rc1, rc2 = st.columns([10, 1])
-                    with rc1:
-                        st.markdown(f"""
-                        <div style="display:grid;grid-template-columns:120px 1fr 30px;align-items:center;gap:10px;padding:8px 0;">
-                            <span style="font-size:0.82rem;color:var(--text);">{html_escape(str(obra_nome))}</span>
-                            <div style="background:var(--bg);border-radius:4px;height:10px;">
-                                <div style="width:{largura}%;background:var(--accent);border-radius:4px;height:10px;"></div>
-                            </div>
-                            <span style="font-size:0.82rem;font-weight:700;color:var(--primary);text-align:right;">{qtd_ops}</span>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    with rc2:
-                        if st.button("▸", key=f"dash_obra_btn_{obra_nome}", use_container_width=True):
-                            st.session_state.dash_obra_sel = None if st.session_state.dash_obra_sel == obra_nome else obra_nome
-                            st.rerun()
-
-                    if st.session_state.dash_obra_sel == obra_nome:
-                        df_obra_sel   = df_micro_dash[df_micro_dash['Obra_Vinculada'] == obra_nome]
-                        concluido_sel = df_obra_sel[df_obra_sel['Status_Item'] == 'Concluido']['Cod_Lote'].nunique()
-                        producao_sel  = df_obra_sel[df_obra_sel['Status_Item'] != 'Concluido']['Cod_Lote'].nunique()
-                        st.markdown(f"""
-                        <div style="border:1px solid var(--border);border-radius:var(--radius);padding:12px 18px;margin:2px 0 8px;background:var(--bg-card);box-shadow:var(--shadow-xs);">
-                            <div style="display:flex;gap:32px;">
-                                <div><span style="font-size:1.3rem;font-weight:800;color:var(--accent);">{producao_sel}</span><br><span style="font-size:0.68rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Em produção</span></div>
-                                <div><span style="font-size:1.3rem;font-weight:800;color:var(--success);">{concluido_sel}</span><br><span style="font-size:0.68rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Concluído</span></div>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+        st.markdown("---")
+        st.markdown("#### 🗓️ Planejamento Semanal de Entregas")
+        st.caption("Só visualização aqui — pra adicionar ou remover, use a Logística.")
+        _renderizar_planejamento_semanal(df_projetos, editavel=False, key_prefix="dash_planej")
 
 elif nome_aba not in abas_disponiveis:
     st.warning("Página não encontrada.")
@@ -10087,92 +10097,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 
             # ── PLANEJAMENTO SEMANAL DE ENTREGAS ──────────────────────────────
             st.markdown("#### 🗓️ Planejamento Semanal de Entregas")
-
-            if "log_planej_offset" not in st.session_state:
-                st.session_state.log_planej_offset = 0
-
-            _hoje_pl = hoje_projeto().date()
-            _seg_atual = _hoje_pl - timedelta(days=_hoje_pl.weekday())
-            _seg_semana = _seg_atual + timedelta(weeks=st.session_state.log_planej_offset)
-            _dias_semana = [_seg_semana + timedelta(days=i) for i in range(6)]
-            _nomes_dias = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
-
-            nav1, nav2, nav3, nav4 = st.columns([1, 3, 1, 1])
-            with nav1:
-                if st.button("◀", key="log_planej_prev", use_container_width=True, help="Semana anterior"):
-                    st.session_state.log_planej_offset -= 1
-                    st.rerun()
-            with nav2:
-                st.markdown(
-                    f"<div style='text-align:center;font-weight:600;padding-top:6px;'>"
-                    f"Semana de {_dias_semana[0].strftime('%d/%m')} a {_dias_semana[-1].strftime('%d/%m/%Y')}</div>",
-                    unsafe_allow_html=True
-                )
-            with nav3:
-                if st.button("▶", key="log_planej_next", use_container_width=True, help="Próxima semana"):
-                    st.session_state.log_planej_offset += 1
-                    st.rerun()
-            with nav4:
-                if st.session_state.log_planej_offset != 0:
-                    if st.button("Hoje", key="log_planej_hoje", use_container_width=True):
-                        st.session_state.log_planej_offset = 0
-                        st.rerun()
-
-            df_planej = carregar_planejamento_semanal(_dias_semana[0], _dias_semana[-1])
-            obras_planej = sorted(df_projetos['Obra'].dropna().unique().tolist()) if not df_projetos.empty else []
-
-            # Abas por dia (st.radio, nao st.tabs -- st.tabs roda o corpo de TODAS as
-            # abas em todo rerun, so escondendo a inativa com CSS; radio + if/elif so
-            # monta a aba escolhida, mesmo padrao ja usado no Almoxarifado). Options sao
-            # indices ESTAVEIS (0-5) -- se o texto (com "· N" mutavel) fosse a propria
-            # option, o Streamlit perde a selecao no rerun seguinte assim que a contagem
-            # daquele dia muda (o texto selecionado deixa de existir na lista nova).
-            _contagem_dia_planej = df_planej.groupby('data').size().to_dict() if not df_planej.empty else {}
-
-            def _fmt_dia_planej(_i):
-                _d = _dias_semana[_i]
-                _marcador = "🔵 " if _d == _hoje_pl else ""
-                _n = _contagem_dia_planej.get(_d, 0)
-                return f"{_marcador}{_nomes_dias[_i]} ({_d.strftime('%d/%m')})" + (f" · {_n}" if _n else "")
-
-            _idx_hoje_planej = _dias_semana.index(_hoje_pl) if _hoje_pl in _dias_semana else 0
-            _idx_dia_ativo = st.radio(
-                "Dia:", list(range(6)), index=_idx_hoje_planej, horizontal=True,
-                format_func=_fmt_dia_planej, key="log_planej_dia_tab", label_visibility="collapsed"
+            _renderizar_planejamento_semanal(
+                df_projetos, editavel=True, key_prefix="log_planej",
+                usuario_nome=st.session_state.usuario_nome
             )
-            _dia_ativo = _dias_semana[_idx_dia_ativo]
-            _label_dia_ativo = _fmt_dia_planej(_idx_dia_ativo)
-
-            df_dia_planej = df_planej[df_planej['data'] == _dia_ativo] if not df_planej.empty else df_planej
-            if df_dia_planej.empty:
-                st.caption("Nenhuma entrega planejada pra esse dia ainda.")
-            else:
-                for _, _item in df_dia_planej.iterrows():
-                    with st.container(border=True):
-                        ci_pl, cd_pl = st.columns([6, 1])
-                        with ci_pl:
-                            st.markdown(f"🏗️ **{_item['obra']}**")
-                            if _item.get('observacao'):
-                                st.caption(_item['observacao'])
-                        with cd_pl:
-                            if st.button("🗑️", key=f"del_planej_{_item['id']}", use_container_width=True):
-                                excluir_planejamento_semanal(int(_item['id']))
-                                st.rerun()
-
-            st.write("")
-            with st.expander(f"➕ Adicionar obra — {_label_dia_ativo}", expanded=df_dia_planej.empty, key="log_planej_add_expander"):
-                if not obras_planej:
-                    st.caption("Cadastre uma obra primeiro.")
-                else:
-                    with st.form("log_planej_form", clear_on_submit=True):
-                        fp1, fp2 = st.columns(2)
-                        with fp1:
-                            _obra_nova = st.selectbox("Obra:", obras_planej, key="log_planej_obra")
-                        with fp2:
-                            _obs_nova = st.text_input("Observação:", key="log_planej_obs", placeholder="Ex: insumos junto")
-                        if st.form_submit_button("Adicionar"):
-                            salvar_planejamento_semanal(_dia_ativo, _obra_nova, _obs_nova, st.session_state.usuario_nome)
-                            st.rerun()
 
     # ==================================================
     # ALMOXARIFADO
@@ -13800,6 +13728,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-09-18", "Dashboard: \"Status dos Lotes\" e \"OPs por Obra\" saíram (sem uso). No lugar, o \"🗓️ Planejamento Semanal de Entregas\" da Logística agora também aparece aqui embaixo — mesmo calendário, só que só pra visualizar (adicionar/remover continua sendo feito na Logística)."),
                 ("2026-09-18", "Dashboard: reorganizado em duas colunas — números principais à esquerda, \"📸 Fotos das Obras\" à direita, num carrossel de uma foto por vez com setas \"‹\"/\"›\" do lado pra passear entre elas, sem precisar abrir nada. A foto agora tem altura fixa, acompanhando a altura da coluna de números ao lado. A faixa \"🚨 Alertas do Sistema\" saiu, já que a informação (lotes atrasados, OPs aguardando liberação) já aparece nos números. Também reduzimos o espaço vazio no topo de toda tela do sistema (não só o Dashboard), pra caber mais conteúdo sem precisar rolar a página."),
                 ("2026-09-18", "Logística: trocamos \"📋 Fila Prioritária\", \"🚛 Envios Agendados\" e \"🗂️ Histórico de Despachos\" (e os 4 cartões de métrica do topo, que dependiam delas) por um \"🗓️ Planejamento Semanal de Entregas\" — abas de Segunda a Sábado (cada uma mostra \"· N\" quando já tem entrega), onde dá pra adicionar a obra e uma observação livre (ex: \"insumos junto\") no dia da aba aberta, navegar entre semanas com ◀/▶ e remover com o 🗑️. Fica registrado por data, então também serve de histórico do que foi entregue em semanas passadas. \"✅ OPs Prontas — Emitir Romaneio\" continua exatamente igual."),
                 ("2026-09-10", "Configurações → usuários: agora cada pessoa tem um \"setor base\" e pode receber \"acessos extras\" de outros setores, sem virar Master. Ex: o pessoal do Compras pode ganhar acesso ao Almoxarifado; alguém da Medição pode ganhar acesso aos Romaneios Devolvidos. Dá pra editar os acessos de quem já existe (a pessoa vê a mudança no próximo login). Quem não tem nenhum acesso extra continua exatamente como antes."),
@@ -13852,12 +13781,10 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 **Passo a passo:**
 - Ao entrar no sistema, o Dashboard abre em duas colunas: à esquerda, os 5 números principais (OPs aguardando liberação, liberadas em produção, concluídas, lotes com prazo vencido, obras ativas); à direita, "📸 Fotos das Obras".
 - As fotos aparecem uma de cada vez, com "‹"/"›" do lado pra passear entre elas. Master pode adicionar foto nova ("➕ Adicionar foto", aceita HEIC do iPhone) e organizar as existentes ("🛠️ Gerenciar fotos").
-- Do lado esquerdo, mais abaixo, "Status dos Lotes" mostra a barra de proporção de cada status.
-- Do lado direito, "OPs por Obra" lista as obras por quantidade de OPs — clique na seta "▸" ao lado de uma obra pra abrir o detalhe (Em produção x Concluído). Clique de novo pra fechar.
+- Embaixo, "🗓️ Planejamento Semanal de Entregas" espelha o calendário da Logística — clique numa aba de dia pra ver as entregas planejadas. É só visualização aqui; pra adicionar ou remover, use a tela de Logística.
 
 **Regras importantes:**
 - Lotes marcados como "Em Parada" não entram na contagem de atrasados — o motivo da parada já explica o atraso.
-- "OPs por Obra" considera só os últimos 90 dias.
 """),
                 ]),
                 ("🏭 Produção", [
