@@ -1396,6 +1396,18 @@ def inicializar_banco_de_dados():
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS logistica_planejamento (
+                id SERIAL PRIMARY KEY,
+                data DATE NOT NULL,
+                obra TEXT NOT NULL,
+                observacao TEXT,
+                criado_por TEXT,
+                criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_planejamento_data ON logistica_planejamento(data)")
+
         cursor.execute("SELECT COUNT(*) FROM usuarios")
         if cursor.fetchone()[0] == 0:
             _senha_master = st.secrets.get("MASTER_PASS") or os.environ.get("MASTER_PASS")
@@ -2554,6 +2566,20 @@ def carregar_fila_logistica():
     return df.rename(columns=rename)
 
 @st.cache_data(ttl=30)
+def carregar_planejamento_semanal(data_ini, data_fim):
+    conn = conectar_banco()
+    try:
+        df = pd.read_sql_query(
+            "SELECT * FROM logistica_planejamento WHERE data BETWEEN %s AND %s ORDER BY data, id",
+            conn, params=(data_ini, data_fim)
+        )
+    finally:
+        liberar_conexao(conn)
+    if not df.empty:
+        df['data'] = pd.to_datetime(df['data']).dt.date
+    return df
+
+@st.cache_data(ttl=30)
 def carregar_solicitacoes():
     conn = conectar_banco()
     try:
@@ -2907,40 +2933,32 @@ def enviar_para_logistica(row, limite_despacho):
     finally:
         liberar_conexao(conn)
 
-def agendar_envio(log_id, data_envio, transportadora, veiculo, obs, usuario):
+def salvar_planejamento_semanal(data, obra: str, observacao: str, usuario: str):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE logistica_envios
-            SET Data_Envio_Agendado=%s, Transportadora=%s, Veiculo=%s, Observacoes=%s, Status_Logistica='Envio Agendado'
-            WHERE id=%s
-        """, (
-            data_envio.strftime('%Y-%m-%d') if data_envio else None,
-            transportadora, veiculo, obs, log_id
-        ))
+        cursor.execute(
+            "INSERT INTO logistica_planejamento (data, obra, observacao, criado_por) VALUES (%s,%s,%s,%s)",
+            (data, obra, (observacao or '').strip() or None, usuario)
+        )
         conn.commit()
-        carregar_fila_logistica.clear()
+        carregar_planejamento_semanal.clear()
     except Exception as e:
         conn.rollback()
-        st.error(f"Erro ao agendar envio: {e}")
+        st.error(f"Erro ao salvar: {e}")
     finally:
         liberar_conexao(conn)
 
-def confirmar_despacho(log_id, usuario):
+def excluir_planejamento_semanal(item_id: int):
     conn = conectar_banco()
     try:
         cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE logistica_envios
-            SET Status_Logistica='Despachado', Confirmado_Por=%s, Confirmado_Em=%s
-            WHERE id=%s
-        """, (usuario, datetime.now(FUSO_BR).strftime('%d/%m/%Y %H:%M'), log_id))
+        cursor.execute("DELETE FROM logistica_planejamento WHERE id=%s", (item_id,))
         conn.commit()
-        carregar_fila_logistica.clear()
+        carregar_planejamento_semanal.clear()
     except Exception as e:
         conn.rollback()
-        st.error(f"Erro ao confirmar despacho: {e}")
+        st.error(f"Erro ao excluir: {e}")
     finally:
         liberar_conexao(conn)
 
@@ -2995,8 +3013,9 @@ def reverter_conclusao_op(lote_id: int):
         row_log = cursor.fetchone()
         status_log = row_log[0] if row_log else None
         if status_log == 'Envio Agendado':
-            return False, ("Essa OP já está com envio agendado na Logística. Use 'Reagendar' lá "
-                            "(volta para 'Aguardando Agendamento') antes de reverter a conclusão.")
+            return False, ("Essa OP está com um envio antigo agendado na Logística (dado de antes do "
+                            "recurso de agendamento ser descontinuado). Fale com o Master antes de "
+                            "reverter a conclusão.")
         cursor.execute("DELETE FROM logistica_envios WHERE item_id=%s", (lote_id,))
         cursor.execute("UPDATE op_pecas SET qtd_enviada=0, saldo=qtd_total, qtd_ultimo_envio=0 WHERE lote_id=%s", (lote_id,))
         cursor.execute("""
@@ -9852,32 +9871,6 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
         with aba_objeto:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Logística</h2><p>Gestão de despachos, transportes e envios</p></div><span class="page-icon">🚚</span></div>', unsafe_allow_html=True)
             st.caption(f"Hoje: {hoje_projeto().strftime('%d/%m/%Y')}")
-            df_log = carregar_fila_logistica()
-            if obra_selecionada and not df_log.empty:
-                df_log = df_log[df_log['Obra_Vinculada'] == obra_selecionada]
-
-            if not df_log.empty:
-                n_aguard   = len(df_log[df_log['Status_Logistica'] == 'Aguardando Agendamento'])
-                n_agendado = len(df_log[df_log['Status_Logistica'] == 'Envio Agendado'])
-                n_despach  = len(df_log[df_log['Status_Logistica'] == 'Despachado'])
-                df_ativos  = df_log[df_log['Status_Logistica'] != 'Despachado']
-                n_atrasado = (
-                    len(df_ativos[df_ativos['Data_Limite_Despacho'].apply(
-                        lambda x: prazo_valido(x) and pd.to_datetime(x) < hoje_projeto()
-                    )]) if not df_ativos.empty else 0
-                )
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Aguardando Agendamento", n_aguard)
-                c2.metric("Envios Agendados",       n_agendado)
-                c3.metric("Despachados",             n_despach)
-                if n_atrasado > 0:
-                    c4.metric("Atrasados", n_atrasado, delta=f"-{n_atrasado}", delta_color="inverse")
-                else:
-                    c4.metric("Atrasos", "Nenhum")
-            else:
-                st.info("Nenhum lote na fila ainda.")
-
-            st.markdown("---")
 
             # ── OPs FINALIZADAS / PARCIAIS — EMITIR ROMANEIO ─────────────────
             st.markdown("#### ✅ OPs Prontas — Emitir Romaneio")
@@ -10120,180 +10113,69 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                     st.toast(f"Baixa revertida — OP {num_op_b} voltou pra fila.")
                                     st.rerun()
 
-            def _dias_restantes_logistica(x):
-                return (pd.to_datetime(x) - hoje_projeto()).days if prazo_valido(x) else 9999
+            # ── PLANEJAMENTO SEMANAL DE ENTREGAS ──────────────────────────────
+            st.markdown("#### 🗓️ Planejamento Semanal de Entregas")
 
-            def _render_por_obra(df_secao, render_item, col_sort):
-                resumo = (df_secao.groupby('Obra_Vinculada')
-                          .agg(qtd=('id', 'count'), atrasados=('_atrasado', 'sum'))
-                          .reset_index()
-                          .sort_values(['atrasados', 'qtd'], ascending=[False, False]))
-                for ob_row in resumo.itertuples():
-                    titulo_obra = f"🏗️ {ob_row.Obra_Vinculada} — {int(ob_row.qtd)} lote(s)"
-                    if ob_row.atrasados > 0:
-                        titulo_obra += f"  🔴 {int(ob_row.atrasados)} atrasado(s)"
-                    with st.expander(titulo_obra, expanded=False, key=f"log_grupo_expander_{col_sort}_{ob_row.Obra_Vinculada}"):
-                        df_obra = df_secao[df_secao['Obra_Vinculada'] == ob_row.Obra_Vinculada].sort_values(col_sort, na_position='last')
-                        for _, row in df_obra.iterrows():
-                            render_item(row)
+            if "log_planej_offset" not in st.session_state:
+                st.session_state.log_planej_offset = 0
 
-            def _render_fila_item(row):
-                prazo_d = row['Data_Limite_Despacho']
-                if prazo_valido(prazo_d):
-                    dias_r = (pd.to_datetime(prazo_d) - hoje_projeto()).days
-                    if dias_r < 0:    css_bar = "bar-danger"; tag = f"ATRASADO {abs(dias_r)}d"
-                    elif dias_r <= 3: css_bar = "bar-warn";   tag = f"URGENTE — {dias_r}d restantes"
-                    else:             css_bar = "bar-ok";     tag = f"{dias_r} dias restantes"
-                else:
-                    css_bar = "bar-neutral"; tag = "Sem prazo definido"
+            _hoje_pl = hoje_projeto().date()
+            _seg_atual = _hoje_pl - timedelta(days=_hoje_pl.weekday())
+            _seg_semana = _seg_atual + timedelta(weeks=st.session_state.log_planej_offset)
+            _dias_semana = [_seg_semana + timedelta(days=i) for i in range(6)]
+            _nomes_dias = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
 
-                st.markdown(f"<div class='{css_bar}'>", unsafe_allow_html=True)
-                ci, cp, ca = st.columns([5, 3, 2])
-                with ci:
-                    num_op_ag = _nn(row.get('Num_OP'), 'S/OP')
-                    st.markdown(
-                        f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;'
-                        f'<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>&nbsp;'
-                        f'<span class="badge-edt">OP: {num_op_ag}</span>',
-                        unsafe_allow_html=True
-                    )
-                    st.markdown(f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} cx` — {row['M2_Item']:.2f} m²")
-                    st.caption(f"Pavimentos: {row['Romaneio_Chapas']}")
-                with cp:
-                    ptxt = pd.to_datetime(prazo_d).strftime('%d/%m/%Y') if prazo_valido(prazo_d) else "—"
-                    st.caption("Prazo maximo despacho")
-                    st.markdown(f"**{ptxt}**")
-                    st.markdown(f"`{tag}`")
-                with ca:
-                    if st.button("Agendar", key=f"ag_btn_{row['id']}", use_container_width=True):
-                        st.session_state[f"ag_open_{row['id']}"] = True
-                st.markdown("</div>", unsafe_allow_html=True)
+            nav1, nav2, nav3, nav4 = st.columns([1, 3, 1, 1])
+            with nav1:
+                if st.button("◀", key="log_planej_prev", use_container_width=True, help="Semana anterior"):
+                    st.session_state.log_planej_offset -= 1
+                    st.rerun()
+            with nav2:
+                st.markdown(
+                    f"<div style='text-align:center;font-weight:600;padding-top:6px;'>"
+                    f"Semana de {_dias_semana[0].strftime('%d/%m')} a {_dias_semana[-1].strftime('%d/%m/%Y')}</div>",
+                    unsafe_allow_html=True
+                )
+            with nav3:
+                if st.button("▶", key="log_planej_next", use_container_width=True, help="Próxima semana"):
+                    st.session_state.log_planej_offset += 1
+                    st.rerun()
+            with nav4:
+                if st.session_state.log_planej_offset != 0:
+                    if st.button("Hoje", key="log_planej_hoje", use_container_width=True):
+                        st.session_state.log_planej_offset = 0
+                        st.rerun()
 
-                if st.session_state.get(f"ag_open_{row['id']}", False):
+            df_planej = carregar_planejamento_semanal(_dias_semana[0], _dias_semana[-1])
+            obras_planej = sorted(df_banco_macro['Obra'].unique().tolist()) if not df_banco_macro.empty else []
+
+            cols_planej = st.columns(6)
+            for _i, _dia in enumerate(_dias_semana):
+                with cols_planej[_i]:
                     with st.container(border=True):
-                        st.markdown(f"#### Agendar — `{num_op_ag}` | Lote `{row['Cod_Lote']}` | {row['Obra_Vinculada']}")
-                        fa1, fa2 = st.columns(2)
-                        with fa1:
-                            dt_env = st.date_input("Data envio:", format="DD/MM/YYYY", key=f"dt_env_{row['id']}",
-                                                   value=(pd.to_datetime(prazo_d).date() if prazo_valido(prazo_d) else hoje_projeto().date()))
-                            transp = st.selectbox("Transporte:", ["Frota Propria (Passold)", "Transportadora Terceira", "Retirada pelo Cliente"], key=f"tr_{row['id']}")
-                        with fa2:
-                            veic = st.text_input("Veiculo / Placa:", key=f"ve_{row['id']}")
-                            obs  = st.text_area("Observacoes:", key=f"ob_{row['id']}", height=80)
-                        cb1, cb2 = st.columns(2)
-                        with cb1:
-                            if st.button("Confirmar agendamento", key=f"conf_{row['id']}", use_container_width=True, type="primary"):
-                                agendar_envio(row['id'], dt_env, transp, veic, obs, st.session_state.usuario_nome)
-                                registrar_auditoria(st.session_state.usuario_nome, "AGENDAR_ENVIO",
-                                    f"Lote {row['Cod_Lote']} — {transp} — {dt_env}")
-                                st.session_state[f"ag_open_{row['id']}"] = False
-                                st.toast(f"Agendado para {dt_env.strftime('%d/%m/%Y')}!")
-                                st.rerun()
-                        with cb2:
-                            if st.button("Cancelar", key=f"can_{row['id']}", use_container_width=True):
-                                st.session_state[f"ag_open_{row['id']}"] = False
-                                st.rerun()
-
-            st.markdown("#### 📋 Fila Prioritaria — Aguardando Agendamento")
-            if df_log.empty or df_log[df_log['Status_Logistica'] == 'Aguardando Agendamento'].empty:
-                st.success("Todos os lotes ja agendados!")
-            else:
-                df_ag = df_log[df_log['Status_Logistica'] == 'Aguardando Agendamento'].copy()
-                df_ag['_atrasado'] = df_ag['Data_Limite_Despacho'].apply(
-                    lambda x: prazo_valido(x) and pd.to_datetime(x) < hoje_projeto()
-                )
-                if obra_selecionada:
-                    for _, row in df_ag.sort_values('Data_Limite_Despacho', na_position='last').iterrows():
-                        _render_fila_item(row)
-                else:
-                    _render_por_obra(df_ag, _render_fila_item, 'Data_Limite_Despacho')
-
-            def _render_envio_item(row):
-                pd_d = row['Data_Limite_Despacho']
-                de_d = row['Data_Envio_Agendado']
-                no_prazo = (pd.to_datetime(de_d) <= pd.to_datetime(pd_d)) if prazo_valido(pd_d) and prazo_valido(de_d) else True
-                css_bar  = "bar-ok" if no_prazo else "bar-danger"
-                st.markdown(f"<div class='{css_bar}'>", unsafe_allow_html=True)
-                ci2, cp2, ca2 = st.columns([5, 3, 2])
-                with ci2:
-                    st.markdown(f'<span class="badge-obra">{row["Obra_Vinculada"]}</span>&nbsp;<span class="badge-lote">Lote: {row["Cod_Lote"]}</span>', unsafe_allow_html=True)
-                    st.markdown(f"**{row['Tipo_Material']}** | `{int(row['Qtd_Caixas'])} cx` — {row['M2_Item']:.2f} m²")
-                    st.caption(f"{row.get('Transportadora', '—')} | {row.get('Veiculo', '—')}")
-                    if row.get('Observacoes'):
-                        st.caption(f"Obs: {row['Observacoes']}")
-                with cp2:
-                    et = pd.to_datetime(de_d).strftime('%d/%m/%Y') if prazo_valido(de_d) else "—"
-                    pt = pd.to_datetime(pd_d).strftime('%d/%m/%Y') if prazo_valido(pd_d) else "—"
-                    st.caption("Data envio agendada")
-                    st.markdown(f"**{et}**")
-                    st.caption("Prazo maximo")
-                    st.write(pt)
-                    if not no_prazo:
-                        st.error("Fora do prazo!")
-                with ca2:
-                    st.write("")
-                    if st.button("Confirmar Despacho", key=f"des_{row['id']}", use_container_width=True, type="primary"):
-                        confirmar_despacho(row['id'], st.session_state.usuario_nome)
-                        registrar_auditoria(st.session_state.usuario_nome, "CONFIRMAR_DESPACHO",
-                            f"Lote {row['Cod_Lote']} — Obra {row.get('Obra_Vinculada','—')}")
-                        st.toast("Despachado!")
-                        st.rerun()
-                    if st.button("Reagendar", key=f"rag_{row['id']}", use_container_width=True):
-                        conn = conectar_banco()
-                        try:
-                            cursor = conn.cursor()
-                            cursor.execute("UPDATE logistica_envios SET Status_Logistica='Aguardando Agendamento' WHERE id=%s", (row['id'],))
-                            conn.commit()
-                            carregar_fila_logistica.clear()
-                        except Exception as e:
-                            conn.rollback()
-                            st.error(f"Erro: {e}")
-                        finally:
-                            liberar_conexao(conn)
-                        st.rerun()
-                st.markdown("</div>", unsafe_allow_html=True)
-
-            st.markdown("#### 🚛 Envios Agendados — Confirmar Saida")
-            if df_log.empty or df_log[df_log['Status_Logistica'] == 'Envio Agendado'].empty:
-                st.info("Nenhum envio agendado.")
-            else:
-                df_agend = df_log[df_log['Status_Logistica'] == 'Envio Agendado'].copy()
-                df_agend['_atrasado'] = df_agend.apply(
-                    lambda r: prazo_valido(r['Data_Limite_Despacho']) and prazo_valido(r['Data_Envio_Agendado'])
-                              and pd.to_datetime(r['Data_Envio_Agendado']) > pd.to_datetime(r['Data_Limite_Despacho']),
-                    axis=1
-                )
-                if obra_selecionada:
-                    for _, row in df_agend.sort_values('Data_Envio_Agendado', na_position='last').iterrows():
-                        _render_envio_item(row)
-                else:
-                    _render_por_obra(df_agend, _render_envio_item, 'Data_Envio_Agendado')
-
-            st.markdown("#### 🗂️ Historico de Despachos")
-            if df_log.empty or df_log[df_log['Status_Logistica'] == 'Despachado'].empty:
-                st.info("Nenhum despacho realizado ainda.")
-            else:
-                df_pont = df_log[df_log['Status_Logistica'] == 'Despachado'].copy()
-                df_pont = df_pont[df_pont['Data_Limite_Despacho'].apply(prazo_valido) & df_pont['Data_Envio_Agendado'].apply(prazo_valido)]
-                if not df_pont.empty:
-                    ok = (pd.to_datetime(df_pont['Data_Envio_Agendado']) <= pd.to_datetime(df_pont['Data_Limite_Despacho'])).sum()
-                    st.metric("Pontualidade nos despachos", f"{ok / len(df_pont) * 100:.0f}%")
-
-                df_hist = df_log[df_log['Status_Logistica'] == 'Despachado'].copy()
-                for col in ['Data_Limite_Despacho', 'Data_Envio_Agendado']:
-                    df_hist[col] = df_hist[col].apply(lambda x: pd.to_datetime(x).strftime('%d/%m/%Y') if prazo_valido(x) else "—")
-                cols_h = [c for c in ['Obra_Vinculada', 'Cod_Lote', 'Tipo_Material', 'Qtd_Caixas', 'M2_Item',
-                                      'Transportadora', 'Veiculo', 'Data_Envio_Agendado', 'Data_Limite_Despacho',
-                                      'Confirmado_Por', 'Confirmado_Em'] if c in df_hist.columns]
-
-                if obra_selecionada:
-                    st.dataframe(df_hist[cols_h], hide_index=True, use_container_width=True)
-                else:
-                    with st.expander("Ver historico agrupado por obra", expanded=False):
-                        for obra_h in sorted(df_hist['Obra_Vinculada'].dropna().unique()):
-                            df_h_obra = df_hist[df_hist['Obra_Vinculada'] == obra_h]
-                            st.markdown(f"**🏗️ {obra_h}** — {len(df_h_obra)} despacho(s)")
-                            st.dataframe(df_h_obra[cols_h], hide_index=True, use_container_width=True)
+                        _marcador = "🔵 " if _dia == _hoje_pl else ""
+                        st.markdown(f"**{_marcador}{_nomes_dias[_i]}**")
+                        st.caption(_dia.strftime('%d/%m'))
+                        df_dia_planej = df_planej[df_planej['data'] == _dia]
+                        for _, _item in df_dia_planej.iterrows():
+                            with st.container(border=True):
+                                st.markdown(f"🏗️ **{_item['obra']}**")
+                                if _item.get('observacao'):
+                                    st.caption(_item['observacao'])
+                                if st.button("🗑️", key=f"del_planej_{_item['id']}", use_container_width=True):
+                                    excluir_planejamento_semanal(int(_item['id']))
+                                    st.rerun()
+                        with st.expander("➕ Adicionar", expanded=False, key=f"log_planej_add_{_dia.isoformat()}"):
+                            if not obras_planej:
+                                st.caption("Cadastre uma obra primeiro.")
+                            else:
+                                with st.form(f"log_planej_form_{_dia.isoformat()}", clear_on_submit=True):
+                                    _obra_nova = st.selectbox("Obra:", obras_planej, key=f"log_planej_obra_{_dia.isoformat()}")
+                                    _obs_nova = st.text_input("Observação:", key=f"log_planej_obs_{_dia.isoformat()}",
+                                                               placeholder="Ex: insumos junto")
+                                    if st.form_submit_button("Adicionar", use_container_width=True):
+                                        salvar_planejamento_semanal(_dia, _obra_nova, _obs_nova, st.session_state.usuario_nome)
+                                        st.rerun()
 
     # ==================================================
     # ALMOXARIFADO
@@ -13921,6 +13803,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
+                ("2026-09-18", "Logística: trocamos \"📋 Fila Prioritária\", \"🚛 Envios Agendados\" e \"🗂️ Histórico de Despachos\" (e os 4 cartões de métrica do topo, que dependiam delas) por um \"🗓️ Planejamento Semanal de Entregas\" — um quadro com um dia da semana (Segunda a Sábado) por coluna, onde dá pra adicionar a obra e uma observação livre (ex: \"insumos junto\"), navegar entre semanas com ◀/▶ e remover com o 🗑️. Fica registrado por data, então também serve de histórico do que foi entregue em semanas passadas. \"✅ OPs Prontas — Emitir Romaneio\" continua exatamente igual."),
                 ("2026-09-10", "Configurações → usuários: agora cada pessoa tem um \"setor base\" e pode receber \"acessos extras\" de outros setores, sem virar Master. Ex: o pessoal do Compras pode ganhar acesso ao Almoxarifado; alguém da Medição pode ganhar acesso aos Romaneios Devolvidos. Dá pra editar os acessos de quem já existe (a pessoa vê a mudança no próximo login). Quem não tem nenhum acesso extra continua exatamente como antes."),
                 ("2026-09-08", "Romaneios Devolvidos: todos os cards agora mostram a data em que o romaneio foi emitido, no mesmo formato em todas as abas (\"Emitido em DD/MM/AAAA\"). Antes só os romaneios de OP com envio parcial mostravam a data. Nos romaneios de OP com envio único a data passou a ser a do envio real (registrado na Logística), não mais a data de despacho planejada."),
                 ("2026-09-03", "Relatório Semanal agora sai com abas separadas no Excel — uma pra ACM, outra pra Esquadrias (e uma \"TERCEIRIZADA\" à parte quando houver OP terceirizada sem equipe definida). Dentro de cada aba as seções vêm na ordem Parcial, Em Produção e Concluído, e o cabeçalho de \"Em Produção\" mostra o total de m² (ACM) ou kg (Esquadrias)."),
@@ -14119,19 +14002,17 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                     ("logistica", "🚚 Logística", """
 **Quem acessa:** Master, Logística, Produção.
 
-**Para que serve:** Gerenciar despacho, transporte e envio dos lotes prontos — desde emitir o romaneio até confirmar a saída do caminhão.
+**Para que serve:** Emitir o romaneio dos lotes prontos e planejar, semana a semana, quais obras recebem entrega.
 
 **Passo a passo:**
 1. "✅ OPs Prontas — Emitir Romaneio": preencha o endereço (e a quantidade de volumes, se Esquadrias) e clique "🖨️ Emitir Romaneio" — o sistema já dá baixa na OP automaticamente ao gerar o arquivo. Sem peças lançadas, dá pra usar "Dar baixa (OP antiga, já emitido)".
-2. "📋 Fila Prioritária": clique "Agendar" no lote desejado, informe data de envio, tipo de transporte, veículo e observações, e confirme.
-3. "🚛 Envios Agendados": quando o caminhão sai de fato, clique "Confirmar Despacho" (ou "Reagendar" se precisar mudar a data).
-4. "🗂️ Histórico de Despachos" mostra tudo que já saiu, com % de pontualidade.
+2. "🗓️ Planejamento Semanal de Entregas": em cada dia (Segunda a Sábado), abra "➕ Adicionar", escolha a obra e, se quiser, uma observação (ex: "insumos junto") e confirme. Use "◀"/"▶" pra navegar entre semanas, e "Hoje" pra voltar rápido pra semana atual. Pra remover, clique no 🗑️ do card.
 
 **Regras importantes:**
 - Na lista "✅ OPs Prontas", o seletor "Organizar por:" tem duas opções: **"🏗️ Obra (com data)"** (padrão) separa por obra e, dentro de cada obra, por data que ficou pronto (Hoje, Ontem, Últimos 7 dias, Entre 8 e 30 dias, Há mais de 30 dias); **"📅 Só por data"** junta todas as obras e separa só pela data. Cada cartão mostra a data em que aquela OP ficou pronta.
 - O romaneio inclui só as peças do último envio, não o histórico acumulado do lote.
 - Dá pra reverter uma baixa de romaneio feita errado, no expander "Romaneios já baixados".
-- Envio agendado pra depois do prazo aparece com aviso "Fora do prazo!" mesmo antes de despachar.
+- O Planejamento Semanal é só uma agenda/registro de obras por dia — não baixa estoque nem altera o status da OP. Navegando pra semanas passadas, ele funciona como histórico do que foi entregue.
 """),
                     ("almoxarifado", "📦 Almoxarifado", """
 **Quem acessa:** Master, Almoxarifado, PCP, Produção.
