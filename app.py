@@ -131,6 +131,10 @@ st.markdown("""
 html, body { color-scheme: light only; }
 .stApp { background: var(--bg); font-family: 'Inter', sans-serif; color: var(--text); }
 #MainMenu, footer, header { visibility: hidden; }
+/* header (barra nativa do Streamlit) ja fica invisivel na regra acima --
+o espaco de 6rem que o Streamlit reserva no topo pra ela nao serve mais
+pra nada. Reduz pra sobrar mais tela util em todas as paginas. */
+div[data-testid="stMainBlockContainer"] { padding-top: 1.5rem !important; }
 
 /* ── Sidebar ────────────────────────────────── */
 section[data-testid="stSidebar"] {
@@ -221,8 +225,8 @@ section[data-testid="stSidebar"] .stRadio input[type="radio"] {
 /* ── Page Header ────────────────────────────── */
 .page-header {
     display: flex; align-items: flex-start; justify-content: space-between;
-    margin-bottom: 1.5rem;
-    padding-bottom: 1rem;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.6rem;
     border-bottom: 1px solid var(--border);
 }
 .page-header-left h2 {
@@ -6646,7 +6650,17 @@ if nome_aba == "Dashboard":
                         st.session_state.dash_foto_idx = (_idx_fd - 1) % len(df_fotos_dash)
                         st.rerun()
                 with _cimg:
-                    st.image(bytes(_foto_fd['conteudo']), use_container_width=True)
+                    # Altura fixa (298px, medida pra bater com a altura real da
+                    # coluna de metricas ao lado -- 5 cards de .dash-card-linha)
+                    # + object-fit:cover, em vez de use_container_width -- assim
+                    # a foto acompanha o tamanho dos dados do lado em vez de
+                    # esticar pra qualquer altura conforme a propria proporcao.
+                    st.markdown(
+                        f'<img src="data:{_foto_fd.get("tipo_arquivo") or "image/jpeg"};base64,'
+                        f'{base64.b64encode(bytes(_foto_fd["conteudo"])).decode()}" '
+                        f'style="width:100%;height:298px;object-fit:cover;border-radius:10px;display:block;">',
+                        unsafe_allow_html=True
+                    )
                 with _cnext:
                     if st.button("›", key="dash_foto_next", use_container_width=True):
                         st.session_state.dash_foto_idx = (_idx_fd + 1) % len(df_fotos_dash)
@@ -13786,7 +13800,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
-                ("2026-09-18", "Dashboard: reorganizado em duas colunas — números principais à esquerda, \"📸 Fotos das Obras\" à direita, num carrossel de uma foto por vez com setas \"‹\"/\"›\" do lado pra passear entre elas, sem precisar abrir nada. A faixa \"🚨 Alertas do Sistema\" saiu, já que a informação (lotes atrasados, OPs aguardando liberação) já aparece nos números."),
+                ("2026-09-18", "Dashboard: reorganizado em duas colunas — números principais à esquerda, \"📸 Fotos das Obras\" à direita, num carrossel de uma foto por vez com setas \"‹\"/\"›\" do lado pra passear entre elas, sem precisar abrir nada. A foto agora tem altura fixa, acompanhando a altura da coluna de números ao lado. A faixa \"🚨 Alertas do Sistema\" saiu, já que a informação (lotes atrasados, OPs aguardando liberação) já aparece nos números. Também reduzimos o espaço vazio no topo de toda tela do sistema (não só o Dashboard), pra caber mais conteúdo sem precisar rolar a página."),
                 ("2026-09-18", "Logística: trocamos \"📋 Fila Prioritária\", \"🚛 Envios Agendados\" e \"🗂️ Histórico de Despachos\" (e os 4 cartões de métrica do topo, que dependiam delas) por um \"🗓️ Planejamento Semanal de Entregas\" — abas de Segunda a Sábado (cada uma mostra \"· N\" quando já tem entrega), onde dá pra adicionar a obra e uma observação livre (ex: \"insumos junto\") no dia da aba aberta, navegar entre semanas com ◀/▶ e remover com o 🗑️. Fica registrado por data, então também serve de histórico do que foi entregue em semanas passadas. \"✅ OPs Prontas — Emitir Romaneio\" continua exatamente igual."),
                 ("2026-09-10", "Configurações → usuários: agora cada pessoa tem um \"setor base\" e pode receber \"acessos extras\" de outros setores, sem virar Master. Ex: o pessoal do Compras pode ganhar acesso ao Almoxarifado; alguém da Medição pode ganhar acesso aos Romaneios Devolvidos. Dá pra editar os acessos de quem já existe (a pessoa vê a mudança no próximo login). Quem não tem nenhum acesso extra continua exatamente como antes."),
                 ("2026-09-08", "Romaneios Devolvidos: todos os cards agora mostram a data em que o romaneio foi emitido, no mesmo formato em todas as abas (\"Emitido em DD/MM/AAAA\"). Antes só os romaneios de OP com envio parcial mostravam a data. Nos romaneios de OP com envio único a data passou a ser a do envio real (registrado na Logística), não mais a data de despacho planejada."),
