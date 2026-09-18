@@ -378,19 +378,19 @@ div[data-testid="stAlert"] { border-radius: var(--radius-sm) !important; }
 .pipeline-arrow { color:var(--border); font-size:1rem; padding:0 4px; }
 
 /* ── Seção cards do dashboard ───────────────── */
-.dash-card {
-    background:var(--bg-card); border:1px solid var(--border);
-    border-radius:var(--radius); padding:20px 24px;
-    box-shadow:var(--shadow-sm); height:100%;
-    transition: box-shadow 0.2s ease;
-}
-.dash-card:hover { box-shadow:var(--shadow-md); }
-.dash-card-title { font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); margin-bottom:8px; }
 .dash-card-value { font-size:2.4rem; font-weight:800; color:var(--primary); line-height:1; }
 .dash-card-value.red   { color:var(--danger); }
 .dash-card-value.orange{ color:var(--accent); }
 .dash-card-value.green { color:var(--success); }
 .dash-card-sub  { font-size:0.78rem; color:var(--text-muted); margin-top:6px; }
+.dash-card-linha {
+    background:var(--bg-card); border:1px solid var(--border);
+    border-radius:var(--radius); padding:12px 18px; margin-bottom:10px;
+    display:flex; align-items:baseline; gap:14px;
+    box-shadow:var(--shadow-sm);
+}
+.dash-card-linha .dash-card-value { font-size:1.6rem; min-width:2.2em; }
+.dash-card-linha .dash-card-sub { margin-top:0; }
 
 /* ── Sidebar nav label ──────────────────────── */
 .nav-section-label {
@@ -6581,143 +6581,82 @@ if nome_aba == "Dashboard":
         else:
             lotes_atrasados = 0
 
-        c1, c2, c3, c4, c5 = st.columns(5)
-        with c1:
-            st.markdown(f"""
-            <div class="dash-card">
-                <div class="dash-card-value orange">{ops_pendentes}</div>
-                <div class="dash-card-sub">OPs aguardando liberação</div>
-            </div>""", unsafe_allow_html=True)
-        with c2:
-            st.markdown(f"""
-            <div class="dash-card">
-                <div class="dash-card-value">{ops_liberadas}</div>
-                <div class="dash-card-sub">liberadas, em produção</div>
-            </div>""", unsafe_allow_html=True)
-        with c3:
-            st.markdown(f"""
-            <div class="dash-card">
-                <div class="dash-card-value green">{ops_concluidas}</div>
-                <div class="dash-card-sub">concluídas</div>
-            </div>""", unsafe_allow_html=True)
-        with c4:
-            cor_atr = "red" if lotes_atrasados > 0 else "green"
-            st.markdown(f"""
-            <div class="dash-card">
-                <div class="dash-card-value {cor_atr}">{lotes_atrasados}</div>
-                <div class="dash-card-sub">lotes com prazo vencido</div>
-            </div>""", unsafe_allow_html=True)
-        with c5:
-            st.markdown(f"""
-            <div class="dash-card">
-                <div class="dash-card-value">{total_obras}</div>
-                <div class="dash-card-sub">obras ativas</div>
-            </div>""", unsafe_allow_html=True)
+        col_metricas, col_fotos = st.columns([1, 1.4])
 
-        # ── Faixa de alertas visível ──────────────────────────────
-        alertas = []
-        if lotes_atrasados > 0:
-            alertas.append(("danger", "🔴", f"{lotes_atrasados} lote(s) atrasado(s)", "Prazo vencido — acesse Relatório Geral"))
-        if ops_pendentes > 0:
-            alertas.append(("warn", "⚠️", f"{ops_pendentes} OP(s) aguardando liberação", "Acesse Liberar OPs da Semana"))
+        with col_metricas:
+            for _valor_m, _rotulo_m, _cor_m in [
+                (ops_pendentes,   "OPs aguardando liberação", "orange" if ops_pendentes else ""),
+                (ops_liberadas,   "liberadas, em produção",   ""),
+                (ops_concluidas,  "concluídas",                "green"),
+                (lotes_atrasados, "lotes com prazo vencido",   "red" if lotes_atrasados > 0 else "green"),
+                (total_obras,     "obras ativas",              ""),
+            ]:
+                st.markdown(f"""
+                <div class="dash-card-linha">
+                    <div class="dash-card-value {_cor_m}">{_valor_m}</div>
+                    <div class="dash-card-sub">{_rotulo_m}</div>
+                </div>""", unsafe_allow_html=True)
 
-        if alertas:
-            st.markdown("---")
-            st.markdown("#### 🚨 Alertas do Sistema")
-            cols_alertas = st.columns(len(alertas))
-            estilos = {
-                "danger": ("background:#FEF2F2;border:1px solid #FECACA;border-left:5px solid #DC2626;", "#DC2626"),
-                "warn":   ("background:#FFFBEB;border:1px solid #FDE68A;border-left:5px solid #D97706;", "#D97706"),
-            }
-            for col, (tipo, icone, titulo, subtitulo) in zip(cols_alertas, alertas):
-                estilo, cor = estilos[tipo]
-                with col:
-                    st.markdown(f"""
-                    <div style="{estilo} border-radius:10px; padding:16px 20px;">
-                        <div style="font-size:1.6rem; margin-bottom:6px;">{icone}</div>
-                        <div style="font-size:1rem; font-weight:800; color:{cor}; line-height:1.2;">{titulo}</div>
-                        <div style="font-size:0.75rem; color:#6B7280; margin-top:4px;">{subtitulo}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-        else:
-            st.markdown("---")
-            st.markdown("""
-            <div style="background:#ECFDF5;border:1px solid #A7F3D0;border-left:5px solid #059669;
-                        border-radius:10px;padding:14px 20px;display:flex;align-items:center;gap:12px;">
-                <span style="font-size:1.4rem;">✅</span>
-                <div>
-                    <strong style="color:#065F46;">Tudo em ordem!</strong>
-                    <span style="color:#6B7280;font-size:0.85rem;margin-left:8px;">Nenhum alerta crítico no momento.</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+        with col_fotos:
+            st.markdown("##### 📸 Fotos das Obras")
 
-        # ── Carrossel de fotos das obras ───────────────────────────
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("#### 📸 Fotos das Obras")
+            if setor == "Master":
+                with st.expander("➕ Adicionar foto", expanded=False):
+                    foto_dash_up = st.file_uploader(
+                        "Foto da obra (aceita HEIC do iPhone):",
+                        type=["png", "jpg", "jpeg", "heic", "heif"], key=_uploader_key("dash_foto_up")
+                    )
+                    legenda_dash_up = st.text_input(
+                        "Legenda:", key=_uploader_key("dash_foto_legenda"),
+                        placeholder="Ex: Dona Lola — fachada Set/26"
+                    )
+                    if st.button("💾 Salvar foto", key="btn_salvar_foto_dash", type="primary"):
+                        if not foto_dash_up:
+                            st.error("Selecione uma foto.")
+                        elif not legenda_dash_up.strip():
+                            st.error("Escreva uma legenda.")
+                        else:
+                            nome_fd, tipo_fd, bytes_fd = _preparar_foto_dashboard(
+                                foto_dash_up.name, foto_dash_up.type or "", foto_dash_up.read()
+                            )
+                            if salvar_foto_dashboard(nome_fd, tipo_fd, bytes_fd, legenda_dash_up.strip(), st.session_state.usuario_nome):
+                                registrar_auditoria(st.session_state.usuario_nome, "DASHBOARD_FOTO_ADICIONAR", legenda_dash_up.strip())
+                                _resetar_uploader("dash_foto_up")
+                                _resetar_uploader("dash_foto_legenda")
+                                st.toast("✅ Foto adicionada!")
+                                st.rerun()
 
-        if setor == "Master":
-            with st.expander("➕ Adicionar foto", expanded=False):
-                foto_dash_up = st.file_uploader(
-                    "Foto da obra (aceita HEIC do iPhone):",
-                    type=["png", "jpg", "jpeg", "heic", "heif"], key=_uploader_key("dash_foto_up")
-                )
-                legenda_dash_up = st.text_input(
-                    "Legenda:", key=_uploader_key("dash_foto_legenda"),
-                    placeholder="Ex: Dona Lola — fachada Set/26"
-                )
-                if st.button("💾 Salvar foto", key="btn_salvar_foto_dash", type="primary"):
-                    if not foto_dash_up:
-                        st.error("Selecione uma foto.")
-                    elif not legenda_dash_up.strip():
-                        st.error("Escreva uma legenda.")
-                    else:
-                        nome_fd, tipo_fd, bytes_fd = _preparar_foto_dashboard(
-                            foto_dash_up.name, foto_dash_up.type or "", foto_dash_up.read()
+            df_fotos_dash = carregar_fotos_dashboard()
+            if df_fotos_dash.empty:
+                if setor == "Master":
+                    st.caption("Nenhuma foto ainda — adicione a primeira acima.")
+            else:
+                # st.image (nao <img> cru) da' de proposito -- clique na foto abre ela
+                # em tamanho grande (lightbox nativo do Streamlit), tipo anuncio de Facebook.
+                _cols_fotos_dash = st.columns(2)
+                for _i_fd, (_, foto_row) in enumerate(df_fotos_dash.iterrows()):
+                    with _cols_fotos_dash[_i_fd % 2]:
+                        st.image(
+                            bytes(foto_row['conteudo']), use_container_width=True,
+                            caption=str(foto_row['legenda']) if pd.notna(foto_row['legenda']) else None
                         )
-                        if salvar_foto_dashboard(nome_fd, tipo_fd, bytes_fd, legenda_dash_up.strip(), st.session_state.usuario_nome):
-                            registrar_auditoria(st.session_state.usuario_nome, "DASHBOARD_FOTO_ADICIONAR", legenda_dash_up.strip())
-                            _resetar_uploader("dash_foto_up")
-                            _resetar_uploader("dash_foto_legenda")
-                            st.toast("✅ Foto adicionada!")
-                            st.rerun()
 
-        df_fotos_dash = carregar_fotos_dashboard()
-        if df_fotos_dash.empty:
-            if setor == "Master":
-                st.caption("Nenhuma foto ainda — adicione a primeira acima.")
-        else:
-            _cards_fotos_dash = "".join(
-                f"""
-                <div style="flex:0 0 auto;width:220px;">
-                    <img src="data:{foto_row['tipo_arquivo'] or 'image/jpeg'};base64,{base64.b64encode(bytes(foto_row['conteudo'])).decode()}"
-                         style="width:220px;height:160px;object-fit:cover;border-radius:10px;border:1px solid var(--border);display:block;">
-                    <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;padding:0 2px;">{html_escape(str(foto_row['legenda'])) if pd.notna(foto_row['legenda']) else ''}</div>
-                </div>
-                """
-                for _, foto_row in df_fotos_dash.iterrows()
-            )
-            st.markdown(
-                f'<div style="display:flex;gap:14px;overflow-x:auto;padding:4px 2px 12px;">{_cards_fotos_dash}</div>',
-                unsafe_allow_html=True
-            )
-
-            if setor == "Master":
-                with st.expander("🛠️ Gerenciar fotos", expanded=False):
-                    for _, foto_row in df_fotos_dash.iterrows():
-                        gfc1, gfc2, gfc3 = st.columns([1, 4, 1])
-                        with gfc1:
-                            st.image(bytes(foto_row['conteudo']), width=80)
-                        with gfc2:
-                            legenda_gf = str(foto_row['legenda']) if pd.notna(foto_row['legenda']) else '(sem legenda)'
-                            st.markdown(f"**{html_escape(legenda_gf)}**")
-                            st.caption(f"{foto_row['enviado_por']} — {pd.to_datetime(foto_row['enviado_em']).strftime('%d/%m/%Y')}")
-                        with gfc3:
-                            if st.button("🗑️", key=f"del_foto_dash_{foto_row['id']}"):
-                                if deletar_foto_dashboard(int(foto_row['id'])):
-                                    registrar_auditoria(st.session_state.usuario_nome, "DASHBOARD_FOTO_EXCLUIR", legenda_gf)
-                                    st.toast("Foto removida.")
-                                    st.rerun()
+                if setor == "Master":
+                    with st.expander("🛠️ Gerenciar fotos", expanded=False):
+                        for _, foto_row in df_fotos_dash.iterrows():
+                            gfc1, gfc2, gfc3 = st.columns([1, 4, 1])
+                            with gfc1:
+                                st.image(bytes(foto_row['conteudo']), width=80)
+                            with gfc2:
+                                legenda_gf = str(foto_row['legenda']) if pd.notna(foto_row['legenda']) else '(sem legenda)'
+                                st.markdown(f"**{html_escape(legenda_gf)}**")
+                                st.caption(f"{foto_row['enviado_por']} — {pd.to_datetime(foto_row['enviado_em']).strftime('%d/%m/%Y')}")
+                            with gfc3:
+                                if st.button("🗑️", key=f"del_foto_dash_{foto_row['id']}"):
+                                    if deletar_foto_dashboard(int(foto_row['id'])):
+                                        registrar_auditoria(st.session_state.usuario_nome, "DASHBOARD_FOTO_EXCLUIR", legenda_gf)
+                                        st.toast("Foto removida.")
+                                        st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -13833,7 +13772,8 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
             st.markdown('<div class="page-header"><div class="page-header-left"><h2>Manual do Sistema</h2><p>Guia de uso de cada tela — atualizado conforme o sistema evolui</p></div><span class="page-icon">📖</span></div>', unsafe_allow_html=True)
 
             MANUAL_CHANGELOG = [
-                ("2026-09-18", "Logística: trocamos \"📋 Fila Prioritária\", \"🚛 Envios Agendados\" e \"🗂️ Histórico de Despachos\" (e os 4 cartões de métrica do topo, que dependiam delas) por um \"🗓️ Planejamento Semanal de Entregas\" — um quadro com um dia da semana (Segunda a Sábado) por coluna, onde dá pra adicionar a obra e uma observação livre (ex: \"insumos junto\"), navegar entre semanas com ◀/▶ e remover com o 🗑️. Fica registrado por data, então também serve de histórico do que foi entregue em semanas passadas. \"✅ OPs Prontas — Emitir Romaneio\" continua exatamente igual."),
+                ("2026-09-18", "Dashboard: reorganizado em duas colunas — números principais à esquerda, \"📸 Fotos das Obras\" à direita (clique numa foto pra abrir em tamanho grande). A faixa \"🚨 Alertas do Sistema\" saiu, já que a informação (lotes atrasados, OPs aguardando liberação) já aparece nos números."),
+                ("2026-09-18", "Logística: trocamos \"📋 Fila Prioritária\", \"🚛 Envios Agendados\" e \"🗂️ Histórico de Despachos\" (e os 4 cartões de métrica do topo, que dependiam delas) por um \"🗓️ Planejamento Semanal de Entregas\" — abas de Segunda a Sábado (cada uma mostra \"· N\" quando já tem entrega), onde dá pra adicionar a obra e uma observação livre (ex: \"insumos junto\") no dia da aba aberta, navegar entre semanas com ◀/▶ e remover com o 🗑️. Fica registrado por data, então também serve de histórico do que foi entregue em semanas passadas. \"✅ OPs Prontas — Emitir Romaneio\" continua exatamente igual."),
                 ("2026-09-10", "Configurações → usuários: agora cada pessoa tem um \"setor base\" e pode receber \"acessos extras\" de outros setores, sem virar Master. Ex: o pessoal do Compras pode ganhar acesso ao Almoxarifado; alguém da Medição pode ganhar acesso aos Romaneios Devolvidos. Dá pra editar os acessos de quem já existe (a pessoa vê a mudança no próximo login). Quem não tem nenhum acesso extra continua exatamente como antes."),
                 ("2026-09-08", "Romaneios Devolvidos: todos os cards agora mostram a data em que o romaneio foi emitido, no mesmo formato em todas as abas (\"Emitido em DD/MM/AAAA\"). Antes só os romaneios de OP com envio parcial mostravam a data. Nos romaneios de OP com envio único a data passou a ser a do envio real (registrado na Logística), não mais a data de despacho planejada."),
                 ("2026-09-03", "Relatório Semanal agora sai com abas separadas no Excel — uma pra ACM, outra pra Esquadrias (e uma \"TERCEIRIZADA\" à parte quando houver OP terceirizada sem equipe definida). Dentro de cada aba as seções vêm na ordem Parcial, Em Produção e Concluído, e o cabeçalho de \"Em Produção\" mostra o total de m² (ACM) ou kg (Esquadrias)."),
@@ -13882,9 +13822,9 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 **Para que serve:** Resumo geral da operação em tempo real: quantas OPs estão pendentes, liberadas, concluídas, quantos lotes estão com prazo vencido e quantas obras ativas.
 
 **Passo a passo:**
-- Ao entrar no sistema, o Dashboard já abre com 5 cartões no topo: OPs aguardando liberação, liberadas em produção, concluídas, lotes com prazo vencido e obras ativas.
-- Se houver algo crítico, aparece a faixa "🚨 Alertas do Sistema" (lotes atrasados, OPs aguardando liberação); se estiver tudo em dia, aparece "✅ Tudo em ordem!".
-- Do lado esquerdo, "Status dos Lotes" mostra a barra de proporção de cada status.
+- Ao entrar no sistema, o Dashboard abre em duas colunas: à esquerda, os 5 números principais (OPs aguardando liberação, liberadas em produção, concluídas, lotes com prazo vencido, obras ativas); à direita, "📸 Fotos das Obras".
+- Clique numa foto pra abrir ela em tamanho grande (mesmo mecanismo de "tela cheia" de qualquer foto do sistema). Master pode adicionar foto nova ("➕ Adicionar foto", aceita HEIC do iPhone) e organizar as existentes ("🛠️ Gerenciar fotos").
+- Do lado esquerdo, mais abaixo, "Status dos Lotes" mostra a barra de proporção de cada status.
 - Do lado direito, "OPs por Obra" lista as obras por quantidade de OPs — clique na seta "▸" ao lado de uma obra pra abrir o detalhe (Em produção x Concluído). Clique de novo pra fechar.
 
 **Regras importantes:**
