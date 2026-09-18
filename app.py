@@ -6634,11 +6634,15 @@ if nome_aba == "Dashboard":
                 if "dash_foto_idx" not in st.session_state:
                     st.session_state.dash_foto_idx = None
 
-                @st.dialog("Foto da obra", width="large")
+                @st.dialog("Foto da obra")
                 def _dialogo_foto_dash(_df_fotos):
                     _idx_fd = st.session_state.dash_foto_idx
                     _foto_fd = _df_fotos.iloc[_idx_fd]
-                    st.image(bytes(_foto_fd['conteudo']), use_container_width=True)
+                    # Largura fixa (nao use_container_width) -- uma foto de obra bem
+                    # vertical (predio alto) esticada pra largura do dialog "large" ficava
+                    # gigante em altura, tomando a tela toda. 420px da' um tamanho normal
+                    # de card independente da proporcao da foto.
+                    st.image(bytes(_foto_fd['conteudo']), width=420)
                     _legenda_fd = str(_foto_fd['legenda']) if pd.notna(_foto_fd['legenda']) else ''
                     st.caption(f"{_legenda_fd} — {_idx_fd + 1} de {len(_df_fotos)}")
                     _cnav1, _cnav2 = st.columns(2)
