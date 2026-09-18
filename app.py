@@ -9995,27 +9995,32 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
                                         df_pecas_rom_c = df_pecas_rom_c.copy()
                                         df_pecas_rom_c['qtd_enviada'] = df_pecas_rom_c['qtd_ultimo_envio']
 
-                                    rom_bytes = gerar_romaneio_xlsx(
-                                        row_c, df_pecas_rom_c, end_r,
-                                        st.session_state.usuario_nome, etapa=etapa_c,
-                                        num_volumes=int(volumes_c) if eh_esq_log else None,
-                                        numero_envio=numero_envio_c
-                                    )
                                     sufixo_arq_c = "_PARCIAL" if eh_parcial_c else ""
-                                    romaneio_baixado = st.download_button(
-                                        label="🖨️ Emitir Romaneio" + (" (Parcial)" if eh_parcial_c else ""),
-                                        data=rom_bytes,
-                                        file_name=f"Romaneio_{num_op_c}_{row_c['Cod_Lote']}{sufixo_arq_c}.xlsx",
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        key=f"dl_rom_{row_c['id']}",
-                                        use_container_width=True
-                                    )
-                                    if romaneio_baixado:
-                                        dar_baixa_romaneio([int(row_c['id'])], st.session_state.usuario_nome)
-                                        registrar_auditoria(st.session_state.usuario_nome, "EMITIR_ROMANEIO",
-                                            f"OP {num_op_c} — Lote {row_c['Cod_Lote']}")
-                                        st.toast(f"Romaneio emitido — OP {num_op_c} baixada!")
-                                        st.rerun()
+                                    bytes_key_c = f"rom_bytes_{row_c['id']}"
+                                    if st.button("🖨️ Gerar Romaneio" + (" (Parcial)" if eh_parcial_c else ""),
+                                                 key=f"prep_rom_{row_c['id']}", use_container_width=True):
+                                        st.session_state[bytes_key_c] = gerar_romaneio_xlsx(
+                                            row_c, df_pecas_rom_c, end_r,
+                                            st.session_state.usuario_nome, etapa=etapa_c,
+                                            num_volumes=int(volumes_c) if eh_esq_log else None,
+                                            numero_envio=numero_envio_c
+                                        )
+                                    if st.session_state.get(bytes_key_c):
+                                        romaneio_baixado = st.download_button(
+                                            label="⬇️ Baixar Romaneio" + (" (Parcial)" if eh_parcial_c else ""),
+                                            data=st.session_state[bytes_key_c],
+                                            file_name=f"Romaneio_{num_op_c}_{row_c['Cod_Lote']}{sufixo_arq_c}.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            key=f"dl_rom_{row_c['id']}",
+                                            use_container_width=True
+                                        )
+                                        if romaneio_baixado:
+                                            dar_baixa_romaneio([int(row_c['id'])], st.session_state.usuario_nome)
+                                            registrar_auditoria(st.session_state.usuario_nome, "EMITIR_ROMANEIO",
+                                                f"OP {num_op_c} — Lote {row_c['Cod_Lote']}")
+                                            st.session_state[bytes_key_c] = None
+                                            st.toast(f"Romaneio emitido — OP {num_op_c} baixada!")
+                                            st.rerun()
 
                     _hoje_d_log = hoje_projeto().date()
                     def _bucket_data_pronto(dt):
@@ -14018,7 +14023,7 @@ for nome_aba, aba_objeto in [(st.session_state.pagina_atual, _FakePage())]:
 **Para que serve:** Emitir o romaneio dos lotes prontos e planejar, semana a semana, quais obras recebem entrega.
 
 **Passo a passo:**
-1. "✅ OPs Prontas — Emitir Romaneio": preencha o endereço (e a quantidade de volumes, se Esquadrias) e clique "🖨️ Emitir Romaneio" — o sistema já dá baixa na OP automaticamente ao gerar o arquivo. Sem peças lançadas, dá pra usar "Dar baixa (OP antiga, já emitido)".
+1. "✅ OPs Prontas — Emitir Romaneio": preencha o endereço (e a quantidade de volumes, se Esquadrias), clique "🖨️ Gerar Romaneio" e depois "⬇️ Baixar Romaneio" — o sistema já dá baixa na OP automaticamente ao baixar o arquivo. Mudou o endereço depois de gerar? Clique "🖨️ Gerar Romaneio" de novo antes de baixar. Sem peças lançadas, dá pra usar "Dar baixa (OP antiga, já emitido)".
 2. "🗓️ Planejamento Semanal de Entregas": abra "➕ Adicionar obra a um dia", escolha o dia (Segunda a Sábado), a obra e, se quiser, uma observação (ex: "insumos junto") e confirme — o card aparece na coluna do dia escolhido. Use "◀"/"▶" pra navegar entre semanas, e "Hoje" pra voltar rápido pra semana atual. Pra remover, clique no 🗑️ do card.
 
 **Regras importantes:**
